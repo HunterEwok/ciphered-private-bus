@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a bug in the specification, test vectors, or Rust reference implementation.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. For a security vulnerability, do not use this form; follow `SECURITY.md` instead.
+        Before submitting, remove any private keys, tokens, or sensitive payloads.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Formal specification (docs/)
+        - Framing / wire format
+        - Endpoint addressing
+        - Access arbitration
+        - Replay protection
+        - Post-quantum E2EE
+        - Root recovery
+        - Rust reference implementation
+        - Test vectors (testdata/)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Crate version, tag, or git commit SHA.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust toolchain (`rustc --version`), target architecture.

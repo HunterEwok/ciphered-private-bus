@@ -1,0 +1,22 @@
+# Rust / Cargo build output
+/target/
+**/*.rs.bk
+*.pdb
+
+# Test and coverage artifacts
+/dist/
+*.out
+*.profraw
+*.profdata
+coverage.*
+
+# Local only, never published
+/.claude/
+/prototype/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

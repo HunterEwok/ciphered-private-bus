@@ -1,0 +1,16 @@
+name: Feature request
+description: Propose a change, discuss an architectural idea, or ask a protocol question.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Problem or motivation
+      description: The use case, protocol gap, or question you want to address.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed design
+      description: How it could work in the specification and/or Rust implementation, including security considerations.

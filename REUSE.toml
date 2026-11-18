@@ -1,0 +1,21 @@
+# The copyright and license of every file, machine-readable
+# (https://reuse.software, checked by `reuse lint` in CI). A file that names its own
+# license and copyright keeps them; this file fills in what a file cannot carry itself
+# or provides the default for the tree. The license texts are in LICENSES/.
+version = 1
+
+# Reference implementation, tooling, configuration, and repository files are under MPL-2.0
+# unless a file or annotation below specifies otherwise.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 HunterEwok"
+SPDX-License-Identifier = "MPL-2.0"
+
+# The formal protocol specification and documentation are licensed under CC BY 4.0 so
+# independent implementations in any language can freely implement the specification.
+[[annotations]]
+path = "docs/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 HunterEwok"
+SPDX-License-Identifier = "CC-BY-4.0"

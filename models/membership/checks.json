@@ -1,0 +1,11 @@
+{
+  "tlcInstance": "tiny_tlc",
+  "witnessInstance": "tiny_tlc",
+  "probes": [
+    "ignore_bitmap", "keep_bit", "accept_old_gen", "accept_lower", "no_halt", "halted_accepts",
+    "rc_no_forever", "proof_needs_cp", "reboot_rollback", "grant_no_right", "accept_old_data_gen", "no_prune"
+  ],
+  "witnesses": [
+    "witnessHalt", "witnessForever", "witnessAccept", "witnessGrant", "witnessRootChange", "witnessRevokedSends"
+  ]
+}

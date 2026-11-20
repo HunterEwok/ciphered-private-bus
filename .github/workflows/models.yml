@@ -58,3 +58,22 @@ jobs:
         run: |
           java -version
           python3 models/membership/check.py inductive --main tiny_ind
+
+  channels:
+    name: channels (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Type check
+        working-directory: models/channels
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/channels/check.py

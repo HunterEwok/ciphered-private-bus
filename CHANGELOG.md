@@ -13,6 +13,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Quint model of the membership state machine (`models/membership/`) with its safety
   invariants, twelve safety probes and one liveness probe, fixed scenarios, and non-vacuity
   witnesses, a check script, and a CI job that runs the simulator at the CI sizes.
+- Quint model of channel keys and retention (`models/channels/`): key rotation and grants,
+  publication numbers reserved in blocks, the recipient's window and retention depth, the clearing
+  publication, and reboots, with a relay that behaves arbitrarily; twelve probes, witnesses, fixed
+  scenarios, and a CI job. `models/run-tlc.ps1` runs TLC for any model folder.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a
@@ -37,6 +41,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   Appendix B, Section B.3, rule 3). Reason: the membership model showed that a proof of a generation
   a node had not reached yet was dropped, and on a direct link nothing sent it again, so the node
   could keep working under a Root that had signed conflicting records.
+- Specification: when a device leaves the readers, the source marks its channels for key rotation
+  in the same event and persists the mark (R-CH-5, R-CORE-5). Reason: the channels model showed that
+  a source that rebooted with its key intact forgot whom it had granted the key and published under it
+  to a removed reader.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

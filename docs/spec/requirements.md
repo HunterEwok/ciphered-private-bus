@@ -634,7 +634,9 @@ distinguishes channels by it but does not know which channel it is.
 > **R-CH-5.** The source MUST generate a new channel key and grant it before the next publication if: a
 > reader of the channel is no longer valid under the source's checkpoint; the application removed a
 > reader; the host signalled "rotate key epoch"; or the key did not survive a reboot of the source. A
-> removed reader does not receive the new key.
+> removed reader does not receive the new key. When a device leaves the readers, the source marks every
+> own channel that has a key for rotation in the same event and persists the mark (R-CORE-5, R-CORE-7):
+> after a reboot it no longer knows whom it granted the key, so the condition cannot be recomputed.
 > *Serves:* S5. *Verified by:* model, Tamarin.
 
 > **R-CH-6.** The source grants the current channel key to a new reader. With it the reader gains access
@@ -969,7 +971,8 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 
 > **R-CORE-5.** The following MUST survive a reboot in the core's storage: the bus identifier with the
 > root and recovery keys; the root generation and the checkpoint; the node's own passport; the latest
-> accepted root change record; for its own channels, the key generation and the publication number; the
+> accepted root change record; for its own channels, the key generation, the publication number, and the
+> rotation mark (R-CH-5); the
 > channel keys the node holds as source or reader, and for each of them the highest accepted generation
 > and number and the window floor (R-CH-9); the private sealing keys of the current epochs; the halt
 > proof. The device, presence, and root keys are stored by the host (R-KEY-1).

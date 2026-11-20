@@ -25,7 +25,7 @@ refusals with any nonce seen in the open. The header of `calls.qnt` lists every 
 | `atMostOnce` | R-CALL-5, R-CALL-13 | S10: a call that is not idempotent is executed at most once, also across automatic retries |
 | `freshNonce` | R-CALL-1, R-CALL-8, R-CORE-6 | S10: an action runs only over a nonce the target issued to this commander since the latest reset or reboot and did not consume |
 | `permitted` | R-CALL-4 | S10: only with the right under the target's current passport and the key the action class requires |
-| `slotsKnown` | R-CALL-7 | S14: slots only for named commanders and the root device |
+| `slotsKnown` | R-CALL-7 | S14: slots only for named commanders and the root device, also after a commander stops being named |
 | `mismatchKeepsSlot` | R-CALL-6 | S14: a mismatch does not change the slot |
 | `noConfirmRetry` | R-CALL-13 | a confirmation-class call is never retried automatically |
 | `epochGrows` | R-CALL-13 | a replayed old key claim never moves the commander's known epoch back |
@@ -47,22 +47,25 @@ Probes, each expected to violate `safety`:
 | `accept_any_epoch` | The commander accepts a key claim that is not newer |
 | `reset_keeps_slots` | "Reset nonces" does not erase the slots |
 | `reboot_keeps_slots` | A reboot does not erase the slots |
+| `keep_revoked_slot` | The slot of a commander that is no longer named survives, and its next call refills it |
 
 `retry_on_mismatch` needs a specific sequence (an executed call whose reply is withheld is replayed)
 and is checked by a fixed scenario in [`scenarios.qnt`](scenarios.qnt), which also shows that the
 replay is reported as unknown, that a retry after a newer key claim is executed once, that a
 confirmation-class call is not retried, and that a reset makes an earlier nonce stale.
 
-The model led to one clarification of the specification: a mismatch for a commander without a slot,
+The model led to two clarifications of the specification: a mismatch for a commander without a slot,
 for example after a reset, is answered like a nonce request, so the refusal itself carries a new nonce
-(R-CALL-6).
+(R-CALL-6); and a review found that the slot of a commander that stops being named survived, so its
+next call consumed the nonce and refilled the slot. The slot is now erased in the same event
+(R-CALL-7).
 
 ## Inductive invariant
 
 [`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`; Apalache proves the same three
 obligations as for the other models. Besides the bounds of every variable and `broken` staying empty,
 `IndInv` states these lemmas: every slot holds a nonce issued to its own device in the current era and
-not consumed; every body of a call agrees with its first body (kept in the ghost variable `intents`)
+not consumed, and belongs to a named commander or the root device; every body of a call agrees with its first body (kept in the ghost variable `intents`)
 in class, key, and idempotence, and all bodies of a call that is not idempotent carry one nonce; a
 call that was executed and is not idempotent has consumed that nonce; a commander's pending call is in
 the pool and is its latest call. Together they make `atMostOnce` and `freshNonce` follow.

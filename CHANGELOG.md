@@ -21,7 +21,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   folder.
 - Quint model of call nonce slots (`models/calls/`): nonce requests, calls, replies, the open
   refusals and the commander's automatic retries, "reset nonces" and reboot, key epoch rotation, and
-  passport changes, with a network that replays and forges unsigned messages; eleven probes,
+  passport changes, with a network that replays and forges unsigned messages; twelve probes,
   witnesses, fixed scenarios, an inductive invariant, and CI jobs.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
@@ -59,6 +59,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Specification: a nonce mismatch for a commander without a slot, for example after "reset nonces",
   is answered like a nonce request, so the refusal carries a new nonce (R-CALL-6). Reason: the calls
   model; otherwise the commander needed a separate nonce request after every reset.
+- Specification: when a device stops being a commander of the target, its nonce slot is erased in the
+  same event (R-CALL-7). Reason: a review of the calls model found that the next call of a removed
+  commander refilled its slot.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

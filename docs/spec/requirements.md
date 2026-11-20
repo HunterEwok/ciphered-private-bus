@@ -797,7 +797,8 @@ has not yet consumed.
 
 > **R-CALL-7.** The target creates slots only for commander devices named in its passport and for the
 > root device named in the checkpoint. A call signed by the root key comes from the root device. A nonce
-> request from anyone else is not answered.
+> request from anyone else is not answered. When a device stops being a commander of the target (a new
+> passport of the target, or the device's revocation), its slot is erased in the same event.
 > *Serves:* S14. *Verified by:* model.
 
 > **R-CALL-8.** The host event "reset nonces" erases all slots. The host raises it from its own uptime

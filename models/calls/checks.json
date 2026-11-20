@@ -12,7 +12,8 @@
     "retry_confirmation",
     "accept_any_epoch",
     "reset_keeps_slots",
-    "reboot_keeps_slots"
+    "reboot_keeps_slots",
+    "keep_revoked_slot"
   ],
   "witnesses": [
     "witnessExecuted",

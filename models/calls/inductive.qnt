@@ -50,6 +50,7 @@ module inductive {
     co.forall(n => 1 <= n and n <= is), sh.forall(n => 1 <= n and n <= is),
     DEVICES.forall(d => sl.get(d) == 0 or and {
       sl.get(d) <= is, it.get(sl.get(d)) == { cmd: d, era: er }, not(co.contains(sl.get(d))),
+      nm.contains(d) or d == ROOT,
     }),
   }
 

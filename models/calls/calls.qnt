@@ -215,14 +215,16 @@ module calls {
   }
 
   // A new passport of the target: a commander loses a right or is no longer
-  // named (revocation or change of rights, R-MEM-3).
+  // named (revocation or change of rights, R-MEM-3). The slot of a device
+  // that is no longer named is erased in the same event (R-CALL-7); the
+  // mutant keep_revoked_slot keeps it.
   action envChange(c: str, rs: Set[int]): bool = all {
     named.contains(c),
     rs.subseteq(passport.get(c)),
     rs != passport.get(c),
     if (rs == Set())
-      commit(slots, tepoch, passport, named.exclude(Set(c)), cmds, calls, replies, shown, issued, issuedTo, era,
-        consumed, executed, Set(), Set())
+      commit(if (MUTANT == "keep_revoked_slot") slots else slots.set(c, 0), tepoch, passport, named.exclude(Set(c)),
+        cmds, calls, replies, shown, issued, issuedTo, era, consumed, executed, Set(), Set())
     else
       commit(slots, tepoch, passport.set(c, rs), named, cmds, calls, replies, shown, issued, issuedTo, era,
         consumed, executed, Set(), Set()),
@@ -300,7 +302,7 @@ module calls {
     all {
       1 <= e, e <= tepoch,
       e > k.epoch or (MUTANT == "accept_any_epoch" and e != k.epoch),
-      val bad = if (e < k.epoch) Set("epochGrows") else Set()
+      val bad = if (e <= k.epoch) Set("epochGrows") else Set()
       if (not(p.active))
         commit(slots, tepoch, passport, named, cmds.set(c, { ...k, epoch: e }), calls, replies, shown, issued,
           issuedTo, era, consumed, executed, bad, Set())
@@ -350,8 +352,9 @@ module calls {
   // S10, R-CALL-4: only with the right under the target's current passport,
   // and with the key the action class requires.
   val permitted = not(broken.contains("permitted"))
-  // S14, R-CALL-7: slots only for named commanders and the root device.
-  val slotsKnown = not(broken.contains("slotsKnown"))
+  // S14, R-CALL-7: slots only for named commanders and the root device, also
+  // after a commander stops being named.
+  val slotsKnown = not(broken.contains("slotsKnown")) and DEVICES.forall(d => slots.get(d) != 0 implies allowed(d))
   // S14, R-CALL-6: a mismatch does not change the slot.
   val mismatchKeepsSlot = not(broken.contains("mismatchKeepsSlot"))
   // R-CALL-13: a confirmation-class call is never retried automatically.

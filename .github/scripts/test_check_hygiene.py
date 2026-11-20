@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -151,6 +152,16 @@ class BranchTests(unittest.TestCase):
             "Claude-patch-1",
         ]:
             self.assertNotEqual(branch_errors(branch), [], branch)
+
+    def test_push_checks_branch_name(self) -> None:
+        zero = "0" * 40
+        errors: list[str] = []
+        # Deleting a remote ref is always allowed; it is how a bad branch gets removed.
+        h.check_push([f"(delete) {zero} refs/heads/codex/old {zero}"], errors)
+        self.assertEqual(errors, [])
+        head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        h.check_push([f"refs/heads/x {head} refs/heads/codex/new {head}"], errors)
+        self.assertNotEqual(errors, [])
 
 
 if __name__ == "__main__":

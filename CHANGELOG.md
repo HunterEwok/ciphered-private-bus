@@ -19,4 +19,5 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,
   tool configuration files, bot identities, and tool-named branches), and limits commit identities to the
-  maintainer's only on the maintainer's own pull requests. It has unit tests.
+  maintainer's only on the maintainer's own pull requests. A pre-push hook checks the
+  branch name and the commits before they leave the machine. It has unit tests.

@@ -34,7 +34,7 @@ By submitting a pull request, you agree that:
   ```
 
   The hooks run the same hygiene check as CI (`.github/scripts/check_hygiene.py`) before
-  each commit and on each commit message.
+  each commit, on each commit message, and on the branch name and commits of each push.
 - Before pushing, run:
 
   ```sh

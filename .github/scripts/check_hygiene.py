@@ -13,6 +13,9 @@ Modes:
   check_hygiene.py --commit-msg FILE  additionally checks a commit message file
   check_hygiene.py --pre-commit       tracked files, the local author identity, and the
                                       current branch name
+  check_hygiene.py --pre-push         tracked files and, for every ref on standard input
+                                      (the Git pre-push format), the branch name and the
+                                      commits about to be pushed
 
 Environment:
   BASE_SHA, HEAD_SHA       commit range to check
@@ -211,7 +214,7 @@ def check_commits(base: str, head: str, errors: list[str], *, strict: bool) -> N
     field_sep = "\x1f"
     fmt = f"%H{field_sep}%an{field_sep}%ae{field_sep}%cn{field_sep}%ce{field_sep}%B{sep}"
     res = subprocess.run(
-        ["git", "log", f"--format={fmt}", f"{base}..{head}"],
+        ["git", "log", f"--format={fmt}", f"{base}..{head}" if head else base],
         capture_output=True,
         text=True,
         check=True,
@@ -237,6 +240,36 @@ def check_local_identity(errors: list[str]) -> None:
     m = re.match(r"(.*?)\s*<([^>]*)>", res.stdout)
     if m:
         check_identity("local git author", m.group(1), m.group(2), errors, strict=False)
+
+
+def local_identity_is_maintainer() -> bool:
+    res = subprocess.run(["git", "var", "GIT_AUTHOR_IDENT"], capture_output=True, text=True)
+    m = re.match(r".*?<([^>]*)>", res.stdout)
+    return bool(m) and m.group(1).strip().lower() in MAINTAINER_EMAILS
+
+
+def check_push(lines: list[str], errors: list[str]) -> None:
+    """Checks refs in the pre-push format: <local ref> <local sha> <remote ref> <remote sha>."""
+    zero = "0" * 40
+    strict = local_identity_is_maintainer()
+    for line in lines:
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        _local_ref, local_sha, remote_ref, remote_sha = parts
+        if local_sha == zero:
+            continue  # Deleting a remote ref
+        if remote_ref.startswith("refs/heads/"):
+            check_branch("pushed branch", remote_ref[len("refs/heads/"):], errors)
+        if remote_sha == zero:
+            # New ref: check every commit that no remote-tracking branch has yet.
+            res = subprocess.run(
+                ["git", "rev-list", local_sha, "--not", "--remotes"], capture_output=True, text=True, check=True
+            )
+            for sha in res.stdout.split():
+                check_commits(f"{sha}^!", "", errors, strict=strict)
+        else:
+            check_commits(remote_sha, local_sha, errors, strict=strict)
 
 
 def main(argv: list[str]) -> int:
@@ -267,6 +300,8 @@ def main(argv: list[str]) -> int:
     elif argv == ["--pre-commit"]:
         check_local_identity(errors)
         check_local_branch(errors)
+    elif argv == ["--pre-push"]:
+        check_push(sys.stdin.read().splitlines(), errors)
 
     if errors:
         print("Hygiene check failed:", file=sys.stderr)

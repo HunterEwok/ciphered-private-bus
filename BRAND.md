@@ -11,7 +11,7 @@ how the name may be used.
 - **Ciphered Private Bus** (short: **CPB**) is the official name of this project and
   protocol, maintained by **HunterEwok** at
   [github.com/HunterEwok/ciphered-private-bus](https://github.com/HunterEwok/ciphered-private-bus).
-- Neither the [MPL-2.0](LICENSE) code license (see Section 2.4) nor the
+- Neither the [MPL-2.0](LICENSE) code license (see Section 2.3) nor the
   [CC BY 4.0](LICENSES/CC-BY-4.0.txt) specification license grants any trademark, service
   mark, or naming rights in "Ciphered Private Bus" or "CPB".
 

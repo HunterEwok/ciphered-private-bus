@@ -11,7 +11,6 @@
 coverage.*
 
 # Local only, never published
-/.claude/
 /prototype/
 
 # Editors and operating systems
@@ -20,3 +19,6 @@ coverage.*
 .vscode/
 *.swp
 *~
+
+# Python bytecode from repository scripts
+__pycache__/

@@ -23,6 +23,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   refusals and the commander's automatic retries, "reset nonces" and reboot, key epoch rotation, and
   passport changes, with a network that replays and forges unsigned messages; twelve probes,
   witnesses, fixed scenarios, an inductive invariant, and CI jobs.
+- Quint model of device enrollment (`models/enrollment/`): pairing by a code with attempts counted on
+  both sides, the joiner's signed payload, join requests, a compromised acceptor and a network
+  adversary that guesses codes and relays payloads between sessions, and admission after the owner
+  compares fingerprints; six probes, witnesses, fixed scenarios, an inductive invariant, and CI jobs.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a
@@ -62,6 +66,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Specification: when a device stops being a commander of the target, its nonce slot is erased in the
   same event (R-CALL-7). Reason: a review of the calls model found that the next call of a removed
   commander refilled its slot.
+- Specification: the join request carries the transcript hash of the acceptor's own pairing session,
+  and the acceptor checks the joiner's signature before sending it (R-JOIN-4). Reason: the
+  enrollment model; it makes explicit what stops a man in the middle from relaying a payload.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

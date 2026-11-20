@@ -1,0 +1,33 @@
+{
+  "tlcInstance": "tiny",
+  "witnessInstance": "tiny",
+  "probes": [
+    "no_fingerprint_compare",
+    "sig_key_only",
+    "no_transcript_binding",
+    "joiner_no_count",
+    "acceptor_no_count",
+    "acceptor_issues"
+  ],
+  "witnesses": [
+    "witnessAdmitted",
+    "witnessDirect",
+    "witnessAdvPaired",
+    "witnessTampered",
+    "witnessForgedRequest"
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "steps": [
+      "stepPairHonest",
+      "stepAdvJoiner",
+      "stepAdvAcceptor",
+      "stepSend",
+      "stepAdmit",
+      "stepRequest",
+      "stepBadRequest",
+      "stepBadIssue"
+    ]
+  }
+}

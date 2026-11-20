@@ -492,10 +492,12 @@ and a Root signature after the owner confirms.
 
 > **R-JOIN-4.** The acceptor prepares a join request: the joiner's key, an optional user-presence key,
 > the name, the pairing transcript hash, the joiner's signature over all of these, and the acceptor's own
-> signature. The Root verifies the joiner's signature, so the acceptor can substitute neither the
-> presence key nor the name. A join request is a control-plane object, not a publication: an open header
-> (bus, acceptor, its checkpoint number) and a body sealed to the sealing key of the root device. A
-> relay sees who submitted the request but not the joiner's name or key.
+> signature. The transcript hash is that of the acceptor's own pairing session, and the acceptor checks
+> the joiner's signature before sending the request, so a payload signed in another session and relayed
+> by a man in the middle is refused. The Root verifies the joiner's signature, so the acceptor can
+> substitute neither the presence key nor the name. A join request is a control-plane object, not a
+> publication: an open header (bus, acceptor, its checkpoint number) and a body sealed to the sealing
+> key of the root device. A relay sees who submitted the request but not the joiner's name or key.
 > *Serves:* S4. *Verified by:* model.
 
 > **R-JOIN-5.** The Root shows the owner the joiner's name, who accepted the request, and the fingerprint

@@ -135,3 +135,43 @@ jobs:
         run: |
           java -version
           python3 models/calls/check.py --inductive tiny_ind
+
+  enrollment:
+    name: enrollment (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Type check
+        working-directory: models/enrollment
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/enrollment/check.py
+
+  enrollment-inductive:
+    name: enrollment (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        # The bounded types of this model need more than the default 4 GB heap.
+        env:
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/enrollment/check.py --inductive tiny_ind

@@ -409,6 +409,9 @@ corresponds to action i.
 > the link. A halted node ranks its pair above every checkpoint of its generation: to a sender with a
 > pair of the same generation it MUST answer with its halt proof (R-MEM-10) in place of a checkpoint, and
 > it does so again on every such message, so a proof that was lost or dropped arrives with the next one.
+> A permanently halted node (R-MEM-13) ranks above every pair of every generation: it answers every
+> message that carries a pair, whatever its generation, with its halt proof of the two root change
+> records.
 > *Serves:* S5, L1. *Verified by:* model, simulator.
 
 > **R-MEM-7.** A node MUST return its own passport and checkpoint when a link requests them. Who is
@@ -447,7 +450,9 @@ corresponds to action i.
 > *Serves:* S9. *Verified by:* model.
 
 > **R-MEM-13.** Two root change records with the same generation and different bodies are a permanent
-> halt (L6).
+> halt (L6). Their halt proof is verified with K1 and K2 from the bus identifier alone, so a node
+> accepts it whatever generation it is at, and the permanent halt reaches nodes of every generation
+> (R-MEM-6).
 > *Serves:* S8. *Verified by:* model.
 
 > **R-MEM-14.** The checkpoint bitmap MUST NOT be longer than the profile limit. The window start moves

@@ -18,14 +18,18 @@ version = "0.62.4"
 latest = "github:apalache-mc/apalache"
 uses = [
   { file = "models/membership/check.py", text = "versions.toml" },
+  { file = "models/channels/check.py", text = "versions.toml" },
+  { file = "models/calls/check.py", text = "versions.toml" },
+  { file = "models/enrollment/check.py", text = "versions.toml" },
+  { file = "models/run-inductive.ps1", text = "tools/versions/versions.toml" },
 ]
 
 [tlc]
 version = "1.7.4"
 latest = "github:tlaplus/tlaplus"
 uses = [
-  { file = "models/membership/run-tlc.ps1", text = '$TlaToolsVersion = "{version}"' },
-  { file = "models/membership/run-tlc.ps1", text = "releases/download/v{version}/tla2tools.jar" },
+  { file = "models/run-tlc.ps1", text = '$TlaToolsVersion = "{version}"' },
+  { file = "models/run-tlc.ps1", text = "releases/download/v{version}/tla2tools.jar" },
 ]
 
 [cddl]

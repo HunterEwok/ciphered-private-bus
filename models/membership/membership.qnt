@@ -367,16 +367,20 @@ module membership {
   // R-MEM-6, R-MEM-10: a halted node ranks its pair above every checkpoint of
   // its generation, so any message from a node of that generation is answered
   // with the halt proof. This is the only way a proof dropped as "future
-  // generation" comes back; the liveness property below depends on it.
+  // generation" comes back; the liveness property below depends on it. A
+  // permanently halted node ranks above every generation and answers every
+  // sender with the proof of the two root change records (R-MEM-13).
   def haltedPeer(d: str, g: int): bool =
     DEVICES.exists(e => e != d and nodes.get(e).halted and not(nodes.get(e).forever) and nodes.get(e).gen == g)
 
+  def foreverPeer(d: str): bool = DEVICES.exists(e => e != d and nodes.get(e).forever)
+
   action nodeHearsHalted(d: str): bool = {
     val n = nodes.get(d)
-    val proofs = pool.hp.filter(h => h.kind != "rc" and h.gen == n.gen)
+    val proofs = pool.hp.filter(h =>
+      (h.kind != "rc" and h.gen == n.gen and haltedPeer(d, n.gen)) or (h.kind == "rc" and foreverPeer(d)))
     all {
       MUTANT != "halted_silent",
-      haltedPeer(d, n.gen),
       proofs != Set(),
       nondet h = proofs.oneOf()
       nodeRecvHp(d, h),
@@ -521,7 +525,8 @@ module membership {
 
   // ------------------------------------------------------------- liveness
   // S8, R-MEM-10: while a halted peer of its generation exists, a node
-  // eventually halts too, or leaves that generation. It assumes only that a
+  // eventually halts too, or leaves that generation; and once a peer is
+  // permanently halted, every node eventually is (R-MEM-13). It assumes only that a
   // node that keeps talking to a halted peer is eventually answered (weak
   // fairness of nodeHearsHalted).
   temporal fairHearing = DEVICES.forall(d =>
@@ -531,7 +536,10 @@ module membership {
     always((nodes.get(d).gen == g and haltedPeer(d, g)) implies
       eventually(nodes.get(d).halted or nodes.get(d).gen != g or not(haltedPeer(d, g))))))
 
-  temporal haltPropagates = fairHearing implies haltReachesPeers
+  temporal foreverReachesPeers = DEVICES.forall(d =>
+    always(foreverPeer(d) implies eventually(nodes.get(d).forever)))
+
+  temporal haltPropagates = fairHearing implies (haltReachesPeers and foreverReachesPeers)
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the violation shows that the

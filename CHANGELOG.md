@@ -69,6 +69,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Specification: the join request carries the transcript hash of the acceptor's own pairing session,
   and the acceptor checks the joiner's signature before sending it (R-JOIN-4). Reason: the
   enrollment model; it makes explicit what stops a man in the middle from relaying a payload.
+- Specification: a permanently halted node (two root change records of one generation) answers
+  every sender, of any generation, with its halt proof, and that proof takes effect at any
+  generation because it is verified with K1 and K2 alone (R-MEM-6, R-MEM-13, Appendix B,
+  Section B.3, rules 2 and 3).
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

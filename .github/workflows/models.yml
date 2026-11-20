@@ -10,9 +10,9 @@ name: models
 on:
   push:
     branches: ["main"]
-    paths: ["models/**", ".github/workflows/models.yml"]
+    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
   pull_request:
-    paths: ["models/**", ".github/workflows/models.yml"]
+    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
 
 permissions:
   contents: read

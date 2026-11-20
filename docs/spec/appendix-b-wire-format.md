@@ -173,8 +173,10 @@ Rules:
 2. A node that receives a valid proof for its bus MUST enter the halted state (R-MEM-8, R-MEM-13),
    whatever checkpoint it is at. It stores the proof and sends it on every link (R-MEM-10). A halted
    node answers a call, a nonce request, and every message that carries a pair of its generation with
-   this same message (R-MEM-6).
-3. A proof for a passport or checkpoint of a generation lower than the current one has no effect: that
+   this same message (R-MEM-6). A permanently halted node (a proof of kind 6) answers every message that
+   carries a pair, of any generation, in the same way.
+3. A proof of kind 6 is verified with K1 and K2 and takes effect at any generation (R-MEM-13).
+   A proof for a passport or checkpoint of a generation lower than the current one has no effect: that
    generation has already been replaced by a root change. A proof of a generation higher than the
    current one cannot be verified yet and is dropped; the node obtains the root change record as for
    any object of a new generation, and once it has moved to that generation, its next message to a

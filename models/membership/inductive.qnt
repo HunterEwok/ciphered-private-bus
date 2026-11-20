@@ -101,6 +101,28 @@ module inductive {
   action modelStep = step
   val modelSafety = safety
 
+  // The branches of step, one by one, so that the obligation "IndInv and one
+  // step imply IndInv" can be checked as independent parts in parallel. The
+  // list must name every branch of step in membership.qnt, and nothing else:
+  // step is exactly their disjunction.
+  action stepRootAdmit = rootAdmit
+  action stepRootChangeRights = rootChangeRights
+  action stepRootRevoke = rootRevoke
+  action stepRootEquivocateCp = rootEquivocateCp
+  action stepRootEquivocatePp = rootEquivocatePp
+  action stepRecoveryChange = recoveryChange
+  action stepRecoveryEquivocate = recoveryEquivocate
+  action stepAdversaryProof = adversaryProof
+  action stepRecvCp = { nondet d = DEVICES.oneOf() all { pool.cp != Set(), nondet c = pool.cp.oneOf() nodeRecvCp(d, c) } }
+  action stepRecvPp = { nondet d = DEVICES.oneOf() all { pool.pp != Set(), nondet p = pool.pp.oneOf() nodeRecvPp(d, p) } }
+  action stepRecvRc = { nondet d = DEVICES.oneOf() all { pool.rc != Set(), nondet r = pool.rc.oneOf() nodeRecvRc(d, r) } }
+  action stepRecvHp = { nondet d = DEVICES.oneOf() all { pool.hp != Set(), nondet h = pool.hp.oneOf() nodeRecvHp(d, h) } }
+  action stepAcceptData = { nondet d = DEVICES.oneOf() all { pool.data != Set(), nondet m = pool.data.oneOf() nodeAcceptData(d, m) } }
+  action stepHearsHalted = { nondet d = DEVICES.oneOf() nodeHearsHalted(d) }
+  action stepReboot = { nondet d = DEVICES.oneOf() nodeReboot(d) }
+  action stepSend = { nondet d = DEVICES.oneOf() nodeSend(d) }
+  action stepGrant = { nondet d = DEVICES.oneOf() all { nodes.get(d).pps != Set(), nodeGrant(d) } }
+
   // ------------------------------------------- an arbitrary state of IndInv
   action indInit = {
     nondet gens = setOfMaps(DEVICES, GENS).oneOf()

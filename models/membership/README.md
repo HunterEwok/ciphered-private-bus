@@ -69,7 +69,8 @@ R-MEM-6: a proof dropped as belonging to a future generation comes back from a h
 the node has moved to that generation (`halted_silent` removes that answer).
 
 Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node
-eventually halts too or leaves that generation (S8, R-MEM-6, R-MEM-10). It assumes weak fairness
+eventually halts too or leaves that generation, and that once a peer is permanently halted, every
+node eventually is (S8, R-MEM-6, R-MEM-10, R-MEM-13). It assumes weak fairness
 of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
 the proof. The probe `halted_silent` (the size of `tiny_tlc`) removes that answer, and the property must
 then fail. Liveness is checked with TLC and is a long run.
@@ -126,7 +127,7 @@ digits of the SHA-256 of `membership.qnt` and `instances.qnt`. The results table
 this hash rather than a commit, because a squash merge replaces the commit hashes of a pull
 request.
 
-On a shared Windows or Linux machine, [`run-tlc.ps1`](run-tlc.ps1) runs the exhaustive TLC
+On a shared Windows or Linux machine, [`run-tlc.ps1`](../run-tlc.ps1) runs the exhaustive TLC
 check end to end with progress output: it compiles the instance, starts TLC at below-normal
 priority within 85% of the cores and memory, prints depth, distinct states, the queue and its
 trend, and free disk space every minute, stops TLC when free disk space falls below 15%, and
@@ -134,22 +135,28 @@ writes `summary.txt` with the model hash and the result. It needs Java 17 or lat
 git, and works in Windows PowerShell 5.1:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File models\membership\run-tlc.ps1 -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model membership -WorkDir <folder> -Java <path to java>
 ```
 
 With `-Probes` the script checks the translation to TLA+ instead: it runs TLC on every probe
-instance against `safety` and on every witness against `tiny_tlc`, each within
+instance against `safety` and on every witness against `tiny_tlc` (both lists are in
+[`checks.json`](checks.json)), each within
 `-TimeoutMinutes` (30 by default), and writes a table of expected and actual outcomes. Every
 row must be violated; a run that reaches its time limit has no verdict and fails. The liveness
 probe `halted_silent` is not part of it.
 
-[`run-inductive.ps1`](run-inductive.ps1) checks the three obligations of the inductive
+[`run-inductive.ps1`](../run-inductive.ps1) checks the three obligations of the inductive
 invariant the same way, without Python, at below-normal priority, with progress output and a
 `summary.txt` that records the model hash and the hash of `inductive.qnt`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File models\membership\run-inductive.ps1 -WorkDir <folder> -Java <path to java> -Main large_ind
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model membership -WorkDir <folder> -Java <path to java> -Main large_ind
 ```
+
+Apalache hands each check to one solver, which runs on one core. With `-Split` the second
+obligation is checked branch by branch of the step (`stepRootAdmit` to `stepGrant` in
+`inductive.qnt`, which together are exactly `step`, listed in `checks.json`), up to `-Parallel` checks at a time, each with
+its own Apalache server.
 
 The simulator runs use a fixed seed, so a run is reproducible. Apalache and TLC runs beyond
 the CI sizes are long runs (R-VER-3): their outcome is recorded below with the number of

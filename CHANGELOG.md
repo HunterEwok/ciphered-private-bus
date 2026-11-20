@@ -11,8 +11,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   requirements, Appendix B (wire format), Appendix C (CDDL schema and size analysis), and a
   glossary of terms and code identifiers.
 - Quint model of the membership state machine (`models/membership/`) with its safety
-  invariants, ten probes, and non-vacuity witnesses, a check script, and a CI job that runs
-  the simulator at the CI sizes.
+  invariants, twelve probes, fixed scenarios, and non-vacuity witnesses, a check script,
+  and a CI job that runs the simulator at the CI sizes.
+- Version check for tools pinned outside Dependabot (`tools/versions/`): pull requests
+  check that the pins agree with the files that use them; a weekly run fails when a newer
+  stable release exists. Dependabot also watches the npm dependencies in `models/`.
 - CDDL schema of the wire format (`docs/spec/cpb.cddl`) and scripts in `tools/cddl/` that
   build the largest instance of every object, validate it against the schema, and check
   negative examples.
@@ -25,6 +28,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 
 ### Changed
+- Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,
   tool configuration files, bot identities, and tool-named branches), and limits commit identities to the

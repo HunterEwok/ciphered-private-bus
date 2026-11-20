@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 HunterEwok
 //
 // Instances of the membership model. `small` is the configuration checked in
 // CI; each `probe_*` instance contains one deliberate defect and is expected to
@@ -22,3 +23,5 @@ module probe_rc_no_forever { import membership(DEVICES = Set("a", "b", "c"), MAX
 module probe_proof_needs_cp { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "proof_needs_cp").* from "./membership" }
 module probe_reboot_rollback { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "reboot_rollback").* from "./membership" }
 module probe_grant_no_right { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "grant_no_right").* from "./membership" }
+module probe_accept_old_data_gen { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "accept_old_data_gen").* from "./membership" }
+module probe_no_prune { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "no_prune").* from "./membership" }

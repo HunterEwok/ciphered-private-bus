@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 HunterEwok
 //
 // Membership state machine of Ciphered Private Bus (verification level V2).
 //
 // Scope: passports, checkpoints, revocation, change of rights, root change,
 // halt and halt proofs, reboot, and the acceptance of data and key grants
-// against the receiver's checkpoint. Requirements: R-MEM-1..13, R-MEM-16, R-CH-2,
+// against the receiver's checkpoint. Requirements: R-MEM-1..13, R-MEM-16, R-CH-13,
 // R-VER-4; properties S4..S9.
 //
 // Abstractions (each one is stated so that a reader can judge what a green
@@ -75,8 +76,9 @@ module membership {
   }
 
   // A log entry records the receiver's checkpoint at the moment it accepted
-  // data from, or granted a key to, a device.
-  type Entry = { node: str, peer: str, ppNo: int, cp: Checkpoint, halted: bool }
+  // data from, or granted a key to, a device, together with the generation of
+  // the message and the rights of the passport the receiver relied on.
+  type Entry = { node: str, peer: str, ppNo: int, msgGen: int, rights: int, cp: Checkpoint, halted: bool }
 
   type Snap = { gen: int, cp: Checkpoint, halted: bool, forever: bool }
 
@@ -273,7 +275,8 @@ module membership {
     else if (cpConflict(c, n.cp) and MUTANT != "no_halt")
       setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "cp", gen: c.gen, no: c.no })) })
     else if (c.no > n.cp.no or acceptOld or (MUTANT == "accept_lower" and c.no < n.cp.no))
-      setNode(d, { ...n, cp: c, gen: c.gen, pps: n.pps.filter(p => validUnder(p, c)) }, pool)
+      setNode(d, { ...n, cp: c, gen: c.gen,
+                   pps: if (MUTANT == "no_prune") n.pps else n.pps.filter(p => validUnder(p, c)) }, pool)
     else
       setNode(d, n, pool)
   }
@@ -345,21 +348,27 @@ module membership {
     }
   }
 
-  // Accept data (R-MEM-6, S4, S5). A receiver with an older pair drops the
-  // message and requests the checkpoint; nothing changes in its state.
+  // Accept data (R-MEM-6, R-MEM-12, S4, S5). A receiver with an older pair
+  // drops the message and requests the checkpoint; nothing changes in its
+  // state. A message of an older generation names a passport of a replaced
+  // Root and is dropped too: passport numbers start over in every generation.
   action nodeAcceptData(d: str, m: Data): bool = {
     val n = nodes.get(d)
+    val known = n.pps.filter(p => p.dev == m.src and p.no == m.ppNo and validUnder(p, n.cp))
     all {
       not(n.halted) or MUTANT == "halted_accepts",
       m.src != d,
+      m.gen == n.gen or MUTANT == "accept_old_data_gen",
       not(lexGt(m.gen, m.cpNo, n.gen, n.cp.no)),
-      n.pps.exists(p => p.dev == m.src and p.no == m.ppNo and validUnder(p, n.cp)),
+      known != Set(),
+      nondet p = known.oneOf()
       commit(nodes, root, pool,
-        accepted.union(Set({ node: d, peer: m.src, ppNo: m.ppNo, cp: n.cp, halted: n.halted })), granted, history),
+        accepted.union(Set({ node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights,
+                             cp: n.cp, halted: n.halted })), granted, history),
     }
   }
 
-  // Grant a channel key to a reader with the read right (R-CH-2, R-MEM-9).
+  // Grant a channel key to a reader with the read right (R-CH-13, R-MEM-9).
   action nodeGrant(d: str): bool = {
     val n = nodes.get(d)
     all {
@@ -370,7 +379,8 @@ module membership {
         p.rights == 1 or MUTANT == "grant_no_right",
         validUnder(p, n.cp),
         commit(nodes, root, pool, accepted,
-          granted.union(Set({ node: d, peer: p.dev, ppNo: p.no, cp: n.cp, halted: n.halted })), history),
+          granted.union(Set({ node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights,
+                              cp: n.cp, halted: n.halted })), history),
       },
     }
   }
@@ -437,11 +447,12 @@ module membership {
   // the owner revoked or replaced cleared.
   val rootHonorsRevocation = root.valid.intersect(root.revoked) == Set()
 
-  // S8, R-MEM-8: a node that is not halted never holds a checkpoint and a
-  // passport cache in conflict with each other.
+  // S8, R-MEM-7, R-MEM-8: a node that is not halted holds in its cache only
+  // passports valid under its checkpoint, and no two of them conflict.
   val cacheConsistent = DEVICES.forall(d =>
     val n = nodes.get(d)
-    n.halted or n.pps.forall(p => n.pps.forall(q => not(ppConflict(p, q)))))
+    n.halted or n.pps.forall(p =>
+      validUnder(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))))
 
   // S4, S5, R-VER-4: no node accepts data from, or grants a key to, a passport
   // that the honest Root sequence has revoked at or before the receiver's
@@ -453,11 +464,19 @@ module membership {
     not(history.contains(e.cp)) or history.forall(c =>
       not(c.gen == e.cp.gen and c.no <= e.cp.no and revokedBy(e.ppNo, c))))
 
-  val revokedIsRejected = neverAfterRevocation(accepted) and neverAfterRevocation(granted)
+  // S4, R-MEM-2, R-MEM-12: every acceptance and grant relied on a passport of
+  // the message's own generation that is valid under the receiver's checkpoint
+  // at that moment, whether or not that checkpoint is honest.
+  def validAtReceiver(log: Set[Entry]): bool = log.forall(e =>
+    e.msgGen == e.cp.gen and e.ppNo < e.cp.nextNo and e.cp.valid.contains(e.ppNo))
 
-  // R-CH-2: keys are granted only to passports with the read right.
-  val grantsNeedRead = granted.forall(e =>
-    pool.pp.exists(p => p.gen == e.cp.gen and p.no == e.ppNo and p.dev == e.peer and p.rights == 1))
+  val revokedIsRejected = neverAfterRevocation(accepted) and neverAfterRevocation(granted)
+    and validAtReceiver(accepted) and validAtReceiver(granted)
+
+  // R-CH-13: keys are granted only to passports with the read right.
+  // The rights are those of the passport the granting node relied on, so an
+  // equivocated passport with other rights cannot mask a defect.
+  val grantsNeedRead = granted.forall(e => e.rights == 1)
 
   // S7: two nodes that processed the same records are in the same state, with
   // one exception: a node that saw two conflicting records halted while the

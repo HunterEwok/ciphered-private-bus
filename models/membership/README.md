@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Copyright (C) 2026 HunterEwok -->
 # Membership model
 
 A Quint [model](membership.qnt) of the membership state machine (verification level V2 of
@@ -28,9 +29,9 @@ of data and key grants. The header of `membership.qnt` lists every abstraction.
 | `haltedIsInert` | R-MEM-9 | S8 |
 | `proofIsObeyed` | R-MEM-10 | S8 |
 | `rootHonorsRevocation` | R-MEM-4 | S5 |
-| `cacheConsistent` | R-MEM-8 | S8 |
-| `revokedIsRejected` | R-MEM-2, R-VER-4 | S4, S5 |
-| `grantsNeedRead` | R-CH-2 | S5 |
+| `cacheConsistent` | R-MEM-7, R-MEM-8 | S8 |
+| `revokedIsRejected` | R-MEM-2, R-MEM-12, R-VER-4 | S4, S5 |
+| `grantsNeedRead` | R-CH-13 | S4, S16 |
 | `convergence` | R-ARC-6 | S7 |
 
 `convergence` compares two nodes that processed the same records. A record of another
@@ -51,6 +52,13 @@ Probes, each expected to violate `safety`:
 | `proof_needs_cp` | A halt proof is ignored by a node that moved past its number |
 | `reboot_rollback` | A reboot loses the persisted checkpoint |
 | `grant_no_right` | A key is granted to a passport without the read right |
+| `accept_old_data_gen` | Data of an older generation is accepted |
+| `no_prune` | A new checkpoint does not remove revoked passports from the cache |
+
+Some defects need a long, specific sequence that random simulation rarely produces. Such a
+probe also has a fixed scenario in [`scenarios.qnt`](scenarios.qnt) (`quint test`): the
+correct model must refuse the step, and the broken one must violate `safety` after it.
+`accept_old_data_gen` is checked this way.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
 the violation shows that halts, permanent halts, accepted data, key grants, root changes, and
@@ -66,7 +74,15 @@ later for Apalache and TLC; Quint downloads its evaluator and Apalache on first 
 python3 models/membership/check.py simulate            # CI run, about 10 minutes
 python3 models/membership/check.py apalache --steps 5   # bounded, instance tiny
 python3 models/membership/check.py tlc --main tiny      # exhaustive, long run
+python3 models/membership/check.py apalache --main probe_no_halt --expect violated
+python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
 ```
+
+`--main` and `--invariant` select any instance and invariant, so probes and witnesses can be
+checked with Apalache and TLC as well. Every run prints the model hash: the first 12 hex
+digits of the SHA-256 of `membership.qnt` and `instances.qnt`. The results table records
+this hash rather than a commit, because a squash merge replaces the commit hashes of a pull
+request.
 
 The simulator runs use a fixed seed, so a run is reproducible. Apalache and TLC runs beyond
 the CI sizes are long runs (R-VER-3): their outcome is recorded below with the number of
@@ -74,10 +90,9 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 
 ## Results
 
-| Date | Commit | Run | Bounds | Result |
+| Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-| 2026-11-20 | this change | `simulate` | 40 steps, 100000 traces per run | `safety` holds on `small` and `tiny`; all 10 probes fire; all 6 witnesses reached |
-| 2026-11-20 | this change | `apalache` | `tiny`, 5 steps | No violation (6.8 min) |
 
-TLC on `tiny` had explored 10.8 million distinct states with 9 million left on the queue
-after 4 minutes; the exhaustive run is a long run and has no result yet.
+No run of the current model is recorded yet. Earlier runs of a previous revision are not
+cited (R-VER-5); the CI run of this change and the long runs on the maintainer's machines
+will be entered here with the model hash.

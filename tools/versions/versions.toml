@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 HunterEwok
+#
+# Tools pinned outside the package managers that Dependabot reads (Cargo, npm,
+# GitHub Actions). `check_versions.py` verifies that every file named in `uses`
+# contains the pinned version, and with `--latest` that the pin is the newest
+# stable release. Change a version here and in the listed files together.
+
+[rust]
+version = "1.100.0"
+latest = "rust-stable"
+uses = [
+  { file = "rust-toolchain.toml", text = 'channel = "{version}"' },
+]
+
+[apalache]
+version = "0.62.4"
+latest = "github:apalache-mc/apalache"
+uses = [
+  { file = "models/membership/check.py", text = "versions.toml" },
+]
+
+[cddl]
+version = "0.12.14"
+latest = "rubygems:cddl"
+uses = [
+  { file = "tools/cddl/README.md", text = "gem install cddl -v {version}" },
+  { file = "docs/spec/appendix-c-cddl.md", text = "gem install cddl -v {version}" },
+]

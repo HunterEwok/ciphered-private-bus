@@ -22,3 +22,7 @@ coverage.*
 
 # Python bytecode from repository scripts
 __pycache__/
+
+# Model checker output
+_apalache-out/
+states/

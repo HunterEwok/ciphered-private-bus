@@ -10,6 +10,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Protocol requirements specification (draft, baseline for gate G0) in `docs/spec/`: the
   requirements, Appendix B (wire format), Appendix C (CDDL schema and size analysis), and a
   glossary of terms and code identifiers.
+- Quint model of the membership state machine (`models/membership/`) with its safety
+  invariants, ten probes, and non-vacuity witnesses, a check script, and a CI job that runs
+  the simulator at the CI sizes.
 - CDDL schema of the wire format (`docs/spec/cpb.cddl`) and scripts in `tools/cddl/` that
   build the largest instance of every object, validate it against the schema, and check
   negative examples.

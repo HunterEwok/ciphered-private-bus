@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 HunterEwok
+
+# State machine model checks at the CI sizes (R-VER-2, R-VER-3): safety holds,
+# every probe fires, every witness is reached.
+
+name: models
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["models/**", ".github/workflows/models.yml"]
+  pull_request:
+    paths: ["models/**", ".github/workflows/models.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: models-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  membership:
+    name: membership (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint
+        run: npm install --global @informalsystems/quint@0.33.1
+      - name: Type check
+        working-directory: models/membership
+        run: quint typecheck instances.qnt
+      - name: Simulate safety, probes, and witnesses
+        run: python3 models/membership/check.py simulate

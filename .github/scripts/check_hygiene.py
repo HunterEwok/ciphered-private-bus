@@ -11,11 +11,13 @@ local paths or leaked secrets.
 Modes:
   check_hygiene.py                    tracked files, commits (BASE_SHA..HEAD_SHA), PR text
   check_hygiene.py --commit-msg FILE  additionally checks a commit message file
-  check_hygiene.py --pre-commit       tracked files and the local author identity
+  check_hygiene.py --pre-commit       tracked files, the local author identity, and the
+                                      current branch name
 
 Environment:
   BASE_SHA, HEAD_SHA       commit range to check
   PR_TITLE, PR_BODY        pull request text to check
+  PR_BRANCH                pull request source branch name to check
   HYGIENE_STRICT_AUTHORS   "1" to accept only the maintainer's commit identities
 """
 
@@ -109,6 +111,12 @@ FORBIDDEN_PATH_RE = re.compile(
     r"|\.gemini|copilot-instructions\.md|\.copilot)(?:/|$)"
 )
 
+# Branch namespaces that AI coding tools create by default.
+FORBIDDEN_BRANCH_RE = re.compile(
+    r"(?i)(?:^|/)(?:claude|anthropic|codex|copilot|chatgpt|openai|gemini|cursor|windsurf|aider|devin"
+    r"|codeium|tabnine|cody|jules|sweep|ai|llm|agent|bot)(?:[-_/]|$)"
+)
+
 CO_AUTHOR_RE = re.compile(r"(?im)^co-authored-by:\s*(.*?)\s*<([^>]*)>\s*$")
 
 # Files that legitimately mention forbidden patterns as part of the hygiene rule itself.
@@ -145,6 +153,21 @@ def check_identity(label: str, name: str, email: str, errors: list[str], *, stri
     elif strict and email not in MAINTAINER_EMAILS:
         errors.append(f"{label}: identity <{email}> is not the maintainer's")
     check_text(f"{label} name", name, errors)
+
+
+def check_branch(label: str, branch: str, errors: list[str]) -> None:
+    branch = branch.strip()
+    if not branch:
+        return
+    m = FORBIDDEN_BRANCH_RE.search(branch)
+    if m:
+        errors.append(f"{label} {branch!r}: branch name points at an AI tool ({m.group(0).strip('/')!r})")
+    check_text(label, branch, errors)
+
+
+def check_local_branch(errors: list[str]) -> None:
+    res = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    check_branch("current branch", res.stdout, errors)
 
 
 def normalize_path(rel: str) -> str:
@@ -232,6 +255,7 @@ def main(argv: list[str]) -> int:
         check_text("PR title", pr_title, errors)
     if pr_body:
         check_text("PR description", pr_body, errors)
+    check_branch("PR branch", os.environ.get("PR_BRANCH", ""), errors)
 
     if len(argv) == 2 and argv[0] == "--commit-msg":
         msg = Path(argv[1]).read_text(encoding="utf-8", errors="replace")
@@ -242,6 +266,7 @@ def main(argv: list[str]) -> int:
             check_identity("commit message co-author", name, email, errors, strict=False)
     elif argv == ["--pre-commit"]:
         check_local_identity(errors)
+        check_local_branch(errors)
 
     if errors:
         print("Hygiene check failed:", file=sys.stderr)

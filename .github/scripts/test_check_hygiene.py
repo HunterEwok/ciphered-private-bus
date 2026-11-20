@@ -129,5 +129,29 @@ class PathTests(unittest.TestCase):
             self.assertNotEqual(path_errors(path), [], path)
 
 
+def branch_errors(branch: str) -> list[str]:
+    errors: list[str] = []
+    h.check_branch("PR branch", branch, errors)
+    return errors
+
+
+class BranchTests(unittest.TestCase):
+    def test_regular_branches_pass(self) -> None:
+        for branch in ["", "main", "chore/repo-hygiene", "feat/frame-codec", "fix/maintain-order", "dependabot/cargo/x-1.2"]:
+            self.assertEqual(branch_errors(branch), [], branch)
+
+    def test_tool_branches_fail(self) -> None:
+        for branch in [
+            "claude/project-thread-1a2b3c",
+            "codex/fix-tests",
+            "copilot/fix-12",
+            "cursor/refactor",
+            "devin/1700000000-task",
+            "user/ai-cleanup",
+            "Claude-patch-1",
+        ]:
+            self.assertNotEqual(branch_errors(branch), [], branch)
+
+
 if __name__ == "__main__":
     unittest.main()

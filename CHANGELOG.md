@@ -18,5 +18,5 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 ### Changed
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,
-  tool configuration files, and bot identities), and limits commit identities to the
+  tool configuration files, bot identities, and tool-named branches), and limits commit identities to the
   maintainer's only on the maintainer's own pull requests. It has unit tests.

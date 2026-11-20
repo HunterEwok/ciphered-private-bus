@@ -16,7 +16,7 @@ of data and key grants. The header of `membership.qnt` lists every abstraction.
 | `small` | 3 | 2 | 3 | Simulator runs in CI |
 | `tiny` | 2 | 2 | 2 | Simulator in CI |
 | `tiny_tlc` | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
-| `probe_*` | 3 | 2 | 3 | One deliberate defect each; `safety` must fail (R-VER-2) |
+| `probe_*` | 3 | 2 | 3 | One deliberate defect each; `safety` must fail (R-VER-2). `accept_old_data_gen` and `halted_silent` have the size of `tiny_tlc`, which their defects need, so that TLC reaches them quickly |
 
 ## Properties
 
@@ -110,6 +110,12 @@ git, and works in Windows PowerShell 5.1:
 ```powershell
 powershell -ExecutionPolicy Bypass -File models\membership\run-tlc.ps1 -WorkDir <folder> -Java <path to java>
 ```
+
+With `-Probes` the script checks the translation to TLA+ instead: it runs TLC on every probe
+instance against `safety` and on every witness against `tiny_tlc`, each within
+`-TimeoutMinutes` (30 by default), and writes a table of expected and actual outcomes. Every
+row must be violated; a run that reaches its time limit has no verdict and fails. The liveness
+probe `halted_silent` is not part of it.
 
 The simulator runs use a fixed seed, so a run is reproducible. Apalache and TLC runs beyond
 the CI sizes are long runs (R-VER-3): their outcome is recorded below with the number of

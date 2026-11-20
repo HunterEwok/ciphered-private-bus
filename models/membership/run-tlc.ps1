@@ -16,6 +16,15 @@
 # Ctrl+C stops only the progress output; TLC keeps running. To stop TLC, use
 # Stop-Process with the PID the script prints. To continue a stopped run from
 # its last checkpoint, pass -Recover with the checkpoint folder (states\<date>).
+#
+# -Probes checks the translation to TLA+ instead: it runs TLC on every probe
+# instance (each must violate `safety`) and on every witness (each must be
+# violated), one after another with -TimeoutMinutes each, and prints a table of
+# expected and actual outcomes. A run that reaches its time limit has no
+# verdict and counts as a failure.
+#
+# Exit status: 0 no error found (with -Probes: every outcome as expected),
+# 2 invariant violated, 3 no verdict (time limit, disk limit, or an error).
 
 param(
     [Parameter(Mandatory = $true)][string]$WorkDir,
@@ -26,7 +35,9 @@ param(
     [double]$Share = 0.85,
     [int]$MinFreeDiskPercent = 15,
     [int]$IntervalSeconds = 60,
-    [string]$Recover = ""
+    [string]$Recover = "",
+    [int]$TimeoutMinutes = 0,
+    [switch]$Probes
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +86,46 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments) {
         $script:NativeExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $saved }
     return $out
+}
+
+# ------------------------------------------------------------------ probes mode
+if ($Probes) {
+    # The liveness probe halted_silent needs -Temporal haltPropagates and a long
+    # run, so it is not part of this check.
+    $probeNames = @("ignore_bitmap", "keep_bit", "accept_old_gen", "accept_lower", "no_halt", "halted_accepts",
+                    "rc_no_forever", "proof_needs_cp", "reboot_rollback", "grant_no_right", "accept_old_data_gen",
+                    "no_prune")
+    $witnesses = @("witnessHalt", "witnessForever", "witnessAccept", "witnessGrant", "witnessRootChange",
+                   "witnessRevokedSends")
+    $runs = @($probeNames | ForEach-Object { , @("probe_$_", "safety") }) +
+            @($witnesses | ForEach-Object { , @("tiny_tlc", $_) })
+    $limit = if ($TimeoutMinutes -gt 0) { $TimeoutMinutes } else { 30 }
+    $hostExe = (Get-Process -Id $PID).Path
+    $rows = @(); $failures = 0
+    foreach ($run in $runs) {
+        $runMain = $run[0]; $runInv = $run[1]
+        Say ("=== {0} / {1}: expected violated, limit {2} min" -f $runMain, $runInv, $limit)
+        $childArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath, "-WorkDir", $WorkDir,
+                       "-Java", $Java, "-Main", $runMain, "-Invariant", $runInv, "-Share", "$Share",
+                       "-MinFreeDiskPercent", "$MinFreeDiskPercent", "-IntervalSeconds", "$IntervalSeconds",
+                       "-TimeoutMinutes", "$limit")
+        $t0 = Get-Date
+        & $hostExe @childArgs
+        $code = $LASTEXITCODE
+        $got = switch ($code) { 0 { "holds" } 2 { "violated" } default { "no verdict" } }
+        $pass = $got -eq "violated"
+        if (-not $pass) { $failures++ }
+        $rows += ("{0,-4}  {1,-26} {2,-20} {3,-10} {4,6:N1} min" -f `
+            $(if ($pass) { "pass" } else { "FAIL" }), $runMain, $runInv, $got, ((Get-Date) - $t0).TotalMinutes)
+    }
+    $table = @("model hash: $(Get-ModelHash)", "expected for every row: violated", "") + $rows +
+             @("", $(if ($failures -eq 0) { "all outcomes as expected" } else { "$failures outcome(s) not as expected" }))
+    New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+    $tableFile = Join-Path $WorkDir ("probes-{0}.txt" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    [System.IO.File]::WriteAllLines($tableFile, $table)
+    Say "Probe table ($tableFile):"
+    $table | ForEach-Object { Write-Host "  $_" }
+    if ($failures -eq 0) { exit 0 } else { exit 1 }
 }
 
 # ------------------------------------------------------------------ preparation
@@ -175,9 +226,11 @@ Say ("TLC started, PID {0}. Log: {1}" -f $tlc.Id, $log)
 
 # ---------------------------------------------------------------------- progress
 $pattern = 'Progress\((\d+)\) at .*?: ([\d,]+) states generated.*?, ([\d,]+) distinct states found \(([\d,]+) ds/min\), ([\d,]+) states left on queue'
-$lastQueue = $null; $lastTime = $null; $lastLine = $null; $trend = ""; $stoppedForDisk = $false
+$lastQueue = $null; $lastTime = $null; $lastLine = $null; $trend = ""; $stoppedForDisk = $false; $stoppedForTime = $false
 while (-not $tlc.HasExited) {
-    Start-Sleep -Seconds $IntervalSeconds
+    # Wait in short steps so that a run which ends early is not held for a whole interval.
+    $waitUntil = (Get-Date).AddSeconds($IntervalSeconds)
+    while (-not $tlc.HasExited -and (Get-Date) -lt $waitUntil) { Start-Sleep -Seconds 1 }
     if ($tlc.HasExited) { break }
     $free = Get-FreeDiskPercent $RunDir
     $elapsed = (Get-Date) - $started
@@ -210,6 +263,12 @@ while (-not $tlc.HasExited) {
         $stoppedForDisk = $true
         break
     }
+    if ($TimeoutMinutes -gt 0 -and $elapsed.TotalMinutes -ge $TimeoutMinutes) {
+        Say "Time limit of $TimeoutMinutes min reached: stopping TLC. This is not a result."
+        Stop-Process -Id $tlc.Id
+        $stoppedForTime = $true
+        break
+    }
 }
 $tlc.WaitForExit()
 $ended = Get-Date
@@ -218,7 +277,9 @@ $ended = Get-Date
 $text = if (Test-Path $log) { Get-Content $log } else { @() }
 $keys = 'No error has been found|Error:|is violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed'
 $result = @($text | Where-Object { $_ -match $keys })
-$ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stoppedForDisk
+$stopped = $stoppedForDisk -or $stoppedForTime
+$ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stopped
+$violated = ($text -match 'is violated').Count -gt 0 -and -not $stopped
 $summary = @(
     "model hash: $hash",
     "commit: $commit",
@@ -226,10 +287,10 @@ $summary = @(
     "tla2tools: $TlaToolsVersion",
     ("limits: {0} workers of {1} cores, heap {2} GB, direct {3} GB" -f $workers, $cores, $heapGb, $directGb),
     "started: $($started.ToString('u')), ended: $($ended.ToString('u')), elapsed: $($ended - $started)",
-    "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif (($text -match 'is violated').Count -gt 0) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",
+    "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif ($stoppedForTime) { 'stopped at the time limit, not a result' } elseif ($violated) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",
     ""
 ) + $result
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }
-if ($ok) { exit 0 } else { exit 1 }
+if ($ok) { exit 0 } elseif ($violated) { exit 2 } else { exit 3 }

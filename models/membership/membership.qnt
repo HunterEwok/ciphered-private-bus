@@ -109,10 +109,12 @@ module membership {
   // The set of valid numbers stands for the window and bitmap, so a number at
   // or above nextNo is never in it: the check "number below next" is part of
   // reading the bitmap and has no separate probe.
+  pure def validIn(p: Passport, c: Checkpoint): bool =
+    p.gen == c.gen and p.no < c.nextNo and c.valid.contains(p.no)
+
+  // The check the nodes run; a probe may break it. Invariants use validIn.
   pure def validUnder(p: Passport, c: Checkpoint): bool =
-    p.gen == c.gen
-      and p.no < c.nextNo
-      and (MUTANT == "ignore_bitmap" or c.valid.contains(p.no))
+    if (MUTANT == "ignore_bitmap") p.gen == c.gen and p.no < c.nextNo else validIn(p, c)
 
   pure def initNode: Node = {
     gen: 1, cp: genesis(1), pps: Set(), rc: -1, halted: false, forever: false,
@@ -452,7 +454,7 @@ module membership {
   val cacheConsistent = DEVICES.forall(d =>
     val n = nodes.get(d)
     n.halted or n.pps.forall(p =>
-      validUnder(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))))
+      validIn(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))))
 
   // S4, S5, R-VER-4: no node accepts data from, or grants a key to, a passport
   // that the honest Root sequence has revoked at or before the receiver's

@@ -108,3 +108,4 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channel
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
 | 2026-11-21 | `d4085bb6dda6` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 14 probes against `safety`, 7 witnesses on `tiny`, breadth-first until the first violation | 21 of 21 violated as expected, depth 8 to 15, 9 s to 78 s each |
+| 2026-11-21 | `d4085bb6dda6`, invariant `5555ca83833d` | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (6 checks at a time, 8 GB heap each) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 0.9 min, the 10 step branches in 3.1 to 34.4 min (`ReaderPub` the longest), `IndInv` implies `safety` in 3.1 min; 38 min in total. Safety holds in every reachable state of `small` |

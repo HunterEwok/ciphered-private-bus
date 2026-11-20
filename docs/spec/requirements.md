@@ -760,6 +760,8 @@ has not yet consumed.
    executes the action, and replies. The reply carries the next nonce, so the next call takes a single
    round trip.
 4. On a mismatch the target executes nothing, leaves the slot unchanged, and returns the current nonce.
+   If the commander has no slot yet (for example after "reset nonces"), the refusal is the answer to a
+   nonce request: the target creates the slot and returns its value.
 
 ### 10.2. Call Requirements
 
@@ -788,7 +790,9 @@ has not yet consumed.
 > *Serves:* S10. *Verified by:* model.
 
 > **R-CALL-6.** On a nonce mismatch the slot MUST NOT change. The answer to a mismatch requires neither
-> decapsulation nor a signature from the target.
+> decapsulation nor a signature from the target. If there is no slot for the commander, the answer is
+> that to a nonce request: the slot is created under the conditions of R-CALL-7, so a call that a reset
+> made stale costs one round trip, not two.
 > *Serves:* S14. *Verified by:* model, load test.
 
 > **R-CALL-7.** The target creates slots only for commander devices named in its passport and for the

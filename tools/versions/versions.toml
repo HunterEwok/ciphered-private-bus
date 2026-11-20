@@ -20,6 +20,14 @@ uses = [
   { file = "models/membership/check.py", text = "versions.toml" },
 ]
 
+[tlc]
+version = "1.7.4"
+latest = "github:tlaplus/tlaplus"
+uses = [
+  { file = "models/membership/run-tlc.ps1", text = '$TlaToolsVersion = "{version}"' },
+  { file = "models/membership/run-tlc.ps1", text = "releases/download/v{version}/tla2tools.jar" },
+]
+
 [cddl]
 version = "0.12.14"
 latest = "rubygems:cddl"

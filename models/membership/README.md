@@ -100,6 +100,17 @@ digits of the SHA-256 of `membership.qnt` and `instances.qnt`. The results table
 this hash rather than a commit, because a squash merge replaces the commit hashes of a pull
 request.
 
+On a shared Windows or Linux machine, [`run-tlc.ps1`](run-tlc.ps1) runs the exhaustive TLC
+check end to end with progress output: it compiles the instance, starts TLC at below-normal
+priority within 85% of the cores and memory, prints depth, distinct states, the queue and its
+trend, and free disk space every minute, stops TLC when free disk space falls below 15%, and
+writes `summary.txt` with the model hash and the result. It needs Java 17 or later, Node, and
+git, and works in Windows PowerShell 5.1:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File models\membership\run-tlc.ps1 -WorkDir <folder> -Java <path to java>
+```
+
 The simulator runs use a fixed seed, so a run is reproducible. Apalache and TLC runs beyond
 the CI sizes are long runs (R-VER-3): their outcome is recorded below with the number of
 states and the running time. An interrupted run is not a result (R-VER-5).

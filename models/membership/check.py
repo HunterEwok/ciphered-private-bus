@@ -19,6 +19,7 @@ the results table in README.md records.
 import argparse
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -74,7 +75,8 @@ def quint(args, timeout):
     """Run quint in the model directory; return (status, combined output, seconds)."""
     start = time.monotonic()
     proc = subprocess.run(
-        ["quint", *args],
+        # On Windows npm installs quint.cmd, which subprocess finds only by its full path.
+        [shutil.which("quint") or "quint", *args],
         cwd=HERE,
         capture_output=True,
         text=True,

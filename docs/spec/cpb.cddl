@@ -1,0 +1,154 @@
+; SPDX-License-Identifier: CC-BY-4.0
+; Ciphered Private Bus, wire format v1 (appendix B), CDDL per RFC 8610.
+; Profile (R-FMT-1..4): unsigned integer <= 2^53 - 1, bstr, tstr, array,
+; map with keys 0..65535;
+; shortest forms; no indefinite lengths; map keys strictly ascending;
+; nesting depth <= 4; at most 128 items per container. A signed object
+; carried inside a message is a bstr (.cbor) and is decoded on its own.
+; Keys 0..255 are critical; 256..65535 are extension fields (R-FMT-14).
+; A field has a default only where this schema says .default; such a
+; field is omitted when it holds the default (R-FMT-2).
+
+message = Hello / Auth / Get / PassportMsg / CheckpointMsg / RootChangeMsg
+        / SealClaimMsg / JoinRequestMsg / KeyRequestMsg / RelayTicketMsg
+        / RelayRefusal / HaltProof / KeyGrantMsg / PublicationMsg / BlobGet
+        / NonceRequest / Nonce / CallMsg / Reply / Refusal
+        / PairInit / PairReply / PairConfirm / PairSealed / PairAbort / PairDone
+
+; ---------- basic types ----------
+u53       = 0..9007199254740991           ; integer ceiling, 2^53 - 1
+seq       = 1..2147483647                 ; passport, checkpoint, generation, epoch,
+                                          ; key generation, ticket, stream: 2^31 - 1
+bus-id    = bstr .size 32
+hash32    = bstr .size 32
+device-id = bstr .size 16
+label16   = bstr .size 16
+nonce16   = bstr .size 16
+credit    = 1..4294967295                 ; same width as StreamChunk.credit
+ext-key   = 256..65535                    ; R-FMT-14 extension zone
+ext       = (ext-key => profile-val)
+profile-val = u53 / bstr / tstr / [* profile-val] / {* (0..65535) => profile-val}
+                                          ; R-FMT-1 inside extension fields
+
+KeyP256   = [1, bstr .size 65]            ; SEC1 uncompressed
+KeyXWing  = [2, bstr .size 1216]
+KeySlh    = [3, bstr .size 32]            ; SLH-DSA-SHA2-128s public key
+sign-key  = KeyP256 / KeySlh
+sig-p256  = bstr .size 64                 ; r || s, low s (R-FMT-8)
+sig-slh   = bstr .size 7856               ; FIPS 205, 128s
+root-sig  = sig-p256 / sig-slh            ; root key: P-256 now, SLH-DSA after R-KEY-10
+signature = sig-p256 / sig-slh            ; call: device, presence or root key
+version   = 1..9007199254740991
+
+; ---------- line ----------
+Hello = {0: 1, 1: [1*128 version], 2: nonce16, 3: bus-id, 4: seq, 5: seq,
+         6: device-id, * ext}             ; versions strictly ascending
+Auth  = {0: 2, 1: sig-p256, * ext}             ; device key or relay key
+
+; ---------- control plane ----------
+Get = {0: 3, 1: bus-id, get-what, * ext}
+get-what = ( (2: 1, 3: device-id)         ; passport
+           // (2: 2)                       ; checkpoint
+           // (2: 3)                       ; root change: the latest one
+           // (2: 4, 3: device-id)         ; seal claim
+           // (2: 5, 3: device-id) )       ; relay ticket, device = RelayId
+
+PassportHead = {1: bus-id, 2: seq, 3: seq}
+PassportRest = {4: KeyP256, 5: bstr .size 1, ? 6: KeyP256,
+                ? 7: [1*128 permit], * ext}
+permit       = [commander: device-id, auto: bstr .size 8, confirm: bstr .size 8]
+Passport     = [PassportHead, PassportRest, root-sig]
+PassportMsg  = {0: 4, 1: bstr .cbor Passport}
+
+CheckpointHead = {1: bus-id, 2: seq, 3: seq}
+CheckpointRest = {4: seq, 5: bstr .size (8..4096), 6: seq,
+                  ? 7: [1*128 device-id], 8: device-id, * ext}
+Checkpoint     = [CheckpointHead, CheckpointRest, root-sig]
+CheckpointMsg  = {0: 5, 1: bstr .cbor Checkpoint}
+
+RootChangeHead = {1: bus-id, 2: seq}
+RootChangeRest = {3: sign-key, * ext}
+RootChange     = [RootChangeHead, RootChangeRest, sig-p256, sig-slh]  ; K1, K2
+RootChangeMsg  = {0: 6, 1: bstr .cbor RootChange}
+
+HaltProof = {0: 12, halt-variant, * ext}
+halt-variant = (
+    (1: 4, 2: bstr .cbor PassportHead,   3: hash32, 4: [root-sig],
+           5: hash32, 6: [root-sig])
+ // (1: 5, 2: bstr .cbor CheckpointHead, 3: hash32, 4: [root-sig],
+           5: hash32, 6: [root-sig])
+ // (1: 6, 2: bstr .cbor RootChangeHead, 3: hash32, 4: [sig-p256, sig-slh],
+           5: hash32, 6: [sig-p256, sig-slh]) )
+
+SealClaimBody = {1: bus-id, 2: device-id, 3: seq, 4: KeyXWing, * ext}
+SealClaim     = [SealClaimBody, sig-p256]
+SealClaimMsg  = {0: 7, 1: bstr .cbor SealClaim}
+
+JoinRequestBody = {1: bus-id, 2: device-id, 3: seq, 4: seq, 5: seq,
+                   6: bstr .size (1312..1446), * ext}   ; X-Wing ct || AEAD(JoinSealed)
+JoinSealed      = {1: KeyP256, 2: tstr .size (1..64), 3: hash32,
+                   ? 4: KeyP256, 5: sig-p256}
+JoinRequest     = [JoinRequestBody, sig-p256]
+JoinRequestMsg  = {0: 8, 1: bstr .cbor JoinRequest}
+
+KeyRequestBody = {1: bus-id, 2: device-id, 3: device-id, 4: label16, 5: seq,
+                  6: nonce16, * ext}
+KeyRequest     = [KeyRequestBody, sig-p256]
+KeyRequestMsg  = {0: 9, 1: bstr .cbor KeyRequest}
+
+RelayTicketBody = {1: bus-id, 2: seq, 3: seq, 4: KeyP256, 5: u53, 6: u53, * ext}
+RelayTicket     = [RelayTicketBody, root-sig]    ; 16384 <= [6] <= [5]
+RelayTicketMsg  = {0: 10, 1: bstr .cbor RelayTicket}
+
+RelayRefusal = {0: 11, 1: bus-id, 2: hash32, 3: 1..5, * ext}
+
+; ---------- channels ----------
+KeyGrantHeader = {1: bus-id, 2: device-id, 3: seq, 4: seq, 5: seq, 6: label16,
+                  7: device-id, 8: seq, 9: hash32, ? 10: nonce16, * ext}
+KeyGrant       = [KeyGrantHeader, bstr .size 1168, sig-p256]
+KeyGrantMsg    = {0: 16, 1: bstr .cbor KeyGrant}
+
+PubHeader = {1: bus-id, 2: device-id, 3: seq, 4: 1..9007199254740991, 5: seq,
+             6: seq, 7: label16, 8: hash32, 9: 0..1024, ? 10: blob-ref, * ext}
+blob-ref  = [size: 17..9007199254740991, hash: hash32, seg: 1024..16346]
+; segments N = ceil(size / seg) <= 2^31 - 1; segment i starts at i * seg;
+; size mod seg is 0 or >= 17 (the last segment holds a tag and >= 1 byte)
+PubContent = {1: 0..65535, ? 2: u53 .default 0, ? 3: bstr .size (1..4096),
+              ? 4: bstr .size (1..4096)}    ; pad: zero bytes, len(data) + len(pad) <= 4096
+NodeInfo   = {1: tstr .size (1..64), * ext}   ; PubContent.data of channel 0 (R-CH-16)
+Publication    = [PubHeader, bstr .size (19..4125), sig-p256]
+PublicationMsg = {0: 17, 1: bstr .cbor Publication}
+
+BlobGet = {0: 18, 1: bus-id, 2: hash32, 3: 0..2147483646, * ext}
+
+; ---------- calls ----------
+NonceRequest = {0: 24, 1: bus-id, 2: device-id, 3: device-id, * ext}
+Nonce        = {0: 25, 1: bus-id, 2: device-id, 3: device-id, 4: nonce16, * ext}
+
+CallBody = {1: bus-id, 2: hash32, 3: device-id, 4: device-id, 5: nonce16,
+            6: seq, 7: seq, 8: seq, 9: bstr .size (1139..5248), * ext}  ; X-Wing ct || AEAD(Command)
+Command  = {1: 1..64, ? 2: bstr .size (1..4096), ? stream-req}
+stream-req = ( (3: 1, ? 4: credit)       ; in order, optional initial credit
+             // (3: 2) )                  ; lossy, no credit
+Call     = [CallBody, signature]
+CallMsg  = {0: 26, 1: bstr .cbor Call}
+
+Reply = {0: 27, 1: bus-id, 2: device-id, 3: device-id, 4: hash32,
+         5: bstr .size (37..4411), * ext}   ; AEAD(ReplyPlain): 21..4395 + 16
+ReplyPlain = {1: 0..65535, ? 2: tstr .size (1..256), ? 3: bstr .size (1..4096),
+              ? (4: seq, ? 5: credit), 6: nonce16}
+
+Refusal = {0: 28, 1: bus-id, 2: device-id, 3: device-id, 4: hash32,
+           refusal-code, * ext}
+refusal-code = ( (5: 1, 6: bstr .cbor SealClaim) ; stale epoch, carries the claim
+               // (5: 2, 7: nonce16) )          ; nonce mismatch, carries the nonce
+
+; ---------- pairing (B.11) ----------
+PairInit    = {0: 40, 1: [1*128 version], 2: nonce16}
+PairReply   = {0: 41, 1: version, 2: nonce16, 3: bstr .size 32}
+PairConfirm = {0: 42, 1: bstr .size 32, 2: bstr .size 32}
+PairSealed  = {0: 43, 1: bstr .size (157..291)}  ; AEAD(PairBus 215..219 / PairDevice 141..275)
+PairAbort   = {0: 44, 1: 1..4}
+PairDone    = {0: 45, 1: bstr .size 32}
+PairBus     = {1: bus-id, 2: KeyP256, 3: KeySlh, 4: KeyP256, 5: seq}
+PairDevice  = {1: KeyP256, ? 2: KeyP256, 3: tstr .size (1..64), 4: sig-p256}

@@ -406,7 +406,9 @@ corresponds to action i.
 > that link and drop the message itself: the core has no wait buffer. A recipient with a larger pair MUST
 > send its checkpoint. A node or relay that accepts a new checkpoint MUST immediately send it on all its
 > links, so dropping happens only when frames are reordered, and the loss is recovered like any loss on
-> the link.
+> the link. A halted node ranks its pair above every checkpoint of its generation: to a sender with a
+> pair of the same generation it MUST answer with its halt proof (R-MEM-10) in place of a checkpoint, and
+> it does so again on every such message, so a proof that was lost or dropped arrives with the next one.
 > *Serves:* S5, L1. *Verified by:* model, simulator.
 
 > **R-MEM-7.** A node MUST return its own passport and checkpoint when a link requests them. Who is
@@ -427,8 +429,8 @@ corresponds to action i.
 > *Serves:* S8. *Verified by:* model.
 
 > **R-MEM-10.** A node MUST keep the halt proof (the shared head of the two records, the two hashes of
-> the rest, and the signatures) and send it on every link as one `HaltProof` message (Appendix B,
-> Section B.3). The proof is self-contained and does not depend on delivery order (R-ARC-6). On
+> the rest, and the signatures), send it on every link as one `HaltProof` message (Appendix B,
+> Section B.3) when it halts, and from then on send it to every sender that is behind it (R-MEM-6). The proof is self-contained and does not depend on delivery order (R-ARC-6). On
 > receiving a valid proof for its bus, a node MUST halt whatever checkpoint it is at: a node that has
 > moved ahead by number would otherwise drop the records themselves as old.
 > *Serves:* S8. *Verified by:* model (the halt propagates).

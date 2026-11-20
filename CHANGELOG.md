@@ -28,6 +28,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 
 ### Changed
+- Specification: a halted node ranks its (generation, checkpoint) pair above every checkpoint of its
+  generation and answers every sender of that generation with its halt proof (R-MEM-6, R-MEM-10,
+  Appendix B, Section B.3, rule 3). Reason: the membership model showed that a proof of a generation
+  a node had not reached yet was dropped, and on a direct link nothing sent it again, so the node
+  could keep working under a Root that had signed conflicting records.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

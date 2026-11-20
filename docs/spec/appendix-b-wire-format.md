@@ -172,10 +172,13 @@ Rules:
    change record with K1 and K2.
 2. A node that receives a valid proof for its bus MUST enter the halted state (R-MEM-8, R-MEM-13),
    whatever checkpoint it is at. It stores the proof and sends it on every link (R-MEM-10). A halted
-   node answers a call and a nonce request with this same message.
+   node answers a call, a nonce request, and every message that carries a pair of its generation with
+   this same message (R-MEM-6).
 3. A proof for a passport or checkpoint of a generation lower than the current one has no effect: that
-   generation has already been replaced by a root change. For a generation higher than the current one,
-   the node first obtains the root change record, as for any object of a new generation.
+   generation has already been replaced by a root change. A proof of a generation higher than the
+   current one cannot be verified yet and is dropped; the node obtains the root change record as for
+   any object of a new generation, and once it has moved to that generation, its next message to a
+   halted peer brings the proof again (R-MEM-6). The core keeps no proof waiting.
 4. A node constructs a proof itself when it receives a record with a valid signature and the same `head`
    as a record it stores, but with a different `rest`.
 5. A relay verifies the proof, stores one per bus outside the data quota, and delivers it to every

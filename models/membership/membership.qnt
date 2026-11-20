@@ -5,8 +5,9 @@
 //
 // Scope: passports, checkpoints, revocation, change of rights, root change,
 // halt and halt proofs, reboot, and the acceptance of data and key grants
-// against the receiver's checkpoint. Requirements: R-MEM-1..13, R-MEM-16, R-CH-13,
-// R-VER-4; properties S4..S9.
+// against the receiver's checkpoint. Requirements: R-MEM-1..13 (R-MEM-6 with
+// the answer of a halted node), R-MEM-16, R-CH-13, R-VER-4; properties S4..S9
+// and S16, and the liveness of halt propagation.
 //
 // Abstractions (each one is stated so that a reader can judge what a green
 // run does and does not show):
@@ -328,6 +329,25 @@ module membership {
       setNode(d, n, pool)
   }
 
+  // R-MEM-6, R-MEM-10: a halted node ranks its pair above every checkpoint of
+  // its generation, so any message from a node of that generation is answered
+  // with the halt proof. This is the only way a proof dropped as "future
+  // generation" comes back; the liveness property below depends on it.
+  def haltedPeer(d: str, g: int): bool =
+    DEVICES.exists(e => e != d and nodes.get(e).halted and not(nodes.get(e).forever) and nodes.get(e).gen == g)
+
+  action nodeHearsHalted(d: str): bool = {
+    val n = nodes.get(d)
+    val proofs = pool.hp.filter(h => h.kind != "rc" and h.gen == n.gen)
+    all {
+      MUTANT != "halted_silent",
+      haltedPeer(d, n.gen),
+      proofs != Set(),
+      nondet h = proofs.oneOf()
+      nodeRecvHp(d, h),
+    }
+  }
+
   // Reboot: everything in R-CORE-5 survives; the passport cache is volatile.
   action nodeReboot(d: str): bool = {
     val n = nodes.get(d)
@@ -404,6 +424,7 @@ module membership {
       all { pool.rc != Set(), nondet r = pool.rc.oneOf() nodeRecvRc(d, r) },
       all { pool.hp != Set(), nondet h = pool.hp.oneOf() nodeRecvHp(d, h) },
       all { pool.data != Set(), nondet m = pool.data.oneOf() nodeAcceptData(d, m) },
+      nodeHearsHalted(d),
       nodeReboot(d),
       nodeSend(d),
       all { nodes.get(d).pps != Set(), nodeGrant(d) },
@@ -498,6 +519,20 @@ module membership {
   val safety = noRollback and currentGeneration and haltIsSticky and haltedIsInert
     and proofIsObeyed and rootHonorsRevocation and cacheConsistent
     and revokedIsRejected and grantsNeedRead and convergence
+
+  // ------------------------------------------------------------- liveness
+  // S8, R-MEM-10: while a halted peer of its generation exists, a node
+  // eventually halts too, or leaves that generation. It assumes only that a
+  // node that keeps talking to a halted peer is eventually answered (weak
+  // fairness of nodeHearsHalted).
+  temporal fairHearing = DEVICES.forall(d =>
+    weakFair(nodeHearsHalted(d), (nodes, root, pool, accepted, granted, history, prev)))
+
+  temporal haltReachesPeers = DEVICES.forall(d => 1.to(MAX_GEN).forall(g =>
+    always((nodes.get(d).gen == g and haltedPeer(d, g)) implies
+      eventually(nodes.get(d).halted or nodes.get(d).gen != g or not(haltedPeer(d, g))))))
+
+  temporal haltPropagates = fairHearing implies haltReachesPeers
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the violation shows that the

@@ -25,3 +25,4 @@ module probe_reboot_rollback { import membership(DEVICES = Set("a", "b", "c"), M
 module probe_grant_no_right { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "grant_no_right").* from "./membership" }
 module probe_accept_old_data_gen { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "accept_old_data_gen").* from "./membership" }
 module probe_no_prune { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, MUTANT = "no_prune").* from "./membership" }
+module probe_halted_silent { import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "halted_silent").* from "./membership" }

@@ -67,7 +67,7 @@ WITNESSES = [
 ]
 SEED = "0x5eed"
 # Fixed scenarios in scenarios.qnt, one module each; every test must pass.
-SCENARIOS = ["scenarios", "scenarios_probe_accept_old_data_gen"]
+SCENARIOS = ["scenarios", "scenarios_probe_accept_old_data_gen", "scenarios_probe_halted_silent"]
 
 
 def quint(args, timeout):
@@ -127,8 +127,9 @@ def simulate(steps, samples, timeout):
     return failures
 
 
-def bounded(backend, main, invariant, expect, steps, timeout):
-    args = ["verify", f"--main={main}", f"--invariant={invariant}", SPEC]
+def bounded(backend, main, invariant, temporal, expect, steps, timeout):
+    prop = f"--temporal={temporal}" if temporal else f"--invariant={invariant}"
+    args = ["verify", f"--main={main}", prop, SPEC]
     if backend == "tlc":
         args.insert(1, "--backend=tlc")
     else:
@@ -136,7 +137,7 @@ def bounded(backend, main, invariant, expect, steps, timeout):
     _, out, secs = quint(args, timeout)
     print(out)
     got = verdict(out)
-    print(f"{backend}  {main}  {invariant}  {got}  {secs:.0f} s")
+    print(f"{backend}  {main}  {temporal or invariant}  {got}  {secs:.0f} s")
     return got != expect
 
 
@@ -147,6 +148,8 @@ def main():
     ap.add_argument("--samples", type=int, default=100000, help="traces per simulator run")
     ap.add_argument("--main", default="tiny", help="instance for apalache and tlc, e.g. tiny or probe_no_halt")
     ap.add_argument("--invariant", default="safety", help="invariant for apalache and tlc, e.g. safety or witnessHalt")
+    ap.add_argument("--temporal", default=None,
+                    help="temporal property instead of an invariant, e.g. haltPropagates (tlc)")
     ap.add_argument("--expect", choices=["holds", "violated"], default="holds",
                     help="expected outcome for apalache and tlc (violated for a probe or a witness)")
     ap.add_argument("--timeout", type=int, default=None, help="seconds per run")
@@ -155,7 +158,7 @@ def main():
     if a.mode == "simulate":
         failures = simulate(a.steps or 40, a.samples, a.timeout or 1800)
     else:
-        failures = bounded(a.mode, a.main, a.invariant, a.expect, a.steps or 5, a.timeout)
+        failures = bounded(a.mode, a.main, a.invariant, a.temporal, a.expect, a.steps or 5, a.timeout)
     sys.exit(1 if failures else 0)
 
 

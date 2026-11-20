@@ -54,11 +54,20 @@ Probes, each expected to violate `safety`:
 | `grant_no_right` | A key is granted to a passport without the read right |
 | `accept_old_data_gen` | Data of an older generation is accepted |
 | `no_prune` | A new checkpoint does not remove revoked passports from the cache |
+| `halted_silent` | A halted node does not answer a sender of its generation with the proof; violates `haltPropagates`, not `safety` |
 
 Some defects need a long, specific sequence that random simulation rarely produces. Such a
 probe also has a fixed scenario in [`scenarios.qnt`](scenarios.qnt) (`quint test`): the
 correct model must refuse the step, and the broken one must violate `safety` after it.
-`accept_old_data_gen` is checked this way.
+`accept_old_data_gen` is checked this way, and so is the case that led to the halt rule of
+R-MEM-6: a proof dropped as belonging to a future generation comes back from a halted peer once
+the node has moved to that generation (`halted_silent` removes that answer).
+
+Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node
+eventually halts too or leaves that generation (S8, R-MEM-6, R-MEM-10). It assumes weak fairness
+of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
+the proof. The probe `halted_silent` (instance `tiny`) removes that answer, and the property must
+then fail. Liveness is checked with TLC and is a long run.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
 the violation shows that halts, permanent halts, accepted data, key grants, root changes, and
@@ -76,6 +85,8 @@ python3 models/membership/check.py apalache --steps 5   # bounded, instance tiny
 python3 models/membership/check.py tlc --main tiny      # exhaustive, long run
 python3 models/membership/check.py apalache --main probe_no_halt --expect violated
 python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
+python3 models/membership/check.py tlc --main tiny --temporal haltPropagates
+python3 models/membership/check.py tlc --main probe_halted_silent --temporal haltPropagates --expect violated
 ```
 
 `--main` and `--invariant` select any instance and invariant, so probes and witnesses can be

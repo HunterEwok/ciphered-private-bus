@@ -637,6 +637,7 @@ distinguishes channels by it but does not know which channel it is.
 > removed reader does not receive the new key. When a device leaves the readers, the source marks every
 > own channel that has a key for rotation in the same event and persists the mark (R-CORE-5, R-CORE-7):
 > after a reboot it no longer knows whom it granted the key, so the condition cannot be recomputed.
+> While the mark is set, the source grants the marked key to no one; a grant waits for the new key.
 > *Serves:* S5. *Verified by:* model, Tamarin.
 
 > **R-CH-6.** The source grants the current channel key to a new reader. With it the reader gains access
@@ -665,7 +666,8 @@ distinguishes channels by it but does not know which channel it is.
 > publication only under a key it holds, and only with a number greater than its highest, or with a
 > number in the window [floor, highest] if it does not currently hold that publication. The floor is the
 > lowest number among the retained publications of the channel (R-CH-11); at depth 0 there is no
-> window. A rebooted recipient thus refills its retained publications, and a repeat of an already
+> window, and a publication of depth 0 is accepted only as a new one. A rebooted recipient thus
+> refills its retained publications, and a repeat of an already
 > accepted one changes nothing, as in the DDS/RTPS reader history cache [DDS-RTPS]. These values change
 > only after full verification and decryption. A publication under a key the recipient does not hold is
 > dropped, changes no state, and triggers one key request per channel (R-CH-18). Whoever sends or
@@ -678,8 +680,11 @@ distinguishes channels by it but does not know which channel it is.
 > **R-CH-10.** Channel retention is set by a single number in the publication header, the depth: from 0
 > to the profile limit. There are no separate modes: "no retention" is depth 0, "latest" is depth 1,
 > "log of N" is depth N. At depth 1 or more, a publication without data and without a blob clears the
-> channel at the recipient and at the relay. The depth of the latest accepted publication of the channel
-> governs: when it decreases, the excess old publications are deleted immediately.
+> channel at the recipient and at the relay. A clearing publication accepted in the window clears the
+> publications up to its own number, and the floor moves above it. A clearing publication and a
+> publication of depth 0 are never retained. The depth of the latest accepted publication of the channel
+> governs: when it decreases, the excess old publications are deleted immediately; the depth of a
+> publication accepted in the window does not change it.
 > *Serves:* S12. *Verified by:* model.
 
 > **R-CH-11.** At depth N ≥ 1 the source, the recipient, and the relay retain the N latest publications
@@ -974,7 +979,8 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 > accepted root change record; for its own channels, the key generation, the publication number, and the
 > rotation mark (R-CH-5); the
 > channel keys the node holds as source or reader, and for each of them the highest accepted generation
-> and number and the window floor (R-CH-9); the private sealing keys of the current epochs; the halt
+> and number, the window floor (R-CH-9), and the depth of the latest accepted publication (R-CH-10);
+> the private sealing keys of the current epochs; the halt
 > proof. The device, presence, and root keys are stored by the host (R-KEY-1).
 > *Serves:* S6, S12. *Verified by:* simulator with power loss.
 

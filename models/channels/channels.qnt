@@ -6,7 +6,7 @@
 // Scope: one source and one channel; the channel key and its rotation, key
 // grants, publication numbers reserved in blocks, the recipient's window and
 // retention depth, the clearing publication, and reboots of the source and the
-// readers. Requirements: R-CH-5..11, R-CH-13, R-CORE-5, R-REL-11; properties
+// readers. Requirements: R-CH-5..13, R-CORE-5, R-REL-11; properties
 // S5, S12, S16 (grant side).
 //
 // Abstractions:
@@ -27,9 +27,10 @@
 //   it accepts the next one (R-CH-7 with no unprocessed publications left).
 // - Data, blobs, padding, and channel 0 are not modelled; a publication is
 //   either data or the clearing publication without data.
-// - Key requests (R-CH-18) and the holder's resend on hello (R-CH-11) only
-//   speed up delivery; in the pool every grant and publication is always
-//   available, so they add no behaviour to the safety model.
+// - Key requests (R-CH-18), the source's own retained publications, and the
+//   holder's resend on hello (R-CH-11) only speed up delivery; in the pool
+//   every grant and publication is always available, so they add no
+//   behaviour to the safety model.
 module channels {
   // ---------------------------------------------------------------- parameters
   const DEVICES: Set[str]   // possible readers (the source is not one of them)
@@ -52,7 +53,6 @@ module channels {
     granted: Set[str],     // readers granted the current key
     nextNo: int,           // next publication number to hand out
     reserved: int,         // persisted: upper bound of the reserved block of numbers
-    retained: Set[Pub],    // own publications in memory (R-CH-11)
     mustRotate: bool,      // persisted: the key must be rotated before the next publication
   }
 
@@ -90,7 +90,7 @@ module channels {
     if (MUTANT == "no_trim") s else s.filter(p => s.filter(q => q.no > p.no).size() < n)
 
   pure def initSource: Source = {
-    gen: 0, kid: 0, keyOk: false, granted: Set(), nextNo: 1, reserved: 0, retained: Set(), mustRotate: false,
+    gen: 0, kid: 0, keyOk: false, granted: Set(), nextNo: 1, reserved: 0, mustRotate: false,
   }
   pure def initReader: Reader = { gen: 0, kid: 0, hiGen: 0, hiNo: 0, floor: 1, depth: 0, retained: Set() }
 
@@ -168,8 +168,11 @@ module channels {
   }
 
   // Grant the current key to a reader (R-CH-6, R-CH-13), also again.
+  // While the rotation mark is set the marked key is granted to no one: the
+  // grant waits for the new key (R-CH-5).
   action sourceGrantTo(d: str): bool = all {
     source.keyOk,
+    not(source.mustRotate) or MUTANT == "grant_marked",
     val allowed = (members.contains(d) or MUTANT == "grant_removed") and (not(NO_READ.contains(d)) or MUTANT == "grant_no_read")
     all {
       allowed,
@@ -177,7 +180,8 @@ module channels {
       val bad = not(members.contains(d)) or NO_READ.contains(d)
       commitWith({ ...source, granted: source.granted.union(Set(d)) }, readers, members,
         { ...pool, grants: pool.grants.union(Set({ gen: source.gen, kid: source.kid, reader: d })) },
-        if (bad) Set("grantsToReaders") else Set(), Set()),
+        (if (bad) Set("grantsToReaders") else Set()).union(if (source.mustRotate) Set("noMarkedGrant") else Set()),
+        Set()),
     },
   }
 
@@ -191,12 +195,11 @@ module channels {
     // Reserve the next block before handing out a number beyond the last one.
     val reserved = if (no > source.reserved) no + BLOCK - 1 else source.reserved
     val p = { gen: source.gen, kid: source.kid, no: no, depth: depth, empty: empty }
-    val kept = if (depth == 0 or empty) Set() else trim(source.retained.union(Set(p)), depth)
     // R-CH-8: publication numbers increase strictly over the device key's life.
     val dup = pool.pubs.exists(q => q.no >= no)
     // R-CH-5, S5: nobody outside the readers holds the key a publication is made under.
     val leak = pool.grants.exists(x => x.kid == source.kid and not(members.contains(x.reader)))
-    commitWith({ ...source, nextNo: no + 1, reserved: reserved, retained: kept }, readers, members,
+    commitWith({ ...source, nextNo: no + 1, reserved: reserved }, readers, members,
       { ...pool, pubs: pool.pubs.union(Set(p)) },
       (if (dup) Set("uniqueNumbers") else Set()).union(if (leak) Set("rotateOnRemove") else Set()),
       if (empty and depth > 0) Set("clear") else Set()),
@@ -213,15 +216,15 @@ module channels {
 
   // Reboot of the source (R-CORE-5): the generation, the block bound, and the
   // rotation mark survive; the key itself may not; the memory is lost,
-  // including the retained publications and the readers granted the key.
+  // including the readers granted the key.
   action sourceReboot = {
     nondet keep = Set(false, true).oneOf()
     val start = if (MUTANT == "no_block_skip") source.reserved - BLOCK + 1 else source.reserved + 1
     val g = if (MUTANT == "gen_not_persisted" and source.gen > 0) source.gen - 1 else source.gen
     commitWith({ ...source, gen: g, keyOk: keep and source.keyOk, granted: Set(),
                  mustRotate: source.mustRotate and MUTANT != "mark_not_persisted",
-                 nextNo: if (start < 1) 1 else start, retained: Set() },
-      readers, members, pool, Set(), Set("sourceReboot"))
+                 nextNo: if (start < 1) 1 else start },
+      readers, members, pool, Set(), Set())
   }
 
   // ------------------------------------------------------------------ readers
@@ -244,7 +247,9 @@ module channels {
     val r = readers.get(d)
     val haveKey = (r.kid != 0 and p.kid == r.kid) or MUTANT == "accept_without_key"
     val isNew = p.no > r.hiNo
-    val inWindow = r.depth > 0 and r.floor <= p.no and p.no <= r.hiNo and not(r.retained.contains(p))
+    // A publication of depth 0 has no window and is never accepted late.
+    val inWindow = r.depth > 0 and (p.depth > 0 or MUTANT == "late_clear_kept")
+      and r.floor <= p.no and p.no <= r.hiNo and not(r.retained.contains(p))
     if (not(haveKey) or not(isNew or inWindow))
       setReader(d, r, Set(), Set())
     else if (isNew) {
@@ -256,8 +261,15 @@ module channels {
       // Accepted only under a key the reader holds (R-CH-9).
       setReader(d, r2, if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set(),
         Set("accept").union(if (p.depth < r.depth and not(cleared)) Set("shrink") else Set()))
+    } else if (p.empty and MUTANT != "late_clear_kept") {
+      // A late clearing publication clears everything up to its number, and
+      // the floor moves above it, so nothing older refills the window
+      // (R-CH-9, R-CH-10).
+      val r2 = { ...r, retained: r.retained.filter(q => q.no > p.no), floor: p.no + 1 }
+      setReader(d, r2, if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set(), Set("lateClear"))
     } else {
       // A publication in the window that the reader does not hold: refill.
+      // Only the depth of the latest publication governs (R-CH-10).
       val kept = trim(r.retained.union(Set(p)), r.depth)
       val r2 = { ...r, retained: kept, floor: minNo(kept, r.floor),
                  hiNo: if (MUTANT == "refill_moves_high") p.no else r.hiNo }
@@ -297,26 +309,29 @@ module channels {
   val rotateOnRemove = not(broken.contains("rotateOnRemove"))       // R-CH-5, S5
   val grantsToReaders = not(broken.contains("grantsToReaders"))     // R-CH-13, S5
   val acceptUnderHeldKey = not(broken.contains("acceptUnderHeldKey")) // R-CH-9
+  val noMarkedGrant = not(broken.contains("noMarkedGrant"))         // R-CH-5
 
-  // R-CH-10, R-CH-11: a reader retains at most `depth` publications, all of
-  // them in its window and with distinct numbers; the source retains at most
-  // the depth of its latest publication.
+  // R-CH-10, R-CH-11, R-CH-12: a reader retains at most `depth`
+  // publications, all of them in its window, with distinct numbers, and none
+  // of them a clearing publication or one of depth 0.
   val retention = DEVICES.forall(d =>
     val r = readers.get(d)
     r.retained.size() <= r.depth
       and r.retained.forall(p => r.floor <= p.no and p.no <= r.hiNo)
-      and r.retained.forall(p => r.retained.forall(q => p.no == q.no implies p == q)))
+      and r.retained.forall(p => r.retained.forall(q => p.no == q.no implies p == q))
+      and r.retained.forall(p => not(p.empty) and p.depth > 0))
 
   // R-CH-13: a device without the read right never holds a channel key.
   val noReadNoKey = NO_READ.forall(d => readers.get(d).kid == 0)
 
   val safety = freshness and uniqueNumbers and uniqueKeys and rotateOnRemove and grantsToReaders
-    and acceptUnderHeldKey and retention and noReadNoKey
+    and acceptUnderHeldKey and noMarkedGrant and retention and noReadNoKey
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.
   val witnessAccept = not(seen.contains("accept"))
   val witnessRefill = not(seen.contains("refill"))
+  val witnessLateClear = not(seen.contains("lateClear"))
   val witnessClear = not(seen.contains("clear"))
   val witnessShrink = not(seen.contains("shrink"))
   val witnessRotateAfterRemove = not(seen.contains("rotateAfterRemove"))

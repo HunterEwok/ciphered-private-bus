@@ -343,7 +343,9 @@ The `blob` field:
 | 4 | `pad` | bstr | Optional: absent when its length would be zero. Zero bytes. The length of `data` plus `pad` equals a padding bucket and does not exceed 4096: the largest bucket equals the largest data. A publication with a greater length or with a non-zero padding byte is rejected |
 
 Largest publication: about 4.3 KiB. The retention depth of a channel is set by the latest accepted
-publication: when the depth decreases, surplus older publications are deleted immediately. A publication
+publication: when the depth decreases, surplus older publications are deleted immediately. A clearing
+publication that arrives late, in the window, clears the publications up to its number; a publication of
+depth 0 is accepted only as a new one, and neither is retained (R-CH-10). A publication
 under a key the recipient does not hold is dropped without a state change and triggers one key request
 per channel. Whoever sends or forwards a grant to a reader sends the retained publications of that
 channel under that key immediately after it, so what was dropped arrives again.

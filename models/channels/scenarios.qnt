@@ -13,6 +13,7 @@ module scenarios {
   val p1 = { gen: 1, kid: 1, no: 1, depth: 2, empty: false }
   val p2 = { gen: 1, kid: 1, no: 2, depth: 2, empty: false }
   val p3 = { gen: 1, kid: 1, no: 3, depth: 1, empty: false }
+  val p4 = { gen: 1, kid: 1, no: 4, depth: 2, empty: false }
 
   // A rebooted reader refills its window from older publications and keeps
   // its highest number (R-CH-9, S12).
@@ -59,6 +60,37 @@ module scenarios {
       .expect(readers.get("a").retained == Set() and safety)
       .then(readerPub("a", p1))
       .expect(readers.get("a").retained == Set() and safety)
+
+  // A clearing publication that arrives late clears the window up to its
+  // number and is not retained; a late publication of depth 0 is dropped
+  // (R-CH-9, R-CH-10, R-CH-12).
+  run lateClearTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(readerGrant("a", g1))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, true))
+      .then(sourcePublishWith(0, false))
+      .then(sourcePublishWith(2, false))
+      .then(readerPub("a", p1))
+      .then(readerPub("a", p4))
+      .expect(readers.get("a").retained == Set(p1, p4) and safety)
+      .then(readerPub("a", { gen: 1, kid: 1, no: 3, depth: 0, empty: false }))
+      .expect(readers.get("a").retained == Set(p1, p4) and safety)
+      .then(readerPub("a", { gen: 1, kid: 1, no: 2, depth: 2, empty: true }))
+      .expect(readers.get("a").retained == Set(p4) and readers.get("a").floor == 3 and safety)
+      .then(readerPub("a", p1))
+      .expect(readers.get("a").retained == Set(p4) and safety)
+
+  // While the rotation mark is set, the marked key is granted to no one
+  // (R-CH-5).
+  run noMarkedGrantTest =
+    init
+      .then(sourceRotate)
+      .then(sourceEpoch)
+      .then(sourceGrantTo("a"))
+      .fail()
 
   // After a reader leaves, the source cannot publish under the old key, even
   // after a reboot that keeps the key (R-CH-5, R-CORE-5).
@@ -119,6 +151,24 @@ module scenarios_probe_empty_no_clear {
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, true))
       .then(readerPub("a", { gen: 1, kid: 1, no: 1, depth: 2, empty: false }))
+      .then(readerPub("a", { gen: 1, kid: 1, no: 2, depth: 2, empty: true }))
+      .expect(not(safety))
+}
+
+module scenarios_probe_late_clear_kept {
+  import channels(DEVICES = Set("a", "b"), NO_READ = Set(), LATE = Set(), MAX_GEN = 2, MAX_NO = 4,
+                  MAX_DEPTH = 2, BLOCK = 2, MUTANT = "late_clear_kept").* from "./channels"
+
+  run lateClearKeptViolatesSafetyTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(readerGrant("a", { gen: 1, kid: 1, reader: "a" }))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, true))
+      .then(sourcePublishWith(2, false))
+      .then(readerPub("a", { gen: 1, kid: 1, no: 1, depth: 2, empty: false }))
+      .then(readerPub("a", { gen: 1, kid: 1, no: 3, depth: 2, empty: false }))
       .then(readerPub("a", { gen: 1, kid: 1, no: 2, depth: 2, empty: true }))
       .expect(not(safety))
 }

@@ -15,8 +15,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   witnesses, a check script, and a CI job that runs the simulator at the CI sizes.
 - Quint model of channel keys and retention (`models/channels/`): key rotation and grants,
   publication numbers reserved in blocks, the recipient's window and retention depth, the clearing
-  publication, and reboots, with a relay that behaves arbitrarily; twelve probes, witnesses, fixed
-  scenarios, and a CI job. `models/run-tlc.ps1` runs TLC for any model folder.
+  publication, and reboots, with a relay that behaves arbitrarily; fourteen probes, witnesses, fixed
+  scenarios, an inductive invariant that Apalache proves in CI for two devices, and CI jobs.
+  `models/run-tlc.ps1` and `models/run-inductive.ps1` run TLC and the inductive proof for any model
+  folder.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a
@@ -45,6 +47,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   in the same event and persists the mark (R-CH-5, R-CORE-5). Reason: the channels model showed that
   a source that rebooted with its key intact forgot whom it had granted the key and published under it
   to a removed reader.
+- Specification: a clearing publication that arrives late, inside the window, clears the publications
+  up to its number and moves the floor above it; a publication of depth 0 is accepted only as a new
+  one; neither is ever retained (R-CH-9, R-CH-10). While the rotation mark is set, the source grants
+  the marked key to no one (R-CH-5). A reader persists the depth of its latest accepted publication
+  (R-CORE-5), which the refill after a reboot needs. Reason: a review of the channels model.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

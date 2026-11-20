@@ -6,7 +6,10 @@
 `safety` must hold on every checked instance, every probe must violate
 `safety`, every witness the simulator reaches must be violated, and the fixed
 scenarios in scenarios.qnt must pass. Seeds are fixed, so a run is
-reproducible. Long runs use models/run-tlc.ps1 and models/run-inductive.ps1.
+reproducible. With --inductive INSTANCE it proves `safety` for all reachable
+states with Apalache instead, from the inductive invariant in inductive.qnt
+(three obligations: init implies IndInv, IndInv and a step imply IndInv, IndInv
+implies safety). Long runs use models/run-tlc.ps1 and models/run-inductive.ps1.
 """
 
 import argparse
@@ -17,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -27,9 +31,12 @@ CHECKED = ["small", "tiny"]
 # after a reboot) are shown reachable by the fixed scenarios.
 SIM_WITNESSES = ["witnessAccept", "witnessClear", "witnessRotateAfterRemove"]
 # Probes whose defect needs a long specific sequence are checked by a scenario.
-SCENARIO_PROBES = ["empty_no_clear", "refill_moves_high", "no_trim"]
+SCENARIO_PROBES = ["empty_no_clear", "refill_moves_high", "no_trim", "late_clear_kept"]
 SCENARIOS = ["scenarios"] + [f"scenarios_probe_{p}" for p in SCENARIO_PROBES]
 SEED = "0x5eed"
+# The Apalache version is pinned with the other tools in tools/versions/versions.toml.
+with open(HERE.parents[1] / "tools" / "versions" / "versions.toml", "rb") as _f:
+    APALACHE = tomllib.load(_f)["apalache"]["version"]
 
 
 def model_hash():
@@ -54,13 +61,39 @@ def verdict(output):
     return "error"
 
 
+def inductive(main, timeout):
+    """The three obligations of the inductive invariant (R-VER-3)."""
+    checks = [
+        ("init implies IndInv", "modelInit", "IndInv", 0),
+        ("IndInv and step imply IndInv", "indInit", "IndInv", 1),
+        ("IndInv implies safety", "indInit", "modelSafety", 0),
+    ]
+    failures = 0
+    for name, init, inv, steps in checks:
+        _, out, secs = quint(["verify", f"--main={main}", f"--init={init}", "--step=modelStep", f"--invariant={inv}",
+                              f"--max-steps={steps}", f"--apalache-version={APALACHE}", "inductive.qnt"], timeout)
+        got = verdict(out)
+        ok = got == "holds"
+        failures += not ok
+        print(f"{'pass' if ok else 'FAIL'}  {main:10} {name:30} {got:9} {secs:7.0f} s")
+        if not ok:
+            print(out, file=sys.stderr)
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--steps", type=int, default=40)
     ap.add_argument("--samples", type=int, default=100000)
     ap.add_argument("--timeout", type=int, default=1800)
+    ap.add_argument("--inductive", metavar="INSTANCE", default=None,
+                    help="prove safety from the inductive invariant instead, e.g. tiny_ind")
     a = ap.parse_args()
     print(f"model {model_hash()}")
+    if a.inductive:
+        # The invariant lives outside the model, so it gets a hash of its own.
+        print(f"inductive invariant {hashlib.sha256((HERE / 'inductive.qnt').read_bytes()).hexdigest()[:12]}")
+        sys.exit(1 if inductive(a.inductive, a.timeout) else 0)
     runs = [(m, "safety", "holds") for m in CHECKED]
     runs += [("probe_" + p, "safety", "violated") for p in CHECKS["probes"] if p not in SCENARIO_PROBES]
     runs += [("small", w, "violated") for w in SIM_WITNESSES]

@@ -2,8 +2,8 @@
 # Copyright (C) 2026 HunterEwok
 
 # State machine model checks at the CI sizes (R-VER-2, R-VER-3): safety holds,
-# every probe fires, every witness is reached, and the inductive invariant
-# proves safety for every reachable state of the instance tiny_ind.
+# every probe fires, every witness is reached, and the inductive invariants
+# prove safety for every reachable state of the instances tiny_ind.
 
 name: models
 
@@ -77,3 +77,21 @@ jobs:
         run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
       - name: Simulate safety, probes, and witnesses; run the scenarios
         run: python3 models/channels/check.py
+
+  channels-inductive:
+    name: channels (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        run: |
+          java -version
+          python3 models/channels/check.py --inductive tiny_ind

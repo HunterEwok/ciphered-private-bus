@@ -2,12 +2,44 @@
   "tlcInstance": "tiny",
   "witnessInstance": "tiny",
   "probes": [
-    "no_rotate_on_remove", "mark_not_persisted", "grant_removed", "grant_no_read", "no_block_skip",
-    "gen_not_persisted", "accept_old_grant", "accept_without_key", "empty_no_clear", "refill_moves_high",
-    "high_not_persisted", "no_trim"
+    "no_rotate_on_remove",
+    "mark_not_persisted",
+    "grant_removed",
+    "grant_no_read",
+    "no_block_skip",
+    "gen_not_persisted",
+    "accept_old_grant",
+    "accept_without_key",
+    "empty_no_clear",
+    "refill_moves_high",
+    "high_not_persisted",
+    "no_trim",
+    "late_clear_kept",
+    "grant_marked"
   ],
   "witnesses": [
-    "witnessAccept", "witnessRefill", "witnessClear", "witnessShrink", "witnessRotateAfterRemove",
+    "witnessAccept",
+    "witnessRefill",
+    "witnessLateClear",
+    "witnessClear",
+    "witnessShrink",
+    "witnessRotateAfterRemove",
     "witnessRefillAfterReboot"
-  ]
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "steps": [
+      "stepEnvRemove",
+      "stepEnvJoin",
+      "stepSourceRotate",
+      "stepSourceGrant",
+      "stepSourcePublish",
+      "stepSourceEpoch",
+      "stepSourceReboot",
+      "stepReaderGrant",
+      "stepReaderPub",
+      "stepReaderReboot"
+    ]
+  }
 }

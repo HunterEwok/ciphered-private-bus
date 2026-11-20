@@ -27,7 +27,8 @@ forge (R-REL-11). The header of `channels.qnt` lists every abstraction.
 | `rotateOnRemove` | R-CH-5 | S5: no device outside the readers holds the key of a new publication |
 | `grantsToReaders` | R-CH-13 | keys are granted only to valid readers with the read right |
 | `acceptUnderHeldKey` | R-CH-9 | a publication is accepted only under a key the reader holds |
-| `retention` | R-CH-10, R-CH-11 | at most `depth` retained publications, all in the window, distinct numbers |
+| `noMarkedGrant` | R-CH-5 | while the rotation mark is set, the marked key is granted to no one |
+| `retention` | R-CH-10, R-CH-11, R-CH-12 | at most `depth` retained publications, all in the window, distinct numbers, none of them a clearing publication or one of depth 0 |
 | `noReadNoKey` | R-CH-13 | a device without the read right never holds a key |
 
 Step properties are checked by a monitor when the step is taken, as in the membership model.
@@ -48,26 +49,59 @@ Probes, each expected to violate `safety`:
 | `refill_moves_high` | A refill from the window moves the highest number back |
 | `high_not_persisted` | A reader loses its highest number in a reboot |
 | `no_trim` | A reader retains more publications than the depth |
+| `late_clear_kept` | A late clearing publication, or one of depth 0, is retained by a refill |
+| `grant_marked` | The source grants a key marked for rotation |
 
-`empty_no_clear`, `refill_moves_high`, and `no_trim` need a long specific sequence and are checked by
-fixed scenarios in [`scenarios.qnt`](scenarios.qnt), which also show that refill after a reboot,
-shrinking the depth, clearing, and rotation after a removal are reachable with `safety` intact.
+`empty_no_clear`, `refill_moves_high`, `no_trim`, and `late_clear_kept` need a long specific sequence
+and are checked by fixed scenarios in [`scenarios.qnt`](scenarios.qnt), which also show that refill
+after a reboot, shrinking the depth, clearing, a late clearing publication, and rotation after a
+removal are reachable with `safety` intact.
+
+A reader persists the depth of its latest accepted publication with its window (R-CORE-5): after a
+reboot it is what lets the window refill. Losing it would only stop the refill, which is liveness, not
+safety, so there is no probe for it; the scenario `refillAfterRebootTest` and the witness
+`witnessRefillAfterReboot` show that the refill after a reboot happens.
 
 The model found a gap in the specification: a source that rebooted with its key intact no longer
 knew whom it had granted the key, and published under it to a device that had left the readers. The
 source now persists a rotation mark set in the same event in which a device leaves (R-CH-5,
-R-CORE-5); the probe `mark_not_persisted` removes it.
+R-CORE-5); the probe `mark_not_persisted` removes it. A review of the model found a second gap: a
+clearing publication or one of depth 0 that arrived late, inside the window, was retained by a refill.
+A late clearing publication now clears the window up to its number and moves the floor above it, and a
+publication of depth 0 is accepted only as a new one (R-CH-9, R-CH-10).
+
+## Inductive invariant
+
+[`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`. Apalache proves the same three
+obligations as for the membership model: the initial state satisfies `IndInv`; one step from any state
+of the bounded types that satisfies `IndInv` leads to such a state; and `IndInv` implies `safety`.
+
+Besides the bounds of every variable and `broken` staying empty, `IndInv` states these lemmas: a key's
+identity equals its generation, and the number of keys made equals the source's generation; a key is
+held only from generation 1; every publication and grant in the pool is at or below the source's
+generation, and every publication number is below the next number and within the reserved block; the
+pool and every reader's retained set have distinct numbers, and what a reader retains is in the pool;
+and while the key may be used (held and not marked), every grant of it went to a current reader. The
+last lemma is what makes `rotateOnRemove` follow, and it needs the persisted rotation mark.
+
+The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the size of `small`)
+for a long run.
 
 ## Running
 
 ```sh
-python3 models/channels/check.py    # CI run
+python3 models/channels/check.py                         # CI run
+python3 models/channels/check.py --inductive tiny_ind    # IndInv in CI
 ```
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -WorkDir <folder> -Java <path to java>
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -Probes -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels -Split -WorkDir <folder> -Java <path to java>
 ```
+
+`run-inductive.ps1` takes the instance (`-Main`, default `small_ind`) and the branches of the step from
+[`checks.json`](checks.json).
 
 ## Results
 

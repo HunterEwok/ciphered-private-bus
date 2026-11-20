@@ -107,5 +107,4 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channel
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-
-No run is recorded yet.
+| 2026-11-21 | `d4085bb6dda6` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 14 probes against `safety`, 7 witnesses on `tiny`, breadth-first until the first violation | 21 of 21 violated as expected, depth 8 to 15, 9 s to 78 s each |

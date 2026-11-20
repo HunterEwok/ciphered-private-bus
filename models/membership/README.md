@@ -78,6 +78,30 @@ Witnesses (`witness*`) state that a behaviour never happens and are expected to 
 the violation shows that halts, permanent halts, accepted data, key grants, root changes, and
 sends under revoked passports are all reachable, so `safety` does not hold vacuously.
 
+## Inductive invariant
+
+[`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv` for the model without
+the processed-record sets (`TRACK_RECV = false`, as in `tiny_tlc`). Apalache proves three
+obligations, which together show that `safety` holds in every reachable state, at any depth:
+
+1. the initial state satisfies `IndInv`;
+2. from every state of the bounded types that satisfies `IndInv`, reachable or not, one step
+   leads to a state that satisfies `IndInv`;
+3. every state that satisfies `IndInv` satisfies `safety`.
+
+Besides the state parts of `safety` and its monitor (`broken` stays empty), `IndInv` states
+the bounds of every variable and these lemmas: a permanent halt is a halt; a processed root
+change proof made the halt permanent and every other processed proof is of the current or an
+older generation; the Root's valid and revoked numbers are below its next number and its rights
+map covers exactly those numbers; and the honest checkpoints of one generation never set a bit
+again once it was cleared, which makes the honest-history part of `revokedIsRejected` follow
+from validity under the receiver's own checkpoint.
+
+The instances are `tiny_ind` (the size of `tiny_tlc`, checked in CI), `small_ind` (three
+devices, three numbers per generation), and `large_ind` (three devices, three generations,
+three numbers) for a long run. `convergence` is not covered: it reads the processed-record sets and
+is checked by the simulator.
+
 ## Running
 
 Requirements: Quint 0.33.1, pinned in [`models/package-lock.json`](../package-lock.json)
@@ -92,6 +116,8 @@ python3 models/membership/check.py apalache --main probe_no_halt --expect violat
 python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
 python3 models/membership/check.py tlc --main tiny_tlc --temporal haltPropagates
 python3 models/membership/check.py tlc --main probe_halted_silent --temporal haltPropagates --expect violated
+python3 models/membership/check.py inductive                    # IndInv, instance tiny_ind
+python3 models/membership/check.py inductive --main small_ind
 ```
 
 `--main` and `--invariant` select any instance and invariant, so probes and witnesses can be
@@ -117,6 +143,14 @@ instance against `safety` and on every witness against `tiny_tlc`, each within
 row must be violated; a run that reaches its time limit has no verdict and fails. The liveness
 probe `halted_silent` is not part of it.
 
+[`run-inductive.ps1`](run-inductive.ps1) checks the three obligations of the inductive
+invariant the same way, without Python, at below-normal priority, with progress output and a
+`summary.txt` that records the model hash and the hash of `inductive.qnt`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File models\membership\run-inductive.ps1 -WorkDir <folder> -Java <path to java> -Main large_ind
+```
+
 The simulator runs use a fixed seed, so a run is reproducible. Apalache and TLC runs beyond
 the CI sizes are long runs (R-VER-3): their outcome is recorded below with the number of
 states and the running time. An interrupted run is not a result (R-VER-5).
@@ -125,7 +159,8 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-20 | `00a4a3ce1fcb` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 12 probes against `safety`, 6 witnesses on `tiny_tlc`, breadth-first until the first violation | 18 of 18 violated as expected, depth 6 to 12, 10 to 30 s each |
+| 2026-11-20 | `00a4a3ce1fcb`, invariant `dccc4421dd8c` | Apalache 0.62.4, `check.py inductive --main tiny_ind` | `tiny_ind`: all reachable states | all three obligations hold: 16 s, 343 s, 34 s |
 
-No run of the current model is recorded yet. Earlier runs of a previous revision are not
-cited (R-VER-5); the CI run of this change and the long runs on the maintainer's machines
-will be entered here with the model hash.
+Earlier runs of a previous revision are not cited (R-VER-5). The exhaustive TLC run of
+`tiny_tlc` was stopped before it ended, for lack of disk space, and is not a result.

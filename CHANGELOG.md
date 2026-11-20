@@ -11,8 +11,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   requirements, Appendix B (wire format), Appendix C (CDDL schema and size analysis), and a
   glossary of terms and code identifiers.
 - Quint model of the membership state machine (`models/membership/`) with its safety
-  invariants, twelve probes, fixed scenarios, and non-vacuity witnesses, a check script,
-  and a CI job that runs the simulator at the CI sizes.
+  invariants, twelve safety probes and one liveness probe, fixed scenarios, and non-vacuity
+  witnesses, a check script, and a CI job that runs the simulator at the CI sizes.
+- Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
+  proves its safety for every reachable state, in CI for two devices and in long runs for
+  larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a
+  check of the TLA+ translation on every probe and witness) and `run-inductive.ps1`.
 - Version check for tools pinned outside Dependabot (`tools/versions/`): pull requests
   check that the pins agree with the files that use them; a weekly run fails when a newer
   stable release exists. Dependabot also watches the npm dependencies in `models/`.

@@ -11,6 +11,9 @@ Modes:
             reproducible.
   apalache  Bounded model checking of `safety` with Apalache.
   tlc       Exhaustive state exploration of `safety` with TLC.
+  inductive Proof of `safety` for all reachable states with Apalache, from the
+            inductive invariant in inductive.qnt: init implies IndInv, IndInv
+            and one step imply IndInv, and IndInv implies safety.
 
 Exit status 0 means every expectation was met. Each run prints the model hash that
 the results table in README.md records.
@@ -144,12 +147,45 @@ def bounded(backend, main, invariant, temporal, expect, steps, timeout):
     return got != expect
 
 
+def inductive(main, timeout):
+    """The three obligations of the inductive invariant (R-VER-3)."""
+    checks = [
+        ("init implies IndInv", "modelInit", "IndInv", 0),
+        ("IndInv and step imply IndInv", "indInit", "IndInv", 1),
+        ("IndInv implies safety", "indInit", "modelSafety", 0),
+    ]
+    failures = 0
+    for name, init, inv, steps in checks:
+        _, out, secs = quint(
+            [
+                "verify",
+                f"--main={main}",
+                f"--init={init}",
+                "--step=modelStep",
+                f"--invariant={inv}",
+                f"--max-steps={steps}",
+                f"--apalache-version={APALACHE}",
+                "inductive.qnt",
+            ],
+            timeout,
+        )
+        got = verdict(out)
+        ok = got == "holds"
+        failures += not ok
+        print(f"{'pass' if ok else 'FAIL'}  {main:10} {name:30} {got:9} {secs:7.0f} s")
+        if not ok:
+            print(out, file=sys.stderr)
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["simulate", "apalache", "tlc"])
+    ap.add_argument("mode", choices=["simulate", "apalache", "tlc", "inductive"])
     ap.add_argument("--steps", type=int, default=None, help="trace length (simulate: 40, apalache: 5)")
     ap.add_argument("--samples", type=int, default=100000, help="traces per simulator run")
-    ap.add_argument("--main", default="tiny_tlc", help="instance for apalache and tlc, e.g. tiny_tlc or probe_no_halt")
+    ap.add_argument("--main", default=None,
+                    help="instance for apalache and tlc (default tiny_tlc, e.g. probe_no_halt) "
+                         "or for inductive (default tiny_ind, or small_ind)")
     ap.add_argument("--invariant", default="safety", help="invariant for apalache and tlc, e.g. safety or witnessHalt")
     ap.add_argument("--temporal", default=None,
                     help="temporal property instead of an invariant, e.g. haltPropagates (tlc)")
@@ -158,10 +194,15 @@ def main():
     ap.add_argument("--timeout", type=int, default=None, help="seconds per run")
     a = ap.parse_args()
     print(f"model {model_hash()}")
+    if a.mode == "inductive":
+        # The invariant lives outside the model, so it gets a hash of its own.
+        print(f"inductive invariant {hashlib.sha256((HERE / 'inductive.qnt').read_bytes()).hexdigest()[:12]}")
     if a.mode == "simulate":
         failures = simulate(a.steps or 40, a.samples, a.timeout or 1800)
+    elif a.mode == "inductive":
+        failures = inductive(a.main or "tiny_ind", a.timeout)
     else:
-        failures = bounded(a.mode, a.main, a.invariant, a.temporal, a.expect, a.steps or 5, a.timeout)
+        failures = bounded(a.mode, a.main or "tiny_tlc", a.invariant, a.temporal, a.expect, a.steps or 5, a.timeout)
     sys.exit(1 if failures else 0)
 
 

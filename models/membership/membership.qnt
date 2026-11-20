@@ -31,6 +31,7 @@ module membership {
   const MAX_GEN: int      // highest root generation the recovery key may create
   const MAX_NO: int       // highest passport and checkpoint number per generation
   const MUTANT: str       // "none", or the name of a deliberate defect (R-VER-2)
+  const TRACK_RECV: bool  // record processed checkpoints, passports and root change records (for convergence only)
 
   // --------------------------------------------------------------------- types
   type Passport = { gen: int, no: int, dev: str, rights: int }
@@ -76,26 +77,24 @@ module membership {
     data: Set[Data],
   }
 
-  // A log entry records the receiver's checkpoint at the moment it accepted
-  // data from, or granted a key to, a device, together with the generation of
-  // the message and the rights of the passport the receiver relied on.
+  // An acceptance or a grant: the receiver's checkpoint at that moment, the
+  // generation of the message, and the rights of the passport it relied on.
   type Entry = { node: str, peer: str, ppNo: int, msgGen: int, rights: int, cp: Checkpoint, halted: bool }
-
-  type Snap = { gen: int, cp: Checkpoint, halted: bool, forever: bool }
 
   // ----------------------------------------------------------------- variables
   var nodes: str -> Node
   var root: Root
   var pool: Pool
-  var accepted: Set[Entry]     // data accepted by a node
-  var granted: Set[Entry]      // channel keys granted by a node
   var history: Set[Checkpoint] // ghost: checkpoints issued by the honest Root sequence
-  var prev: str -> Snap        // ghost: node state before the last step
+  // Monitor: properties of a single step (a transition, an acceptance, a
+  // grant) are checked when the step is taken, and the name of a violated one
+  // is added here. This keeps no copy of the previous state and no log of
+  // past acceptances, which would multiply the states TLC has to explore.
+  var broken: Set[str]
+  var seen: Set[str]           // ghost: "accept" and "grant" once they happened (witnesses)
 
   // ------------------------------------------------------------------- helpers
   pure def genesis(g: int): Checkpoint = { gen: g, no: 0, valid: Set(), nextNo: 1 }
-
-  pure def snap(n: Node): Snap = { gen: n.gen, cp: n.cp, halted: n.halted, forever: n.forever }
 
   pure def lexGt(g1: int, c1: int, g2: int, c2: int): bool =
     g1 > g2 or (g1 == g2 and c1 > c2)
@@ -126,28 +125,64 @@ module membership {
 
   pure def emptyPool: Pool = { cp: Set(), pp: Set(), rc: Set(), hp: Set(), data: Set() }
 
-  action commit(n2: str -> Node, r2: Root, p2: Pool, a2: Set[Entry], g2: Set[Entry], h2: Set[Checkpoint]): bool = all {
+  // Properties of one transition of one node, from a to b.
+  pure def stepProblems(a: Node, b: Node): Set[str] =
+    // S6, R-MEM-5: within one generation the checkpoint number never
+    // decreases, including across a reboot.
+    (if (b.gen > a.gen or (b.gen == a.gen and b.cp.no >= a.cp.no)) Set() else Set("noRollback"))
+    // S9, R-MEM-12: the generation never decreases.
+    .union(if (b.gen >= a.gen) Set() else Set("currentGeneration"))
+    // S8, R-MEM-9, R-MEM-13: only a root change record leaves the halted
+    // state, and a permanent halt is never left.
+    .union(if ((a.forever implies b.forever) and ((a.halted and not(b.halted)) implies b.gen > a.gen))
+             Set() else Set("haltIsSticky"))
+    // S8, R-MEM-9: a halted node accepts no checkpoint.
+    .union(if ((a.halted and b.gen == a.gen) implies b.cp == a.cp) Set() else Set("haltedIsInert"))
+
+  // S4, S5, R-VER-4: a passport the honest Root sequence revoked at or before
+  // the receiver's checkpoint. Passport numbers are never reused, so "revoked
+  // at checkpoint c" means: number below c.nextNo and not in c.valid.
+  pure def revokedBy(ppNo: int, c: Checkpoint): bool = ppNo < c.nextNo and not(c.valid.contains(ppNo))
+
+  // Properties of one acceptance or grant, checked against the honest
+  // checkpoints issued so far. Honest checkpoints are issued in order, so all
+  // those at or below an honest receiver checkpoint already exist.
+  pure def entryProblems(e: Entry, h: Set[Checkpoint], isGrant: bool): Set[str] =
+    // S4, S5, R-VER-4: not revoked by the honest sequence at or before the
+    // receiver's checkpoint; S4, R-MEM-2, R-MEM-12: valid under the receiver's
+    // own checkpoint, honest or not, and of the message's own generation.
+    (if ((not(h.contains(e.cp)) or h.forall(c => not(c.gen == e.cp.gen and c.no <= e.cp.no and revokedBy(e.ppNo, c))))
+         and e.msgGen == e.cp.gen and e.ppNo < e.cp.nextNo and e.cp.valid.contains(e.ppNo))
+       Set() else Set("revokedIsRejected"))
+    // S8, R-MEM-9: a halted node accepts no data and grants no key.
+    .union(if (e.halted) Set("haltedIsInert") else Set())
+    // R-CH-13: keys are granted only to passports with the read right, as
+    // the granting node saw them, so an equivocated passport cannot mask it.
+    .union(if (isGrant and e.rights != 1) Set("grantsNeedRead") else Set())
+
+  action commitWith(n2: str -> Node, r2: Root, p2: Pool, h2: Set[Checkpoint], extra: Set[str], tags: Set[str]): bool = all {
     nodes' = n2,
     root' = r2,
     pool' = p2,
-    accepted' = a2,
-    granted' = g2,
     history' = h2,
-    prev' = nodes.keys().mapBy(d => snap(nodes.get(d))),
+    broken' = broken.union(extra).union(DEVICES.fold(Set(), (acc, d) => acc.union(stepProblems(nodes.get(d), n2.get(d))))),
+    seen' = seen.union(tags),
   }
 
+  action commit(n2: str -> Node, r2: Root, p2: Pool, h2: Set[Checkpoint]): bool =
+    commitWith(n2, r2, p2, h2, Set(), Set())
+
   action setNode(d: str, n: Node, p2: Pool): bool =
-    commit(nodes.set(d, n), root, p2, accepted, granted, history)
+    commit(nodes.set(d, n), root, p2, history)
 
   // -------------------------------------------------------------- initial state
   action init = all {
     nodes' = DEVICES.mapBy(d => initNode),
     root' = initRoot,
     pool' = emptyPool,
-    accepted' = Set(),
-    granted' = Set(),
     history' = Set(),
-    prev' = DEVICES.mapBy(d => snap(initNode)),
+    broken' = Set(),
+    seen' = Set(),
   }
 
   // ------------------------------------------------------------- Root actions
@@ -166,7 +201,7 @@ module membership {
       { ...root, cpNo: root.cpNo + 1, nextNo: root.nextNo + 1, valid: v,
         rights: root.rights.put(root.nextNo, rights), revoked: root.revoked.union(replaces) },
       { ...pool, pp: pool.pp.union(Set(p)), cp: pool.cp.union(Set(c)) },
-      accepted, granted, history.union(Set(c))),
+      history.union(Set(c))),
   }
 
   action rootAdmit = {
@@ -197,7 +232,7 @@ module membership {
     val v = if (MUTANT == "keep_bit") root.valid else root.valid.exclude(Set(k))
     val c = rootCheckpoint(v, root.nextNo)
     commit(nodes, { ...root, cpNo: root.cpNo + 1, valid: v, revoked: root.revoked.union(Set(k)) },
-      { ...pool, cp: pool.cp.union(Set(c)) }, accepted, granted, history.union(Set(c))),
+      { ...pool, cp: pool.cp.union(Set(c)) }, history.union(Set(c))),
   }
 
   // Equivocation: a second, different checkpoint with an already used number.
@@ -209,7 +244,7 @@ module membership {
     val c2 = { ...c, valid: v.filter(x => x < c.nextNo) }
     all {
       c2 != c,
-      commit(nodes, root, { ...pool, cp: pool.cp.union(Set(c2)) }, accepted, granted, history),
+      commit(nodes, root, { ...pool, cp: pool.cp.union(Set(c2)) }, history),
     }
   }
 
@@ -217,7 +252,7 @@ module membership {
   action rootEquivocatePp = {
     nondet p = pool.pp.filter(p => p.gen == root.gen).oneOf()
     val p2 = { ...p, rights: 1 - p.rights }
-    commit(nodes, root, { ...pool, pp: pool.pp.union(Set(p2)) }, accepted, granted, history)
+    commit(nodes, root, { ...pool, pp: pool.pp.union(Set(p2)) }, history)
   }
 
   // ------------------------------------------------------ Recovery key actions
@@ -227,14 +262,14 @@ module membership {
     root.gen < MAX_GEN,
     val rc = { gen: root.gen + 1, key: 0 }
     commit(nodes, { ...initRoot, gen: root.gen + 1 },
-      { ...pool, rc: pool.rc.union(Set(rc)) }, accepted, granted, history),
+      { ...pool, rc: pool.rc.union(Set(rc)) }, history),
   }
 
   // Two root change records with one generation (L6).
   action recoveryEquivocate = {
     nondet rc = pool.rc.oneOf()
     val rc2 = { ...rc, key: 1 - rc.key }
-    commit(nodes, root, { ...pool, rc: pool.rc.union(Set(rc2)) }, accepted, granted, history)
+    commit(nodes, root, { ...pool, rc: pool.rc.union(Set(rc2)) }, history)
   }
 
   // ---------------------------------------------------------- Adversary actions
@@ -261,7 +296,7 @@ module membership {
   }
 
   action setNodeless(hp: Set[HaltProof]): bool =
-    commit(nodes, root, { ...pool, hp: hp }, accepted, granted, history)
+    commit(nodes, root, { ...pool, hp: hp }, history)
 
   // ------------------------------------------------------------- Node actions
   pure def halt(n: Node): Node = { ...n, halted: true }
@@ -270,7 +305,7 @@ module membership {
   action nodeRecvCp(d: str, c: Checkpoint): bool = {
     val n0 = nodes.get(d)
     val acceptOld = MUTANT == "accept_old_gen" and c.gen < n0.gen
-    val n = if (c.gen == n0.gen or acceptOld) { ...n0, recvCp: n0.recvCp.union(Set(c)) } else n0
+    val n = if (TRACK_RECV and (c.gen == n0.gen or acceptOld)) { ...n0, recvCp: n0.recvCp.union(Set(c)) } else n0
     if (n.forever or (n.halted and MUTANT != "halted_accepts"))
       setNode(d, n, pool)
     else if (c.gen != n.gen and not(acceptOld))
@@ -287,7 +322,7 @@ module membership {
   // Receive a passport (R-MEM-2, R-MEM-3, R-MEM-8).
   action nodeRecvPp(d: str, p: Passport): bool = {
     val n0 = nodes.get(d)
-    val n = if (p.gen == n0.gen) { ...n0, recvPp: n0.recvPp.union(Set(p)) } else n0
+    val n = if (TRACK_RECV and p.gen == n0.gen) { ...n0, recvPp: n0.recvPp.union(Set(p)) } else n0
     if (n.halted or n.forever)
       setNode(d, n, pool)
     else if (n.pps.exists(q => ppConflict(p, q)) and MUTANT != "no_halt")
@@ -301,7 +336,7 @@ module membership {
   // Receive a root change record (R-MEM-11, R-MEM-13).
   action nodeRecvRc(d: str, rc: RootChange): bool = {
     val n0 = nodes.get(d)
-    val n = if (rc.gen >= n0.gen) { ...n0, recvRc: n0.recvRc.union(Set(rc)) } else n0
+    val n = if (TRACK_RECV and rc.gen >= n0.gen) { ...n0, recvRc: n0.recvRc.union(Set(rc)) } else n0
     if (n.forever)
       setNode(d, n, pool)
     else if (rc.gen == n.gen and n.rc != rc.key and n.rc >= 0 and MUTANT != "rc_no_forever")
@@ -384,9 +419,8 @@ module membership {
       not(lexGt(m.gen, m.cpNo, n.gen, n.cp.no)),
       known != Set(),
       nondet p = known.oneOf()
-      commit(nodes, root, pool,
-        accepted.union(Set({ node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights,
-                             cp: n.cp, halted: n.halted })), granted, history),
+      val e = { node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights, cp: n.cp, halted: n.halted }
+      commitWith(nodes, root, pool, history, entryProblems(e, history, false), Set("accept")),
     }
   }
 
@@ -400,9 +434,8 @@ module membership {
         p.dev != d,
         p.rights == 1 or MUTANT == "grant_no_right",
         validUnder(p, n.cp),
-        commit(nodes, root, pool, accepted,
-          granted.union(Set({ node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights,
-                              cp: n.cp, halted: n.halted })), history),
+        val e = { node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, cp: n.cp, halted: n.halted }
+        commitWith(nodes, root, pool, history, entryProblems(e, history, true), Set("grant")),
       },
     }
   }
@@ -433,32 +466,16 @@ module membership {
 
   // ---------------------------------------------------------------- invariants
 
-  // S6, R-MEM-5: within one generation the checkpoint number never decreases,
-  // including across a reboot.
-  val noRollback = DEVICES.forall(d =>
-    val n = nodes.get(d)
-    val p = prev.get(d)
-    n.gen > p.gen or (n.gen == p.gen and n.cp.no >= p.cp.no))
+  // Step properties (see stepProblems and entryProblems).
+  val noRollback = not(broken.contains("noRollback"))
+  val haltIsSticky = not(broken.contains("haltIsSticky"))
+  val haltedIsInert = not(broken.contains("haltedIsInert"))
 
   // S9, R-MEM-12: a node holds only records of its current generation, and the
   // generation never decreases.
-  val currentGeneration = DEVICES.forall(d =>
+  val currentGeneration = not(broken.contains("currentGeneration")) and DEVICES.forall(d =>
     val n = nodes.get(d)
-    n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen) and n.gen >= prev.get(d).gen)
-
-  // S8, R-MEM-9: only a root change record leaves the halted state, and a
-  // permanent halt is never left.
-  val haltIsSticky = DEVICES.forall(d =>
-    val n = nodes.get(d)
-    val p = prev.get(d)
-    (p.forever implies n.forever) and ((p.halted and not(n.halted)) implies n.gen > p.gen))
-
-  // S8, R-MEM-9: a halted node accepts no checkpoint, data, or grant.
-  val haltedIsInert = DEVICES.forall(d =>
-    val n = nodes.get(d)
-    val p = prev.get(d)
-    (p.halted and n.gen == p.gen) implies n.cp == p.cp)
-    and accepted.forall(e => not(e.halted)) and granted.forall(e => not(e.halted))
+    n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen))
 
   // R-MEM-10: a node that processed a halt proof of its current generation is
   // halted, whatever checkpoint it is at.
@@ -477,34 +494,16 @@ module membership {
     n.halted or n.pps.forall(p =>
       validIn(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))))
 
-  // S4, S5, R-VER-4: no node accepts data from, or grants a key to, a passport
-  // that the honest Root sequence has revoked at or before the receiver's
-  // checkpoint. Passport numbers are never reused, so "revoked at checkpoint
-  // c" means: number below c.nextNo and not in c.valid.
-  def revokedBy(ppNo: int, c: Checkpoint): bool = ppNo < c.nextNo and not(c.valid.contains(ppNo))
+  // S4, S5, R-VER-4, R-MEM-2, R-MEM-12 (see entryProblems).
+  val revokedIsRejected = not(broken.contains("revokedIsRejected"))
 
-  def neverAfterRevocation(log: Set[Entry]): bool = log.forall(e =>
-    not(history.contains(e.cp)) or history.forall(c =>
-      not(c.gen == e.cp.gen and c.no <= e.cp.no and revokedBy(e.ppNo, c))))
-
-  // S4, R-MEM-2, R-MEM-12: every acceptance and grant relied on a passport of
-  // the message's own generation that is valid under the receiver's checkpoint
-  // at that moment, whether or not that checkpoint is honest.
-  def validAtReceiver(log: Set[Entry]): bool = log.forall(e =>
-    e.msgGen == e.cp.gen and e.ppNo < e.cp.nextNo and e.cp.valid.contains(e.ppNo))
-
-  val revokedIsRejected = neverAfterRevocation(accepted) and neverAfterRevocation(granted)
-    and validAtReceiver(accepted) and validAtReceiver(granted)
-
-  // R-CH-13: keys are granted only to passports with the read right.
-  // The rights are those of the passport the granting node relied on, so an
-  // equivocated passport with other rights cannot mask a defect.
-  val grantsNeedRead = granted.forall(e => e.rights == 1)
+  // R-CH-13 (see entryProblems).
+  val grantsNeedRead = not(broken.contains("grantsNeedRead"))
 
   // S7: two nodes that processed the same records are in the same state, with
   // one exception: a node that saw two conflicting records halted while the
   // other did not notice, and no halt proof has reached them yet.
-  val convergence = DEVICES.forall(a => DEVICES.forall(b =>
+  val convergence = not(TRACK_RECV) or DEVICES.forall(a => DEVICES.forall(b =>
     val x = nodes.get(a)
     val y = nodes.get(b)
     val same = x.recvCp == y.recvCp and x.recvPp == y.recvPp
@@ -526,7 +525,7 @@ module membership {
   // node that keeps talking to a halted peer is eventually answered (weak
   // fairness of nodeHearsHalted).
   temporal fairHearing = DEVICES.forall(d =>
-    weakFair(nodeHearsHalted(d), (nodes, root, pool, accepted, granted, history, prev)))
+    weakFair(nodeHearsHalted(d), (nodes, root, pool, history, broken, seen)))
 
   temporal haltReachesPeers = DEVICES.forall(d => 1.to(MAX_GEN).forall(g =>
     always((nodes.get(d).gen == g and haltedPeer(d, g)) implies
@@ -539,8 +538,8 @@ module membership {
   // behaviour is reachable, so the safety checks above are not vacuous.
   val witnessHalt = DEVICES.forall(d => not(nodes.get(d).halted))
   val witnessForever = DEVICES.forall(d => not(nodes.get(d).forever))
-  val witnessAccept = accepted == Set()
-  val witnessGrant = granted == Set()
+  val witnessAccept = not(seen.contains("accept"))
+  val witnessGrant = not(seen.contains("grant"))
   val witnessRootChange = DEVICES.forall(d => nodes.get(d).gen == 1)
   val witnessRevokedSends = not(pool.data.exists(m =>
     DEVICES.exists(d => revokedBy(m.ppNo, nodes.get(d).cp) and nodes.get(d).gen == m.gen)))

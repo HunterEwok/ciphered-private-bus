@@ -14,12 +14,17 @@ of data and key grants. The header of `membership.qnt` lists every abstraction.
 | Instance | Devices | Generations | Numbers per generation | Purpose |
 | --- | --- | --- | --- | --- |
 | `small` | 3 | 2 | 3 | Simulator runs in CI |
-| `tiny` | 2 | 2 | 2 | Simulator in CI; Apalache and TLC |
+| `tiny` | 2 | 2 | 2 | Simulator in CI |
+| `tiny_tlc` | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
 | `probe_*` | 3 | 2 | 3 | One deliberate defect each; `safety` must fail (R-VER-2) |
 
 ## Properties
 
-`safety` is the conjunction of the invariants below.
+`safety` is the conjunction of the invariants below. Properties of a single step (a node's
+transition, an acceptance, a grant) are checked by a monitor when the step is taken: a violated
+one adds its name to the variable `broken`, and the invariant states that its name is absent.
+This is equivalent to comparing each state with the previous one, but keeps neither a copy of
+the previous state nor a log of past acceptances, which would multiply the states TLC explores.
 
 | Invariant | Requirement | Property |
 | --- | --- | --- |
@@ -66,7 +71,7 @@ the node has moved to that generation (`halted_silent` removes that answer).
 Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node
 eventually halts too or leaves that generation (S8, R-MEM-6, R-MEM-10). It assumes weak fairness
 of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
-the proof. The probe `halted_silent` (instance `tiny`) removes that answer, and the property must
+the proof. The probe `halted_silent` (the size of `tiny_tlc`) removes that answer, and the property must
 then fail. Liveness is checked with TLC and is a long run.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
@@ -81,11 +86,11 @@ later for Apalache and TLC; Quint downloads its evaluator and Apalache on first 
 
 ```sh
 python3 models/membership/check.py simulate            # CI run, about 10 minutes
-python3 models/membership/check.py apalache --steps 5   # bounded, instance tiny
-python3 models/membership/check.py tlc --main tiny      # exhaustive, long run
+python3 models/membership/check.py apalache --steps 5   # bounded smoke check, instance tiny_tlc
+python3 models/membership/check.py tlc --main tiny_tlc  # exhaustive, long run
 python3 models/membership/check.py apalache --main probe_no_halt --expect violated
 python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
-python3 models/membership/check.py tlc --main tiny --temporal haltPropagates
+python3 models/membership/check.py tlc --main tiny_tlc --temporal haltPropagates
 python3 models/membership/check.py tlc --main probe_halted_silent --temporal haltPropagates --expect violated
 ```
 

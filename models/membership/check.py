@@ -55,9 +55,10 @@ PROBES = [
     "proof_needs_cp",
     "reboot_rollback",
     "grant_no_right",
-    "accept_old_data_gen",
     "no_prune",
 ]
+# Probes that random simulation rarely reaches are checked by a fixed scenario
+# in SCENARIOS instead: accept_old_data_gen, halted_silent.
 WITNESSES = [
     "witnessHalt",
     "witnessForever",
@@ -148,7 +149,7 @@ def main():
     ap.add_argument("mode", choices=["simulate", "apalache", "tlc"])
     ap.add_argument("--steps", type=int, default=None, help="trace length (simulate: 40, apalache: 5)")
     ap.add_argument("--samples", type=int, default=100000, help="traces per simulator run")
-    ap.add_argument("--main", default="tiny", help="instance for apalache and tlc, e.g. tiny or probe_no_halt")
+    ap.add_argument("--main", default="tiny_tlc", help="instance for apalache and tlc, e.g. tiny_tlc or probe_no_halt")
     ap.add_argument("--invariant", default="safety", help="invariant for apalache and tlc, e.g. safety or witnessHalt")
     ap.add_argument("--temporal", default=None,
                     help="temporal property instead of an invariant, e.g. haltPropagates (tlc)")

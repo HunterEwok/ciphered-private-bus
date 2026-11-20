@@ -9,7 +9,7 @@
 // change, even though the new Root reissued passport number 1 to the same
 // device (R-MEM-12).
 module scenarios {
-  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "none").* from "./membership"
+  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "none", TRACK_RECV = true).* from "./membership"
 
   val oldData = { src: "b", ppNo: 1, gen: 1, cpNo: 0 }
 
@@ -50,7 +50,7 @@ module scenarios {
 }
 
 module scenarios_probe_accept_old_data_gen {
-  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "accept_old_data_gen").* from "./membership"
+  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "accept_old_data_gen", TRACK_RECV = true).* from "./membership"
 
   val oldData = { src: "b", ppNo: 1, gen: 1, cpNo: 0 }
 
@@ -69,7 +69,7 @@ module scenarios_probe_accept_old_data_gen {
 
 // Without the answer of R-MEM-6 the dropped proof never comes back.
 module scenarios_probe_halted_silent {
-  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "halted_silent").* from "./membership"
+  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, MUTANT = "halted_silent", TRACK_RECV = true).* from "./membership"
 
   val proof = { kind: "pp", gen: 2, no: 1 }
 

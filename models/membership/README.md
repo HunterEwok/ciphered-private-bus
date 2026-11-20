@@ -58,7 +58,8 @@ sends under revoked passports are all reachable, so `safety` does not hold vacuo
 
 ## Running
 
-Requirements: Quint 0.33.1 (`npm install -g @informalsystems/quint@0.33.1`) and Java 17 or
+Requirements: Quint 0.33.1, pinned in [`models/package-lock.json`](../package-lock.json)
+(`npm ci` in `models/`, then put `models/node_modules/.bin` on the `PATH`), and Java 17 or
 later for Apalache and TLC; Quint downloads its evaluator and Apalache on first use.
 
 ```sh

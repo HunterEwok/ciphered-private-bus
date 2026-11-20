@@ -25,4 +25,5 @@ __pycache__/
 
 # Model checker output
 _apalache-out/
+node_modules/
 states/

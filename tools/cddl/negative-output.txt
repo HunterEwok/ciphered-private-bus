@@ -1,0 +1,19 @@
+Passport, 129 permits                    encoder refused
+Get root change with device              rejected
+Command lossy with credit                rejected
+Refusal code 1 with nonce                rejected
+Hello version 0                          rejected
+JoinSealed with SLH signature            rejected
+Reply ct 36 bytes                        rejected
+PairSealed ct 292 bytes                  rejected
+Publication with SLH signature           rejected
+Unknown critical field 9 in Hello        rejected
+Extension field 300 in Hello             accepted
+HaltProof kind 6 with one sig            rejected
+seg 1023                                 rejected
+gen 0                                    rejected
+Call enc 5249                            rejected
+float in extension field                 rejected
+negative int in extension                rejected
+bool in extension                        rejected
+2^53 in extension                        rejected

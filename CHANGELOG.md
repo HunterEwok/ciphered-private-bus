@@ -7,6 +7,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 ## [Unreleased]
 
 ### Added
+- Protocol requirements specification (draft, baseline for gate G0) in `docs/spec/`: the
+  requirements, Appendix B (wire format), Appendix C (CDDL schema and size analysis), and a
+  glossary of terms and code identifiers.
+- CDDL schema of the wire format (`docs/spec/cpb.cddl`) and scripts in `tools/cddl/` that
+  build the largest instance of every object, validate it against the schema, and check
+  negative examples.
 - Initial repository setup, licensing (`MPL-2.0` for code, `CC-BY-4.0` for specification),
   branding policy, and contributor documentation.
 - Rust Cargo workspace with a pinned toolchain, shared lints, and a placeholder `cpb`

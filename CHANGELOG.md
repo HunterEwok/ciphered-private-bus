@@ -18,7 +18,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   publication, and reboots, with a relay that behaves arbitrarily; fourteen probes, witnesses, fixed
   scenarios, an inductive invariant that Apalache proves in CI for two devices, and CI jobs.
   `models/run-tlc.ps1` and `models/run-inductive.ps1` run TLC and the inductive proof for any model
-  folder.
+  folder, and `models/run-all.ps1` runs both for several models one after another.
 - Quint model of call nonce slots (`models/calls/`): nonce requests, calls, replies, the open
   refusals and the commander's automatic retries, "reset nonces" and reboot, key epoch rotation, and
   passport changes, with a network that replays and forges unsigned messages; twelve probes,

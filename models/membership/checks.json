@@ -44,6 +44,7 @@
       "stepReboot",
       "stepSend",
       "stepGrant"
-    ]
+    ],
+    "parallel": 4
   }
 }

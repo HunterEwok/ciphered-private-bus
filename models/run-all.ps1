@@ -11,7 +11,11 @@
 # -MemoryGB is the memory the runs may take together (the inductive proof gives
 # half of it to Java heaps and leaves the rest to the solvers). -Parallel is the
 # number of inductive checks at a time; each gets MemoryGB / 2 / Parallel of
-# heap. A stage that fails does not stop the next one.
+# heap. A model whose checks.json sets "inductive.parallel" uses that number
+# instead (fewer checks with more memory each, for the large membership
+# instance). -TimeoutHours bounds each inductive check, so that a run fits a
+# night; a check stopped at the limit has no verdict. A stage that fails does
+# not stop the next one.
 #
 # Example:
 #   powershell -ExecutionPolicy Bypass -File models\run-all.ps1 `
@@ -22,7 +26,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$WorkDir,
     [string]$Java = "java",
-    [string[]]$Models = @("channels", "calls", "enrollment"),
+    [string[]]$Models = @("channels", "calls", "enrollment", "membership"),
     [string[]]$Stages = @("probes", "inductive"),
     [double]$MemoryGB = 100,
     [int]$Parallel = 6,
@@ -61,7 +65,9 @@ foreach ($model in $Models) {
             $stageArgs = @("-Model", $model, "-Probes", "-TimeoutMinutes", $TimeoutMinutes, "-Share", $shareText)
         } elseif ($stage -eq "inductive") {
             $script = Join-Path $ModelsDir "run-inductive.ps1"
-            $stageArgs = @("-Model", $model, "-Split", "-Parallel", $Parallel, "-Share", $shareText, "-TimeoutHours", $TimeoutHours)
+            $ind = (Get-Content (Join-Path (Join-Path $ModelsDir $model) "checks.json") -Raw | ConvertFrom-Json).inductive
+            $par = if ($ind -and $ind.parallel) { [int]$ind.parallel } else { $Parallel }
+            $stageArgs = @("-Model", $model, "-Split", "-Parallel", $par, "-Share", $shareText, "-TimeoutHours", $TimeoutHours)
         } else { throw "Unknown stage $stage (probes or inductive)" }
         Say ("===== {0}: {1} =====" -f $model, $stage)
         $started = Get-Date

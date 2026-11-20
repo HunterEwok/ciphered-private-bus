@@ -61,9 +61,34 @@ function Get-ModelHash {
 
 function Format-Count([int64]$N) { return $N.ToString("N0", [System.Globalization.CultureInfo]::InvariantCulture) }
 
+# Runs a native command and returns its standard output lines. Standard error
+# is collected separately: Windows PowerShell 5.1 would otherwise turn any
+# line on it into a terminating error.
+function Invoke-Native([string]$Exe, [string[]]$Arguments) {
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $script:NativeErrors = @()
+    try {
+        $out = & $Exe @Arguments 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $script:NativeErrors += $_.ToString() } else { "$_" }
+        }
+        $script:NativeExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $saved }
+    return $out
+}
+
 # ------------------------------------------------------------------ preparation
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $WorkDir = (Resolve-Path $WorkDir).Path
+
+# Quint starts Apalache with the java found on the PATH, so put the given Java
+# first on it.
+if ($Java -ne "java") {
+    $Java = (Resolve-Path $Java).Path
+    $javaBin = Split-Path -Parent $Java
+    $env:JAVA_HOME = Split-Path -Parent $javaBin
+    $env:PATH = $javaBin + [System.IO.Path]::PathSeparator + $env:PATH
+}
 $env:QUINT_HOME = Join-Path $WorkDir "quint-home"
 $env:npm_config_cache = Join-Path $WorkDir "npm-cache"
 
@@ -71,11 +96,12 @@ $quint = Join-Path $ModelsDir ("node_modules/.bin/" + $(if ($OnWindows) { "quint
 if (-not (Test-Path $quint)) {
     Say "Installing Quint from models/package-lock.json"
     Push-Location $ModelsDir
-    try { & npm ci --ignore-scripts | Out-Host } finally { Pop-Location }
+    try { Invoke-Native "npm" @("ci", "--ignore-scripts") | Out-Host } finally { Pop-Location }
+    if ($script:NativeExit -ne 0) { $script:NativeErrors | Out-Host; throw "npm ci failed" }
 }
 
 $hash = Get-ModelHash
-$commit = (& git -C $ModelDir rev-parse --short HEAD).Trim()
+$commit = "$(Invoke-Native "git" @("-C", $ModelDir, "rev-parse", "--short", "HEAD"))".Trim()
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $RunDir = Join-Path $WorkDir ("{0}-{1}" -f $Main, $stamp)
 New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $RunDir "tmp") | Out-Null
@@ -87,14 +113,16 @@ $compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$In
 if ($Temporal) { $compileArgs += "--temporal=$Temporal" }
 $compileArgs += "instances.qnt"
 Push-Location $ModelDir
-try { $raw = & $quint @compileArgs 2>$null } finally { Pop-Location }
-$lines = @($raw -split "`r?`n")
+try { $lines = @(Invoke-Native $quint $compileArgs) } finally { Pop-Location }
 $start = -1; $end = -1
 for ($i = 0; $i -lt $lines.Count; $i++) {
     if ($start -lt 0 -and $lines[$i] -match "^-+ MODULE $Main -+$") { $start = $i }
     if ($start -ge 0 -and $lines[$i] -match "^=+$") { $end = $i }
 }
-if ($start -lt 0 -or $end -lt 0) { throw "Compilation produced no TLA+ module $Main" }
+if ($start -lt 0 -or $end -lt 0) {
+    $script:NativeErrors | Out-Host
+    throw "Compilation produced no TLA+ module $Main (exit code $script:NativeExit)"
+}
 $spec = Join-Path $RunDir "$Main.tla"
 [System.IO.File]::WriteAllLines($spec, $lines[$start..$end])
 
@@ -198,7 +226,7 @@ $summary = @(
     "tla2tools: $TlaToolsVersion",
     ("limits: {0} workers of {1} cores, heap {2} GB, direct {3} GB" -f $workers, $cores, $heapGb, $directGb),
     "started: $($started.ToString('u')), ended: $($ended.ToString('u')), elapsed: $($ended - $started)",
-    "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } else { 'see tlc.log' })",
+    "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif (($text -match 'is violated').Count -gt 0) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",
     ""
 ) + $result
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)

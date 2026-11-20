@@ -23,6 +23,28 @@ By submitting a pull request, you agree that:
 - Your **specification and documentation** contributions in `docs/` are licensed under
   [CC BY 4.0](LICENSES/CC-BY-4.0.txt).
 
+## Local setup
+
+- Install the Rust toolchain with [rustup](https://rustup.rs). The pinned channel and
+  components in `rust-toolchain.toml` are installed automatically on first use.
+- Enable the repository's Git hooks once per clone:
+
+  ```sh
+  git config core.hooksPath .githooks
+  ```
+
+  The hooks run the same hygiene check as CI (`.github/scripts/check_hygiene.py`) before
+  each commit, on each commit message, and on the branch name and commits of each push.
+- Before pushing, run:
+
+  ```sh
+  cargo fmt --all --check
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace
+  cargo deny check            # requires `cargo install cargo-deny`
+  python3 -m unittest discover -s .github/scripts
+  ```
+
 ## Conventions
 
 - **English only** in code, comments, documentation, commit messages, and issues.
@@ -36,6 +58,11 @@ By submitting a pull request, you agree that:
   Other source files and scripts start with the same two lines in their own comment style.
   Files that cannot carry headers (e.g., JSON test vectors, images) are covered by
   [REUSE.toml](REUSE.toml); `reuse lint` checks that every file has a valid license.
+- **Repository hygiene.** CI rejects non-English text, non-ASCII characters outside common
+  typographic punctuation, traces of AI tooling (generation notices, trailers, chat links,
+  model names, tool configuration files, bot identities, or tool-named branches), local
+  filesystem paths, and secrets in files, commit messages, and pull request text. Keep editor- and tool-specific
+  files out of the repository; use `.git/info/exclude` for local ignores.
 - **Pull requests & branch protection.** Changes go into `main` through pull requests.
 - **Commit messages.** Short summary line in the imperative mood (e.g., `"Add frame header
   parser"`), followed by a blank line and details if needed.

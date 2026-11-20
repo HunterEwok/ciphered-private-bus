@@ -1,5 +1,10 @@
 # Security Policy
 
+## Supported versions
+
+CPB is in early development and has no stable release yet. Until 1.0, security fixes are
+made only on the `main` branch and in the latest published release.
+
 ## Reporting a vulnerability
 
 Please report security vulnerabilities privately. Do not open a public issue, pull request,

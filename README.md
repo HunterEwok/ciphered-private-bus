@@ -22,7 +22,7 @@ Ciphered Private Bus (**CPB**) defines a transport-independent logical communica
 |---|---|---|
 | `docs/` | Formal protocol specification, threat model, cryptography | [CC BY 4.0](LICENSES/CC-BY-4.0.txt) |
 | `testdata/` | Interoperability and conformance test vectors | [MPL-2.0](LICENSE) |
-| (crates) | Rust reference implementation | [MPL-2.0](LICENSE) |
+| `crates/` | Rust reference implementation (Cargo workspace) | [MPL-2.0](LICENSE) |
 
 ## Contributing
 

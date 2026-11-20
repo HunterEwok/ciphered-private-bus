@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-exec python3 .github/scripts/check_hygiene.py
+exec python3 .github/scripts/check_hygiene.py --pre-commit

@@ -2,8 +2,27 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Repository hygiene checks: English-only text, no AI traces or chat links,
-clean commit authors, and no local paths or leaked secrets."""
+"""Repository hygiene checks.
+
+Enforces English-only text, no traces of AI tooling (notices, trailers, chat links,
+model names, tool configuration files, bot identities), clean commit identities, and no
+local paths or leaked secrets.
+
+Modes:
+  check_hygiene.py                    tracked files, commits (BASE_SHA..HEAD_SHA), PR text
+  check_hygiene.py --commit-msg FILE  additionally checks a commit message file
+  check_hygiene.py --pre-commit       tracked files, the local author identity, and the
+                                      current branch name
+  check_hygiene.py --pre-push         tracked files and, for every ref on standard input
+                                      (the Git pre-push format), the branch name and the
+                                      commits about to be pushed
+
+Environment:
+  BASE_SHA, HEAD_SHA       commit range to check
+  PR_TITLE, PR_BODY        pull request text to check
+  PR_BRANCH                pull request source branch name to check
+  HYGIENE_STRICT_AUTHORS   "1" to accept only the maintainer's commit identities
+"""
 
 from __future__ import annotations
 
@@ -13,55 +32,100 @@ import subprocess
 import sys
 from pathlib import Path
 
-ALLOWED_EMAILS = {
+# Identities accepted when HYGIENE_STRICT_AUTHORS=1 (the maintainer's own pull requests).
+MAINTAINER_EMAILS = {
     "88090358+hunterewok@users.noreply.github.com",
     "noreply@github.com",
-    "49699333+dependabot[bot]@users.noreply.github.com",
 }
 
-# Allowed non-ASCII characters (standard typographic punctuation and math/symbols).
-ALLOWED_NON_ASCII = set(
-    "—–‘’“”•…·§©®™°±×÷≠≤≥→←↔⇒⇔"
+# Bot identities that are always accepted.
+ALLOWED_BOT_EMAILS = {
+    "49699333+dependabot[bot]@users.noreply.github.com",
+    "41898282+github-actions[bot]@users.noreply.github.com",
+}
+
+# Commit identities of AI coding tools, rejected for every contributor.
+BLOCKED_EMAIL_RE = re.compile(
+    r"(?i)(?:@anthropic\.com|@openai\.com|@cursor\.(?:com|sh)|@aider\.chat|@codeium\.com"
+    r"|@windsurf\.com|@cognition\.ai|@devin\.ai|@tabnine\.com|@sourcegraph\.com"
+    r"|copilot|claude|codex|\[bot\]@)"
 )
+
+# Allowed non-ASCII characters (standard typographic punctuation and math/symbols).
+ALLOWED_NON_ASCII = set("—–‘’“”•…·§©®™°±×÷≠≤≥→←↔⇒⇔")
 
 # Forbidden scripts (Cyrillic, CJK, Arabic, Hebrew, etc.).
 FORBIDDEN_SCRIPT_RE = re.compile(
-    r"[\u0400-\u04FF"  # Cyrillic
-    r"\u0500-\u052F"   # Cyrillic Supplement
-    r"\u0590-\u05FF"   # Hebrew
-    r"\u0600-\u06FF"   # Arabic
-    r"\u3040-\u30FF"   # Hiragana / Katakana
-    r"\u4E00-\u9FFF"   # CJK Unified Ideographs
-    r"\uAC00-\uD7AF]"  # Hangul
+    r"[Ѐ-ӿ"  # Cyrillic
+    r"Ԁ-ԯ"  # Cyrillic Supplement
+    r"֐-׿"  # Hebrew
+    r"؀-ۿ"  # Arabic
+    r"぀-ヿ"  # Hiragana / Katakana
+    r"一-鿿"  # CJK Unified Ideographs
+    r"가-힯]"  # Hangul
+)
+
+_TOOL = (
+    r"(?:ai|claude|anthropic|chatgpt|openai|gpt|copilot|codex|gemini|cursor|windsurf|aider"
+    r"|devin|codeium|tabnine|cody|llm|antigravity|an?\s+(?:ai|llm|assistant|language\s+model))"
 )
 
 AI_TRACE_PATTERNS = [
-    (re.compile(r"(?i)\bgenerated\s+(?:by|with)\s+(?:ai|gemini|claude|chatgpt|gpt|copilot|cursor|antigravity|llm)\b"), "AI generation notice"),
-    (re.compile(r"(?i)\b(?:made|written|created)\s+(?:by|with)\s+(?:ai|gemini|claude|chatgpt|copilot|antigravity)\b"), "AI attribution notice"),
-    (re.compile(r"(?i)claude\.ai/(?:[^\s)\]>`\"']+)"), "Claude conversation link"),
-    (re.compile(r"(?i)chatgpt\.com/(?:[^\s)\]>`\"']+)"), "ChatGPT conversation link"),
-    (re.compile(r"(?i)chat\.openai\.com/(?:[^\s)\]>`\"']+)"), "OpenAI chat link"),
-    (re.compile(r"(?i)gemini\.google\.com/(?:[^\s)\]>`\"']+)"), "Gemini conversation link"),
-    (re.compile(r"(?i)aistudio\.google\.com/(?:[^\s)\]>`\"']+)"), "AI Studio link"),
-    (re.compile(r"(?i)conversation://"), "Internal conversation URI"),
-    (re.compile(r"(?i)^\s*claude-session:", re.MULTILINE), "Claude session trailer"),
-    (re.compile(r"(?i)\b(?:claude[ -])?(?:opus|sonnet|haiku)[ -]?\d"), "Claude model identifier"),
-    (re.compile(r"(?i)\bgemini[ -]?\d+(?:\.\d+)?[ -]?(?:pro|flash|ultra)\b"), "Gemini model identifier"),
-    (re.compile(r"(?i)\bgpt-[45](?:o|turbo)?\b"), "GPT model identifier"),
+    # Notices such as "Generated with [Tool](link)" or "Co-written by an AI".
+    (re.compile(rf"(?i)\b(?:generated|made|written|created|authored|assisted|produced|drafted)"
+                rf"\s+(?:by|with|using|via)\s+[\[(*_`\s]*{_TOOL}\b"), "AI generation notice"),
+    (re.compile(r"(?i)\bai[- ](?:generated|assisted|written|authored|powered\s+coding)\b"), "AI generation notice"),
+    (re.compile(r"(?i)\bas\s+an\s+ai\b"), "AI assistant phrasing"),
+    # Product and vendor names.
+    (re.compile(r"(?i)\b(?:claude|anthropic|chatgpt|openai|copilot|codex|antigravity)\b"), "AI tool or vendor name"),
+    (re.compile(r"(?i)\b(?:cursor|windsurf|devin|codeium|tabnine)\s+(?:ai|agent|ide|chat|composer|rules)\b"),
+     "AI tool name"),
+    (re.compile(r"(?i)\baider\.chat\b"), "AI tool name"),
+    (re.compile(r"(?i)\b(?:llms?|large\s+language\s+models?|language\s+model)\b"), "language model reference"),
+    # Model identifiers.
+    (re.compile(r"(?i)\b(?:opus|sonnet|haiku)[ -]?\d"), "AI model identifier"),
+    (re.compile(r"(?i)\bgemini[ -]?(?:\d+(?:\.\d+)?|cli|code\s+assist|pro|flash|ultra)\b"), "AI model identifier"),
+    (re.compile(r"(?i)\bgpt-?\d"), "AI model identifier"),
+    # Chat and session links.
+    (re.compile(r"(?i)chatgpt\.com/"), "chat link"),
+    (re.compile(r"(?i)chat\.openai\.com/"), "chat link"),
+    (re.compile(r"(?i)gemini\.google\.com/"), "chat link"),
+    (re.compile(r"(?i)aistudio\.google\.com/"), "chat link"),
+    (re.compile(r"(?i)conversation://"), "internal conversation URI"),
+    # Trailers that tools append to commit messages.
+    (re.compile(r"(?im)^\s*(?:[a-z]+-session|ai-assisted|assisted-by|generated-by|co-developed-by)\s*:"),
+     "AI tool trailer"),
 ]
 
 SECRET_AND_PATH_PATTERNS = [
-    (re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"), "Private key header"),
+    (re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"), "private key header"),
     (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b"), "GitHub token"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "GitHub token"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key ID"),
-    (re.compile(r"/home/antigravity\b"), "Local VM path (/home/antigravity)"),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"), "API secret key"),
+    (re.compile(r"(?:/home|/Users)/[A-Za-z0-9._-]+/"), "local home directory path"),
+    (re.compile(r"(?i)\b[A-Z]:\\Users\\"), "local home directory path"),
 ]
+
+# Configuration files and directories of AI coding tools.
+FORBIDDEN_PATH_RE = re.compile(
+    r"(?i)(?:^|/)(?:claude\.md|agents\.md|gemini\.md|\.claude|\.cursor|\.cursorrules|\.cursorignore"
+    r"|\.aider[^/]*|\.windsurf[^/]*|\.clinerules|\.cline|\.continue|\.codex|\.junie|\.roo[^/]*"
+    r"|\.gemini|copilot-instructions\.md|\.copilot)(?:/|$)"
+)
+
+# Branch namespaces that AI coding tools create by default.
+FORBIDDEN_BRANCH_RE = re.compile(
+    r"(?i)(?:^|/)(?:claude|anthropic|codex|copilot|chatgpt|openai|gemini|cursor|windsurf|aider|devin"
+    r"|codeium|tabnine|cody|jules|sweep|ai|llm|agent|bot)(?:[-_/]|$)"
+)
 
 CO_AUTHOR_RE = re.compile(r"(?im)^co-authored-by:\s*(.*?)\s*<([^>]*)>\s*$")
 
 # Files that legitimately mention forbidden patterns as part of the hygiene rule itself.
 SELF_EXEMPT = {
     ".github/scripts/check_hygiene.py",
+    ".github/scripts/test_check_hygiene.py",
 }
 
 
@@ -71,42 +135,67 @@ def check_text(label: str, text: str, errors: list[str], *, check_scripts: bool 
             m = FORBIDDEN_SCRIPT_RE.search(line)
             if m:
                 errors.append(f"{label}:{idx}: non-English script character {m.group(0)!r} found")
+                continue
             for ch in line:
-                if ord(ch) > 127 and ch not in ALLOWED_NON_ASCII and not FORBIDDEN_SCRIPT_RE.match(ch):
+                if ord(ch) > 127 and ch not in ALLOWED_NON_ASCII:
                     errors.append(f"{label}:{idx}: unexpected non-ASCII character {ch!r} (U+{ord(ch):04X})")
                     break
 
-    for pattern, desc in AI_TRACE_PATTERNS:
+    for pattern, desc in AI_TRACE_PATTERNS + SECRET_AND_PATH_PATTERNS:
         m = pattern.search(text)
         if m:
             errors.append(f"{label}: forbidden {desc}: {m.group(0)!r}")
 
-    for pattern, desc in SECRET_AND_PATH_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            errors.append(f"{label}: forbidden {desc}: {m.group(0)!r}")
+
+def check_identity(label: str, name: str, email: str, errors: list[str], *, strict: bool) -> None:
+    email = email.strip().lower()
+    if email in ALLOWED_BOT_EMAILS:
+        return
+    if BLOCKED_EMAIL_RE.search(email):
+        errors.append(f"{label}: AI tool or bot identity <{email}>")
+    elif strict and email not in MAINTAINER_EMAILS:
+        errors.append(f"{label}: identity <{email}> is not the maintainer's")
+    check_text(f"{label} name", name, errors)
+
+
+def check_branch(label: str, branch: str, errors: list[str]) -> None:
+    branch = branch.strip()
+    if not branch:
+        return
+    m = FORBIDDEN_BRANCH_RE.search(branch)
+    if m:
+        errors.append(f"{label} {branch!r}: branch name points at an AI tool ({m.group(0).strip('/')!r})")
+    check_text(label, branch, errors)
+
+
+def check_local_branch(errors: list[str]) -> None:
+    res = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    check_branch("current branch", res.stdout, errors)
+
+
+def normalize_path(rel: str) -> str:
+    return rel[2:] if rel.startswith("./") else rel
+
+
+def check_paths(paths: list[str], errors: list[str]) -> None:
+    for rel in paths:
+        if FORBIDDEN_PATH_RE.search(rel):
+            errors.append(f"{rel}: AI tool configuration file must not be committed")
+        check_text(f"path {rel}", rel, errors)
+
+
+def tracked_files() -> list[str]:
+    res = subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True)
+    return [normalize_path(p.decode("utf-8", errors="replace")) for p in res.stdout.split(b"\0") if p]
 
 
 def check_tracked_files(errors: list[str]) -> None:
-    res = subprocess.run(
-        ["git", "ls-files", "-z"],
-        capture_output=True,
-        check=True,
-    )
-    paths = [p.decode("utf-8", errors="replace") for p in res.stdout.split(b"\0") if p]
-    if not paths:
-        # Fallback for untracked initial setup before first commit.
-        paths = [
-            str(p)
-            for p in Path(".").rglob("*")
-            if p.is_file() and ".git" not in p.parts and "target" not in p.parts
-        ]
-
+    paths = tracked_files()
+    check_paths(paths, errors)
     for rel in paths:
-        norm = rel.lstrip("./")
-        if norm in SELF_EXEMPT:
+        if rel in SELF_EXEMPT:
             continue
-        p = Path(norm)
+        p = Path(rel)
         if not p.is_file():
             continue
         raw = p.read_bytes()
@@ -115,17 +204,17 @@ def check_tracked_files(errors: list[str]) -> None:
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            errors.append(f"{norm}: file is not valid UTF-8")
+            errors.append(f"{rel}: file is not valid UTF-8")
             continue
-        check_text(norm, text, errors)
+        check_text(rel, text, errors)
 
 
-def check_commits(base: str, head: str, errors: list[str]) -> None:
+def check_commits(base: str, head: str, errors: list[str], *, strict: bool) -> None:
     sep = "\x1e"
     field_sep = "\x1f"
-    fmt = f"%H{field_sep}%ae{field_sep}%ce{field_sep}%B{sep}"
+    fmt = f"%H{field_sep}%an{field_sep}%ae{field_sep}%cn{field_sep}%ce{field_sep}%B{sep}"
     res = subprocess.run(
-        ["git", "log", f"--format={fmt}", f"{base}..{head}"],
+        ["git", "log", f"--format={fmt}", f"{base}..{head}" if head else base],
         capture_output=True,
         text=True,
         check=True,
@@ -134,30 +223,64 @@ def check_commits(base: str, head: str, errors: list[str]) -> None:
         record = record.strip("\n")
         if not record:
             continue
-        parts = record.split(field_sep, 3)
-        if len(parts) != 4:
+        parts = record.split(field_sep, 5)
+        if len(parts) != 6:
             continue
-        sha, author_email, committer_email, msg = parts
+        sha, author_name, author_email, committer_name, committer_email, msg = parts
         short = sha[:9]
-        if author_email.lower() not in ALLOWED_EMAILS:
-            errors.append(f"commit {short}: disallowed author email <{author_email}>")
-        if committer_email.lower() not in ALLOWED_EMAILS:
-            errors.append(f"commit {short}: disallowed committer email <{committer_email}>")
-        for m in CO_AUTHOR_RE.findAll(msg) if hasattr(CO_AUTHOR_RE, "findAll") else CO_AUTHOR_RE.findall(msg):
-            co_email = m[1].strip().lower()
-            if co_email not in ALLOWED_EMAILS:
-                errors.append(f"commit {short}: disallowed Co-authored-by <{m[1]}>")
+        check_identity(f"commit {short} author", author_name, author_email, errors, strict=strict)
+        check_identity(f"commit {short} committer", committer_name, committer_email, errors, strict=strict)
+        for name, email in CO_AUTHOR_RE.findall(msg):
+            check_identity(f"commit {short} co-author", name, email, errors, strict=strict)
         check_text(f"commit {short}", msg, errors)
 
 
-def main() -> int:
+def check_local_identity(errors: list[str]) -> None:
+    res = subprocess.run(["git", "var", "GIT_AUTHOR_IDENT"], capture_output=True, text=True)
+    m = re.match(r"(.*?)\s*<([^>]*)>", res.stdout)
+    if m:
+        check_identity("local git author", m.group(1), m.group(2), errors, strict=False)
+
+
+def local_identity_is_maintainer() -> bool:
+    res = subprocess.run(["git", "var", "GIT_AUTHOR_IDENT"], capture_output=True, text=True)
+    m = re.match(r".*?<([^>]*)>", res.stdout)
+    return bool(m) and m.group(1).strip().lower() in MAINTAINER_EMAILS
+
+
+def check_push(lines: list[str], errors: list[str]) -> None:
+    """Checks refs in the pre-push format: <local ref> <local sha> <remote ref> <remote sha>."""
+    zero = "0" * 40
+    strict = local_identity_is_maintainer()
+    for line in lines:
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        _local_ref, local_sha, remote_ref, remote_sha = parts
+        if local_sha == zero:
+            continue  # Deleting a remote ref
+        if remote_ref.startswith("refs/heads/"):
+            check_branch("pushed branch", remote_ref[len("refs/heads/"):], errors)
+        if remote_sha == zero:
+            # New ref: check every commit that no remote-tracking branch has yet.
+            res = subprocess.run(
+                ["git", "rev-list", local_sha, "--not", "--remotes"], capture_output=True, text=True, check=True
+            )
+            for sha in res.stdout.split():
+                check_commits(f"{sha}^!", "", errors, strict=strict)
+        else:
+            check_commits(remote_sha, local_sha, errors, strict=strict)
+
+
+def main(argv: list[str]) -> int:
     errors: list[str] = []
+    strict = os.environ.get("HYGIENE_STRICT_AUTHORS", "").strip() == "1"
     check_tracked_files(errors)
 
     base = os.environ.get("BASE_SHA", "").strip()
     head = os.environ.get("HEAD_SHA", "").strip()
     if base and head and base != "0" * 40:
-        check_commits(base, head, errors)
+        check_commits(base, head, errors, strict=strict)
 
     pr_title = os.environ.get("PR_TITLE", "")
     pr_body = os.environ.get("PR_BODY", "")
@@ -165,10 +288,20 @@ def main() -> int:
         check_text("PR title", pr_title, errors)
     if pr_body:
         check_text("PR description", pr_body, errors)
+    check_branch("PR branch", os.environ.get("PR_BRANCH", ""), errors)
 
-    if len(sys.argv) == 3 and sys.argv[1] == "--commit-msg":
-        msg = Path(sys.argv[2]).read_text(encoding="utf-8", errors="replace")
+    if len(argv) == 2 and argv[0] == "--commit-msg":
+        msg = Path(argv[1]).read_text(encoding="utf-8", errors="replace")
+        # Comment lines are stripped by git before the commit is recorded.
+        msg = "\n".join(line for line in msg.splitlines() if not line.startswith("#"))
         check_text("commit message", msg, errors)
+        for name, email in CO_AUTHOR_RE.findall(msg):
+            check_identity("commit message co-author", name, email, errors, strict=False)
+    elif argv == ["--pre-commit"]:
+        check_local_identity(errors)
+        check_local_branch(errors)
+    elif argv == ["--pre-push"]:
+        check_push(sys.stdin.read().splitlines(), errors)
 
     if errors:
         print("Hygiene check failed:", file=sys.stderr)
@@ -181,4 +314,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

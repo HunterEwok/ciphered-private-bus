@@ -4,6 +4,6 @@
 # The toolchain used for development and CI. The minimum supported Rust version (MSRV) is
 # `rust-version` in Cargo.toml and is checked separately in CI.
 [toolchain]
-channel = "1.97.0"
+channel = "1.100.0"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

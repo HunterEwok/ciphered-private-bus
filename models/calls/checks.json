@@ -1,0 +1,43 @@
+{
+  "tlcInstance": "tiny",
+  "witnessInstance": "tiny",
+  "probes": [
+    "no_erase",
+    "mismatch_changes",
+    "slot_for_anyone",
+    "no_right_check",
+    "presence_not_required",
+    "revoked_calls",
+    "retry_on_mismatch",
+    "retry_confirmation",
+    "accept_any_epoch",
+    "reset_keeps_slots",
+    "reboot_keeps_slots",
+    "keep_revoked_slot"
+  ],
+  "witnesses": [
+    "witnessExecuted",
+    "witnessNoRight",
+    "witnessUnknown",
+    "witnessStaleNonce",
+    "witnessEpochRetryExecuted",
+    "witnessMismatchRetryExecuted"
+  ],
+  "inductive": {
+    "instance": "mid_ind",
+    "smallInstance": "tiny_ind",
+    "parallel": 1,
+    "steps": [
+      "stepAnswer",
+      "stepLearn",
+      "stepMismatch",
+      "stepStart",
+      "stepEpoch",
+      "stepReply",
+      "stepChange",
+      "stepCall",
+      "stepReset",
+      "stepRotate"
+    ]
+  }
+}

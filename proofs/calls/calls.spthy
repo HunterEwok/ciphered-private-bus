@@ -1,0 +1,449 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * Calls, replies and streams (requirements R-CALL-1..5, R-CALL-9, R-CALL-10,
+ * R-STR-1, R-STR-2; Appendix B, Sections B.6 and B.7): the target issues a
+ * nonce, the commander signs a call over it and seals the command to the
+ * target's sealing key with HPKE, the target executes it once and answers
+ * with a reply under a key exported from the HPKE context, and both sides
+ * exchange stream chunks under per-direction keys from the same context.
+ * Verification level V1 (Section 14.1): a symbolic model, primitives are
+ * perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - Membership and rights are reduced to public registries: !DevKey and
+ *   !PresKey hold each device's device key and user-presence key, !RootKey
+ *   the root key of the bus and its root device, and !Permit(bus, T, C)
+ *   says that C may command T. Which actions a passport allows, revocation
+ *   and slot erasure on removal (R-CALL-7) are in models/calls.
+ * - An action has a class: 'auto' actions are signed by the commander's
+ *   device key, 'confirm' actions by its user-presence key or by the root
+ *   key from the root device (R-CALL-4). The class is part of the command.
+ * - The nonce slot is a linear fact; it is consumed by the execution, so a
+ *   nonce executes at most one action (R-CALL-5). The reply carries a next
+ *   nonce, but the next slot is made by IssueNonce like any other: a slot
+ *   made by the execution would let every slot stem from an earlier one,
+ *   and the backward search would not end. Mismatch, refusals,
+ *   retries, resets and stream credit are in models/calls.
+ * - HPKE: the KEM shared secret is a fresh value ss sealed with asymmetric
+ *   encryption to the target's sealing key, together with the info label,
+ *   the command and the associated data (the hash of the body fields 1..8);
+ *   the exporter is the hash h(<label, ss>). The sealing key epoch is the
+ *   sealing key itself.
+ * - ChaCha20-Poly1305 is symmetric encryption with the associated data
+ *   inside the plaintext. One stream chunk is modelled per direction; the
+ *   chunk number and credit fields are in the header and nothing else.
+ * - Compromise: RevealDev, RevealPres and RevealRoot give the adversary a
+ *   signing key; RevealSeal a sealing private key the target still holds
+ *   (none after erasure); RevealContext the commander's HPKE context of one
+ *   call.
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_KEEP_NONCE          the slot keeps its nonce after an execution -> at_most_once
+ *   PROBE_NONCE_UNSIGNED      neither the signature nor the associated data covers the nonce -> call_integrity_auto
+ *   PROBE_CONFIRM_DEVICE_KEY  a confirm action accepts the device key   -> call_integrity_confirm
+ *   PROBE_STATIC_REPLY_KEY    the reply key comes from the target's sealing key, not the call -> reply_binding
+ */
+
+theory CpbCalls
+begin
+
+builtins: hashing, signing, symmetric-encryption, asymmetric-encryption
+
+// What the commander signs, and the associated data of the sealed command:
+// the whole body (R-CALL-2, R-CALL-3), or, in the probe, the body without
+// the nonce. The probe drops the nonce from both, since the signature covers
+// the sealed command and its associated data would bind the nonce alone.
+#ifdef PROBE_NONCE_UNSIGNED
+macros: callsigmsg(bus, sh, C, T, n, epk, enc) = <'cpb call v1', bus, sh, C, T, epk, enc>,
+        callad(bus, sh, C, T, n, epk) = h(<bus, sh, C, T, epk>)
+#else
+macros: callsigmsg(bus, sh, C, T, n, epk, enc) = <'cpb call v1', bus, sh, C, T, n, epk, enc>,
+        callad(bus, sh, C, T, n, epk) = h(<bus, sh, C, T, n, epk>)
+#endif
+
+// The reply key: exported from the HPKE context of the call (R-CALL-9).
+#ifdef PROBE_STATIC_REPLY_KEY
+macros: replykey(ss, epk) = h(<'cpb reply v1', epk>)
+#else
+macros: replykey(ss, epk) = h(<'cpb reply v1', ss>)
+#endif
+
+restriction OneDevice:
+  "All bus d #i #j. NewDevice(bus, d) @ i & NewDevice(bus, d) @ j ==> #i = #j"
+
+restriction OneRoot:
+  "All bus #i #j. NewRoot(bus) @ i & NewRoot(bus) @ j ==> #i = #j"
+
+restriction NoSealUseAfterErase:
+  "All bus d sk #e #u. ErasedSeal(bus, d, sk) @ e & UseSeal(bus, d, sk) @ u ==> u < e"
+
+/* ---------------------------------------------------------------- devices */
+
+rule NewDevice:
+    [ Fr(~ltk), Fr(~prs) ]
+  --[ NewDevice($bus, $D) ]->
+    [ !Ltk($bus, $D, ~ltk), !DevKey($bus, $D, pk(~ltk)),
+      !PresLtk($bus, $D, ~prs), !PresKey($bus, $D, pk(~prs)),
+      Out(pk(~ltk)), Out(pk(~prs)) ]
+
+// The root key, held by the root device $D.
+rule NewRoot:
+    [ !Ltk($bus, $D, ltk), Fr(~root) ]
+  --[ NewRoot($bus) ]->
+    [ !RootLtk($bus, $D, ~root), !RootKey($bus, $D, pk(~root)), Out(pk(~root)) ]
+
+rule Permit:
+    [ !DevKey(bus, T, kt), !DevKey(bus, C, kc) ]
+  --[ Permitted(bus, T, C) ]->
+    [ !Permit(bus, T, C) ]
+
+rule RevealDev:
+    [ !Ltk(bus, D, ltk) ]
+  --[ RevealDev(bus, D) ]->
+    [ Out(ltk) ]
+
+rule RevealPres:
+    [ !PresLtk(bus, D, prs) ]
+  --[ RevealPres(bus, D) ]->
+    [ Out(prs) ]
+
+rule RevealRoot:
+    [ !RootLtk(bus, D, root) ]
+  --[ RevealRoot(bus) ]->
+    [ Out(root) ]
+
+// The target's sealing key and its signed claim (R-KEY-2).
+rule NewSealKey:
+    let claim = <'claim', bus, D, pk(~sk)> in
+    [ !Ltk(bus, D, ltk), Fr(~sk) ]
+  --[ NewSeal(bus, D, ~sk) ]->
+    [ !SealKey(bus, D, ~sk), Out(<claim, sign(<'cpb seal claim v1', bus, D, pk(~sk)>, ltk)>) ]
+
+rule RevealSeal:
+    [ !SealKey(bus, D, sk) ]
+  --[ RevealSeal(bus, D, sk), UseSeal(bus, D, sk) ]->
+    [ Out(sk) ]
+
+rule EraseSeal:
+    [ !SealKey(bus, D, sk) ]
+  --[ ErasedSeal(bus, D, sk) ]->
+    [ ]
+
+/* ------------------------------------------------------------------ nonce */
+
+// The target issues a nonce for a permitted commander (R-CALL-1, R-CALL-7).
+// The nonce message is unsigned.
+rule IssueNonce:
+    [ !Permit(bus, T, C), Fr(~n) ]
+  --[ NonceIssued(bus, T, C, ~n) ]->
+    [ Slot(bus, T, C, ~n), Out(<'nonce', bus, C, T, ~n>) ]
+
+#ifdef PROBE_KEEP_NONCE
+// The probe's slot is never consumed: a persistent copy for ExecuteAuto.
+// (A linear slot written back by the execution would make the backward
+// search loop.)
+rule IssueNonceKept:
+    [ !Permit(bus, T, C), Fr(~n) ]
+  --[ NonceIssued(bus, T, C, ~n) ]->
+    [ !KeptSlot(bus, T, C, ~n), Out(<'nonce', bus, C, T, ~n>) ]
+#endif
+
+/* ------------------------------------------------------------- commander */
+
+// A call (R-CALL-2, R-CALL-3): the body names the bus, the signing key, the
+// commander, the target, the nonce and the target's sealing key; the command
+// and the KEM secret are sealed with the other fields as associated data.
+// The signature covers the body. Signed by the device key: an 'auto' action.
+rule CallAuto:
+    let epk   = pk(xe)
+        sh    = h(pk(ltk))
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'auto', $action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        claim = <'claim', bus, T, epk>
+    in
+    [ !Ltk(bus, C, ltk), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
+      In(<'nonce', bus, C, T, n>),
+      In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss) ]->
+    [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
+      Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), ltk)>) ]
+
+// A 'confirm' action signed by the commander's user-presence key.
+rule CallConfirm:
+    let epk   = pk(xe)
+        sh    = h(pk(prs))
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'confirm', $action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        claim = <'claim', bus, T, epk>
+    in
+    [ !PresLtk(bus, C, prs), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
+      In(<'nonce', bus, C, T, n>),
+      In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss), PresenceSigned(bus, C) ]->
+    [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
+      Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), prs)>) ]
+
+// A 'confirm' action signed by the root key; the commander is the root device.
+rule CallRoot:
+    let epk   = pk(xe)
+        sh    = h(pk(root))
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'confirm', $action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        claim = <'claim', bus, T, epk>
+    in
+    [ !RootLtk(bus, C, root), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
+      In(<'nonce', bus, C, T, n>),
+      In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss), RootSigned(bus, C) ]->
+    [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
+      Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), root)>) ]
+
+rule RevealContext:
+    [ !Context(bus, C, cid, ss) ]
+  --[ RevealContext(bus, C, cid) ]->
+    [ Out(ss) ]
+
+/* ----------------------------------------------------------------- target */
+
+// The target executes only with the nonce of its slot and a signature by a
+// key with the right to the action's class (R-CALL-4); the matched nonce is
+// erased first (R-CALL-5). The reply (R-CALL-9, R-CALL-10) carries the next
+// nonce, under the reply key with the open header as associated data. The
+// target then opens a stream (R-STR-1) and sends one chunk.
+#ifdef PROBE_KEEP_NONCE
+rule ExecuteAuto:
+    let sh    = h(pk(xc))
+        epk   = pk(sk)
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'auto', action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        cid   = h(body)
+        rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+        chdr  = <'chunk', T, C, cid, '1', 'from target'>
+        chunk = senc(<~data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
+    in
+    [ !KeptSlot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk), !DevKey(bus, C, pk(xc)),
+      Fr(~res), Fr(~next), Fr(~data),
+      In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, ~data),
+      UseSeal(bus, T, sk) ]->
+    [ Target(bus, T, C, cid, ~ss),
+      Out(<rhdr, reply>), Out(<chdr, chunk>) ]
+#else
+rule ExecuteAuto:
+    let sh    = h(pk(xc))
+        epk   = pk(sk)
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'auto', action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        cid   = h(body)
+        rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+        chdr  = <'chunk', T, C, cid, '1', 'from target'>
+        chunk = senc(<~data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
+    in
+    [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk), !DevKey(bus, C, pk(xc)),
+      Fr(~res), Fr(~next), Fr(~data),
+      In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, ~data),
+      UseSeal(bus, T, sk) ]->
+    [ Target(bus, T, C, cid, ~ss),
+      Out(<rhdr, reply>), Out(<chdr, chunk>) ]
+#endif
+
+// A 'confirm' action signed by the commander's user-presence key. The probe
+// adds a rule that also accepts the device key; its KEM secret and arguments
+// are untyped, so that the search finds the adversary's own call quickly.
+
+rule ExecuteConfirm:
+    let sh    = h(pk(xp))
+        epk   = pk(sk)
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'confirm', action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        cid   = h(body)
+        rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+    in
+    [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
+      !PresKey(bus, C, pk(xp)), Fr(~res), Fr(~next),
+      In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xp)>) ]
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+    [ Out(<rhdr, reply>) ]
+
+#ifdef PROBE_CONFIRM_DEVICE_KEY
+rule ExecuteConfirmDeviceKey:
+    let sh    = h(pk(xc))
+        epk   = pk(sk)
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'confirm', action, args>
+        enc   = aenc(<'cpb call seal v1', ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        cid   = h(body)
+        rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(ss, epk))
+    in
+    [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
+      !DevKey(bus, C, pk(xc)), Fr(~res), Fr(~next),
+      In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+    [ Out(<rhdr, reply>) ]
+#endif
+
+// A 'confirm' action signed by the root key from the root device.
+rule ExecuteRoot:
+    let sh    = h(pk(xr))
+        epk   = pk(sk)
+        ad    = callad(bus, sh, C, T, n, epk)
+        cmd   = <'confirm', action, ~args>
+        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        body  = <'call', bus, sh, C, T, n, epk, enc>
+        cid   = h(body)
+        rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+    in
+    [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
+      !RootKey(bus, C, pk(xr)), Fr(~res), Fr(~next),
+      In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xr)>) ]
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+    [ Out(<rhdr, reply>) ]
+
+// The target accepts a chunk from the commander under the other key.
+rule TargetChunk:
+    let chdr  = <'chunk', T, C, cid, '1', 'from commander'>
+        chunk = senc(<data, h(chdr)>, h(<'cpb stream c2t v1', ~ss>))
+    in
+    [ Target(bus, T, C, cid, ~ss), In(<chdr, chunk>) ]
+  --[ ChunkAccepted(bus, T, C, cid, 'from commander', data) ]->
+    [ ]
+
+/* --------------------------------------------------------- commander side */
+
+// The commander finds its call by the call identifier and opens the reply,
+// then accepts the target's chunk and sends its own.
+rule CommanderReply:
+    let rhdr  = <'reply', bus, T, C, cid>
+        reply = senc(<code, res, next, h(rhdr)>, replykey(~ss, epk))
+    in
+    [ Commander(bus, C, T, cid, ~ss, epk), In(<rhdr, reply>) ]
+  --[ ReplyAccepted(bus, C, T, cid, res) ]->
+    [ CommanderStream(bus, C, T, cid, ~ss) ]
+
+rule CommanderChunk:
+    let chdr  = <'chunk', T, C, cid, '1', 'from target'>
+        chunk = senc(<data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
+        mhdr  = <'chunk', T, C, cid, '1', 'from commander'>
+        mine  = senc(<~mydata, h(mhdr)>, h(<'cpb stream c2t v1', ~ss>))
+    in
+    [ CommanderStream(bus, C, T, cid, ~ss), Fr(~mydata), In(<chdr, chunk>) ]
+  --[ ChunkAccepted(bus, C, T, cid, 'from target', data), ChunkSent(bus, C, T, cid, ~mydata) ]->
+    [ Out(<mhdr, mine>) ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+lemma executable_auto:
+  exists-trace
+  "Ex bus C T cid data mydata #i #j.
+     ChunkAccepted(bus, C, T, cid, 'from target', data) @ i
+     & ChunkAccepted(bus, T, C, cid, 'from commander', mydata) @ j
+     & (not Ex b d #k. RevealDev(b, d) @ k)
+     & (not Ex b d sk #k. RevealSeal(b, d, sk) @ k)
+     & (not Ex b c x #k. RevealContext(b, c, x) @ k)"
+
+lemma executable_confirm:
+  exists-trace
+  "Ex bus C T cid res #i #p.
+     ReplyAccepted(bus, C, T, cid, res) @ i & PresenceSigned(bus, C) @ p
+     & (not Ex b d #k. RevealPres(b, d) @ k)
+     & (not Ex b d sk #k. RevealSeal(b, d, sk) @ k)"
+
+lemma executable_root:
+  exists-trace
+  "Ex bus C T cid res #i #p.
+     ReplyAccepted(bus, C, T, cid, res) @ i & RootSigned(bus, C) @ p
+     & (not Ex b #k. RevealRoot(b) @ k)
+     & (not Ex b d sk #k. RevealSeal(b, d, sk) @ k)"
+
+// S10, R-CALL-2, R-CALL-4: an automatic action is executed only as a
+// commander called it, over this nonce, unless its device key is known.
+lemma call_integrity_auto:
+  "All bus T C n action args #i.
+     Executed(bus, T, C, n, <'auto', action, args>) @ i
+     ==> (Ex ss #s. CallSent(bus, C, T, n, <'auto', action, args>, ss) @ s & s < i)
+       | (Ex #r. RevealDev(bus, C) @ r)"
+
+// S10, R-CALL-4: a confirmation-class action is executed only as called,
+// signed by the commander's user-presence key or by the root key from the
+// root device; the device key alone is not enough.
+lemma call_integrity_confirm:
+  "All bus T C n action args #i.
+     Executed(bus, T, C, n, <'confirm', action, args>) @ i
+     ==> (Ex ss #s. CallSent(bus, C, T, n, <'confirm', action, args>, ss) @ s & s < i)
+       | (Ex #r. RevealPres(bus, C) @ r)
+       | (Ex #r. RevealRoot(bus) @ r)"
+
+// S10, R-CALL-5: one nonce executes at most one action.
+lemma at_most_once:
+  "All bus T C n c1 c2 #i #j.
+     Executed(bus, T, C, n, c1) @ i & Executed(bus, T, C, n, c2) @ j
+     ==> #i = #j"
+
+// Helper: the KEM secret of a call is learned only from the commander's
+// context, with the target's sealing private key, or by someone who can
+// sign claims for the target.
+lemma context_secrecy [reuse]:
+  "All bus C T cid epk ss #i #j.
+     Context(bus, C, T, cid, epk, ss) @ i & K(ss) @ j
+     ==> (Ex #r. RevealContext(bus, C, cid) @ r)
+       | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r)
+       | (Ex #r. RevealDev(bus, T) @ r)"
+
+// S1, S13, R-CALL-3: the arguments of a call are learned only with the
+// target's sealing private key while the target still held it, or by
+// someone who can sign claims for the target.
+lemma command_secrecy:
+  "All bus C T epk args #i #j.
+     CallTo(bus, C, T, epk, args) @ i & K(args) @ j
+     ==> (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
+            & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))
+       | (Ex #r. RevealDev(bus, T) @ r)"
+
+// S11, R-CALL-9: a reply accepted by the commander for a call comes from the
+// target of exactly that call, unless the call's context or the target's
+// sealing key is known.
+lemma reply_binding:
+  "All bus C T cid res #i.
+     ReplyAccepted(bus, C, T, cid, res) @ i
+     ==> (Ex #s. ReplySent(bus, T, C, cid, res) @ s & s < i)
+       | (Ex #r. RevealContext(bus, C, cid) @ r)
+       | (Ex sk #r. RevealSeal(bus, T, sk) @ r)
+       | (Ex #r. RevealDev(bus, T) @ r)"
+
+// S11, R-STR-1, R-STR-2: a chunk accepted on a stream comes from the other
+// party of that call, unless the call's context, a sealing private key of
+// either party, or the target's device key is known.
+lemma stream_binding:
+  "All bus A B cid dir data #i.
+     ChunkAccepted(bus, A, B, cid, dir, data) @ i
+     ==> (Ex #s. ChunkSent(bus, B, A, cid, data) @ s & s < i)
+       | (Ex #r. RevealContext(bus, A, cid) @ r)
+       | (Ex #r. RevealContext(bus, B, cid) @ r)
+       | (Ex sk #r. RevealSeal(bus, A, sk) @ r)
+       | (Ex sk #r. RevealSeal(bus, B, sk) @ r)
+       | (Ex #r. RevealDev(bus, A) @ r)
+       | (Ex #r. RevealDev(bus, B) @ r)"
+
+end

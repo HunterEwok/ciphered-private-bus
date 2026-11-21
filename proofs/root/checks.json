@@ -1,0 +1,32 @@
+{
+  "probes": {
+    "PROBE_K1_ONLY": "root_change_quantum",
+    "PROBE_K2_ONLY": "root_change_authentic",
+    "PROBE_ROOT_ANY_GEN": "old_root_powerless",
+    "PROBE_NO_BUS_CHECK": "join_authentic",
+    "PROBE_HALT_SAME_REST": "halt_proof_authentic",
+    "PROBE_NO_LABEL": "halt_proof_authentic"
+  },
+  "ci": {
+    "lemmas": [
+      "executable",
+      "executable_halt",
+      "executable_permanent_halt",
+      "join_authentic",
+      "root_change_authentic",
+      "root_change_quantum",
+      "old_root_powerless",
+      "quantum_forges_records",
+      "halt_proof_authentic",
+      "permanent_halt_authentic"
+    ],
+    "probes": [
+      "PROBE_K1_ONLY",
+      "PROBE_K2_ONLY",
+      "PROBE_ROOT_ANY_GEN",
+      "PROBE_NO_BUS_CHECK",
+      "PROBE_HALT_SAME_REST",
+      "PROBE_NO_LABEL"
+    ]
+  }
+}

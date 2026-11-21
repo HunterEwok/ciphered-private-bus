@@ -176,6 +176,10 @@ invariant the same way, without Python, at below-normal priority, with progress 
 powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model membership -WorkDir <folder> -Java <path to java> -Main large_ind
 ```
 
+`-Only` repeats single checks of an earlier run that had no verdict, for example `-Split -Parallel 1
+-Only RootChangeRights` with the whole heap for one check; checks of two runs of the same model and
+invariant hashes together make one result.
+
 Apalache hands each check to one solver, which runs on one core. With `-Split` the second
 obligation is checked branch by branch of the step (`stepRootAdmit` to `stepGrant` in
 `inductive.qnt`, which together are exactly `step`, listed in `checks.json`), up to `-Parallel` checks at a time, each with

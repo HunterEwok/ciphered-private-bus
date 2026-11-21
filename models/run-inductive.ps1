@@ -21,6 +21,12 @@
 #   powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels `
 #     -WorkDir D:\runs -Java C:\jdk\bin\java.exe -Split
 #   ... -Model membership -Main large_ind -Split -Parallel 12
+#   ... -Model membership -Main large_ind -Split -Parallel 1 -Only RootChangeRights
+#
+# -Only runs a subset of the checks, to repeat those of an earlier run that
+# had no verdict: "init", "safety", or step branches named as in the progress
+# output (without "step"). Each obligation stands on its own, so the checks of
+# two runs of the same model and invariant hashes together make one result.
 #
 # -Main defaults to "inductive.instance" in checks.json.
 #
@@ -36,7 +42,8 @@ param(
     [double]$Share = 0.85,
     [int]$Port = 8822,
     [int]$IntervalSeconds = 60,
-    [int]$TimeoutHours = 0
+    [int]$TimeoutHours = 0,
+    [string[]]$Only = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -119,6 +126,19 @@ if ($Split) {
     $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1)
 }
 $jobs += , @("IndInv implies safety", "indInit", "modelStep", "modelSafety", 0)
+# With powershell -File a list arrives as one string, "a,b".
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Only.Count -gt 0) {
+    $picked = @()
+    $known = @()
+    foreach ($j in $jobs) {
+        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq "modelSafety") { $key = "safety" } else { $key = $j[2] -replace '^step', '' }
+        $known += $key
+        if ($Only -contains $key) { $picked += , $j }
+    }
+    foreach ($o in $Only) { if ($known -notcontains $o) { throw "-Only ${o}: not one of $($known -join ', ')" } }
+    $jobs = $picked
+}
 
 # Resources: every running check has its own server and heap.
 if ($Parallel -le 0) { $Parallel = if ($Split) { 8 } else { 1 } }

@@ -13,7 +13,12 @@
     "reboot_rollback",
     "grant_no_right",
     "accept_old_data_gen",
-    "no_prune"
+    "no_prune",
+    "accept_no_publish",
+    "below_window_valid",
+    "window_past_set_bit",
+    "unbounded_window",
+    "need_next"
   ],
   "witnesses": [
     "witnessHalt",
@@ -21,7 +26,8 @@
     "witnessAccept",
     "witnessGrant",
     "witnessRootChange",
-    "witnessRevokedSends"
+    "witnessRevokedSends",
+    "witnessWindowMoves"
   ],
   "inductive": {
     "instance": "large_ind",

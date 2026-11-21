@@ -3,20 +3,27 @@
 # Membership model
 
 A Quint [model](membership.qnt) of the membership state machine (verification level V2 of
-the [specification](../../docs/spec/requirements.md), Section 14): passports, checkpoints,
-revocation, change of rights, root change, halt and halt proofs, reboot, and the acceptance
-of data and key grants. The header of `membership.qnt` lists every abstraction.
+the [specification](../../docs/spec/requirements.md), Section 14): passports, checkpoints and
+their window, revocation, change of rights, root change, halt and halt proofs, reboot, and the
+acceptance of data and key grants against the read and publish rights. The header of
+`membership.qnt` lists every abstraction.
 
 ## Instances
 
 [`instances.qnt`](instances.qnt) fixes the sizes.
 
-| Instance | Devices | Generations | Numbers per generation | Purpose |
-| --- | --- | --- | --- | --- |
-| `small` | 3 | 2 | 3 | Simulator runs in CI |
-| `tiny` | 2 | 2 | 2 | Simulator in CI |
-| `tiny_tlc` | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
-| `probe_*` | 3 | 2 | 3 | One deliberate defect each; `safety` must fail (R-VER-2). `accept_old_data_gen` and `halted_silent` have the size of `tiny_tlc`, which their defects need, so that TLC reaches them quickly |
+| Instance | Devices | Generations | Numbers per generation | Window | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| `small` | 3 | 2 | 3 | 2 | Simulator runs in CI |
+| `tiny` | 2 | 2 | 2 | 2 | Simulator in CI |
+| `tiny_tlc` | 2 | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
+| `conv_tlc` | 2 | 2 | 1 | 1 | TLC of `safety` including `convergence`, with the processed-record sets; two checkpoints out of order need two numbers and are covered by a scenario and the probe `need_next` |
+| `live_tlc` | 2 | 2 | 1 | 1 | TLC of the liveness property `haltPropagates` |
+| `probe_*` | 3 | 2 | 3 | 2 | One deliberate defect each; `safety` must fail (R-VER-2). `accept_old_data_gen`, `halted_silent` and `need_next` have the size of `tiny_tlc`, which their defects need, so that TLC reaches them quickly; `halted_silent_live` has the size of `live_tlc` |
+
+With three numbers per generation a window of two binds: the Root has to reissue a passport
+before it can issue a third. With two numbers it never binds, but the window start still moves
+past revoked and replaced numbers.
 
 ## Properties
 
@@ -37,11 +44,14 @@ the previous state nor a log of past acceptances, which would multiply the state
 | `cacheConsistent` | R-MEM-7, R-MEM-8 | S8 |
 | `revokedIsRejected` | R-MEM-2, R-MEM-12, R-VER-4 | S4, S5 |
 | `grantsNeedRead` | R-CH-13 | S4, S16 |
+| `dataNeedsPublish` | R-CH-13 | S4, S16: data off channel 0 is accepted only from a passport with the publish right |
+| `windowBounded` | R-MEM-14 | every checkpoint the Root issues spans at most `WINDOW` numbers |
+| `windowKeepsValid` | R-MEM-4, R-MEM-14 | the Root's latest checkpoint has the bit of every passport the Root holds valid: moving the window revokes nobody |
 | `convergence` | R-ARC-6 | S7 |
 
 `convergence` compares two nodes that processed the same records. A record of another
-generation is dropped unprocessed: the core has no wait buffer (R-MEM-6). Getting such a
-record again is a liveness property and is not checked yet.
+generation is dropped unprocessed: the core has no wait buffer (R-MEM-6). That such a record
+comes back is part of the liveness property `haltPropagates` for halt proofs.
 
 Probes, each expected to violate `safety`:
 
@@ -59,6 +69,11 @@ Probes, each expected to violate `safety`:
 | `grant_no_right` | A key is granted to a passport without the read right |
 | `accept_old_data_gen` | Data of an older generation is accepted |
 | `no_prune` | A new checkpoint does not remove revoked passports from the cache |
+| `accept_no_publish` | Data off channel 0 is accepted from a passport without the publish right; violates `dataNeedsPublish` |
+| `below_window_valid` | A passport number below the window start, which has no bit, is taken as valid, so a revoked passport comes back when the window moves past it; violates `revokedIsRejected` and `cacheConsistent` |
+| `window_past_set_bit` | The Root moves the window start past a set bit; violates `windowKeepsValid` |
+| `unbounded_window` | The Root issues a checkpoint whose window exceeds `WINDOW`; violates `windowBounded` |
+| `need_next` | A node takes only the checkpoint right after its own, so its state depends on the order of arrival; violates `convergence` (S7) |
 | `halted_silent` | A halted node does not answer a sender of its generation with the proof; violates `haltPropagates`, not `safety` |
 
 Some defects need a long, specific sequence that random simulation rarely produces. Such a
@@ -66,18 +81,23 @@ probe also has a fixed scenario in [`scenarios.qnt`](scenarios.qnt) (`quint test
 correct model must refuse the step, and the broken one must violate `safety` after it.
 `accept_old_data_gen` is checked this way, and so is the case that led to the halt rule of
 R-MEM-6: a proof dropped as belonging to a future generation comes back from a halted peer once
-the node has moved to that generation (`halted_silent` removes that answer).
+the node has moved to that generation (`halted_silent` removes that answer). Further scenarios
+show two nodes that receive two checkpoints in opposite orders ending at the same one (and
+`need_next` leaving them apart), and a replaced passport leaving the cache when the window
+start moves past it (and `below_window_valid` keeping it).
 
 Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node
 eventually halts too or leaves that generation, and that once a peer is permanently halted, every
 node eventually is (S8, R-MEM-6, R-MEM-10, R-MEM-13). It assumes weak fairness
 of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
 the proof. The probe `halted_silent` (the size of `tiny_tlc`) removes that answer, and the property must
-then fail. Liveness is checked with TLC and is a long run.
+then fail. Liveness is checked with TLC on `live_tlc` (one number per generation, which is
+enough for a halt and a permanent halt) and is a long run; `probe_halted_silent_live` is its probe.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
-the violation shows that halts, permanent halts, accepted data, key grants, root changes, and
-sends under revoked passports are all reachable, so `safety` does not hold vacuously.
+the violation shows that halts, permanent halts, accepted data, key grants, root changes, sends
+under revoked passports, and a moving window are all reachable, so `safety` does not hold
+vacuously.
 
 ## Inductive invariant
 
@@ -91,17 +111,19 @@ obligations, which together show that `safety` holds in every reachable state, a
 3. every state that satisfies `IndInv` satisfies `safety`.
 
 Besides the state parts of `safety` and its monitor (`broken` stays empty), `IndInv` states
-the bounds of every variable and these lemmas: a permanent halt is a halt; a processed root
+the bounds of every variable (every checkpoint keeps its valid numbers inside a window of at
+most `WINDOW` numbers) and these lemmas: a permanent halt is a halt; a processed root
 change proof made the halt permanent and every other processed proof is of the current or an
-older generation; the Root's valid and revoked numbers are below its next number and its rights
-map covers exactly those numbers; and the honest checkpoints of one generation never set a bit
+older generation; the Root's valid and revoked numbers are below its next number, its rights
+map covers exactly those numbers, and its next checkpoint fits the window; the Root's latest
+honest checkpoint carries exactly the Root's valid numbers; and the honest checkpoints of one generation never set a bit
 again once it was cleared, which makes the honest-history part of `revokedIsRejected` follow
 from validity under the receiver's own checkpoint.
 
 The instances are `tiny_ind` (the size of `tiny_tlc`, checked in CI), `small_ind` (three
 devices, three numbers per generation), and `large_ind` (three devices, three generations,
-three numbers) for a long run. `convergence` is not covered: it reads the processed-record sets and
-is checked by the simulator.
+three numbers) for a long run. `convergence` is not covered: it reads the processed-record sets.
+It is checked by the simulator, by the scenarios, and exhaustively by TLC on `conv_tlc`.
 
 ## Running
 
@@ -115,8 +137,9 @@ python3 models/membership/check.py apalache --steps 5   # bounded smoke check, i
 python3 models/membership/check.py tlc --main tiny_tlc  # exhaustive, long run
 python3 models/membership/check.py apalache --main probe_no_halt --expect violated
 python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
-python3 models/membership/check.py tlc --main tiny_tlc --temporal haltPropagates
-python3 models/membership/check.py tlc --main probe_halted_silent --temporal haltPropagates --expect violated
+python3 models/membership/check.py tlc --main conv_tlc  # safety with convergence, long run
+python3 models/membership/check.py tlc --main live_tlc --temporal haltPropagates
+python3 models/membership/check.py tlc --main probe_halted_silent_live --temporal haltPropagates --expect violated
 python3 models/membership/check.py inductive                    # IndInv, instance tiny_ind
 python3 models/membership/check.py inductive --main small_ind
 ```

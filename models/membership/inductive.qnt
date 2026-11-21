@@ -14,26 +14,31 @@ module inductive {
   const I_DEVICES: Set[str]
   const I_MAX_GEN: int
   const I_MAX_NO: int
+  const I_WINDOW: int
   const I_MUTANT: str
-  import membership(DEVICES = I_DEVICES, MAX_GEN = I_MAX_GEN, MAX_NO = I_MAX_NO, MUTANT = I_MUTANT, TRACK_RECV = false).* from "./membership"
+  import membership(DEVICES = I_DEVICES, MAX_GEN = I_MAX_GEN, MAX_NO = I_MAX_NO, WINDOW = I_WINDOW, MUTANT = I_MUTANT, TRACK_RECV = false).* from "./membership"
 
   // ------------------------------------------------------------ bounded types
   val GENS = 1.to(MAX_GEN)
   val NOS = 1.to(MAX_NO)
-  // Every checkpoint, honest or not, has its valid numbers below its next
-  // number, and a next number at most one above its own number: each
-  // passport the Root issues comes with a new checkpoint. Limiting the type
-  // to such checkpoints keeps the solver's sets small.
-  val CPS: Set[Checkpoint] = tuples(GENS, 0.to(MAX_NO), NOS.powerset(), 1.to(MAX_NO + 1))
-    .map(t => { gen: t._1, no: t._2, valid: t._3, nextNo: t._4 })
-    .filter(c => c.nextNo <= c.no + 1 and c.valid.forall(k => k < c.nextNo))
-  val PPS: Set[Passport] = tuples(GENS, NOS, DEVICES, Set(0, 1))
+  // Every checkpoint, honest or not, has its valid numbers in its window
+  // [start, nextNo), a window of at most WINDOW numbers, and a next number at
+  // most one above its own number: each passport the Root issues comes with a
+  // new checkpoint. Limiting the type to such checkpoints keeps the solver's
+  // sets small.
+  val CPS: Set[Checkpoint] = tuples(GENS, 0.to(MAX_NO), 1.to(MAX_NO + 1), NOS.powerset(), 1.to(MAX_NO + 1))
+    .map(t => { gen: t._1, no: t._2, start: t._3, valid: t._4, nextNo: t._5 })
+    .filter(c => and {
+      c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= WINDOW,
+      c.valid.forall(k => c.start <= k and k < c.nextNo),
+    })
+  val PPS: Set[Passport] = tuples(GENS, NOS, DEVICES, RIGHTS)
     .map(t => { gen: t._1, no: t._2, dev: t._3, rights: t._4 })
   val RCS: Set[RootChange] = tuples(GENS, Set(0, 1)).map(t => { gen: t._1, key: t._2 })
   val HPS: Set[HaltProof] = tuples(Set("cp", "pp", "rc"), GENS, 0.to(MAX_NO))
     .map(t => { kind: t._1, gen: t._2, no: t._3 })
-  val DATAS: Set[Data] = tuples(DEVICES, NOS, GENS, 0.to(MAX_NO))
-    .map(t => { src: t._1, ppNo: t._2, gen: t._3, cpNo: t._4 })
+  val DATAS: Set[Data] = tuples(DEVICES, NOS, GENS, 0.to(MAX_NO), Set(false, true))
+    .map(t => { src: t._1, ppNo: t._2, gen: t._3, cpNo: t._4, ch0: t._5 })
 
   pure def below(s: Set[int], c: Checkpoint): Set[int] = s.filter(k => k < c.nextNo)
 
@@ -62,7 +67,9 @@ module inductive {
     r.valid.forall(k => 1 <= k and k < r.nextNo),
     r.revoked.forall(k => 1 <= k and k < r.nextNo),
     r.rights.keys() == NOS.filter(k => k < r.nextNo),
-    r.rights.keys().forall(k => r.rights.get(k) == 0 or r.rights.get(k) == 1),
+    r.rights.keys().forall(k => RIGHTS.contains(r.rights.get(k))),
+    // the window of the Root's next checkpoint fits (R-MEM-14)
+    r.nextNo - windowStart(r.valid, r.nextNo) <= WINDOW,
     // rootHonorsRevocation
     r.valid.intersect(r.revoked) == Set(),
   }
@@ -74,6 +81,8 @@ module inductive {
     h.subseteq(CPS),
     h.forall(c => c.gen <= r.gen and (c.gen == r.gen implies and {
       c.no <= r.cpNo, c.nextNo <= r.nextNo, below(r.valid, c).subseteq(c.valid),
+      // windowKeepsValid
+      c.no == r.cpNo implies (c.valid == r.valid and c.nextNo == r.nextNo),
     })),
     h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no <= c2.no) implies
       (c1.nextNo <= c2.nextNo and below(c2.valid, c1).subseteq(c1.valid)))),
@@ -137,7 +146,7 @@ module inductive {
     nondet rnx = 1.to(MAX_NO + 1).oneOf()
     nondet rv = NOS.powerset().oneOf()
     nondet rrv = NOS.powerset().oneOf()
-    nondet rfull = setOfMaps(NOS, Set(0, 1)).oneOf()
+    nondet rfull = setOfMaps(NOS, RIGHTS).oneOf()
     nondet pcp = CPS.powerset().oneOf()
     nondet ppp = PPS.powerset().oneOf()
     nondet prc = RCS.powerset().oneOf()
@@ -166,15 +175,15 @@ module inductive {
 
 // The instance tiny_tlc.
 module tiny_ind {
-  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_WINDOW = 2, I_MUTANT = "none").*
 }
 
 // The size of small: three devices, three numbers per generation.
 module small_ind {
-  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 2, I_MAX_NO = 3, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 2, I_MAX_NO = 3, I_WINDOW = 2, I_MUTANT = "none").*
 }
 
 // For a long run (R-VER-3): three devices, three generations, three numbers.
 module large_ind {
-  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 3, I_MAX_NO = 3, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 3, I_MAX_NO = 3, I_WINDOW = 2, I_MUTANT = "none").*
 }

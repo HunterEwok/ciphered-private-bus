@@ -3,11 +3,11 @@
 //
 // Membership state machine of Ciphered Private Bus (verification level V2).
 //
-// Scope: passports, checkpoints, revocation, change of rights, root change,
-// halt and halt proofs, reboot, and the acceptance of data and key grants
-// against the receiver's checkpoint. Requirements: R-MEM-1..13 (R-MEM-6 with
-// the answer of a halted node), R-MEM-16, R-CH-13, R-VER-4; properties S4..S9
-// and S16, and the liveness of halt propagation.
+// Scope: passports, checkpoints with their window, revocation, change of
+// rights, root change, halt and halt proofs, reboot, and the acceptance of
+// data and key grants against the receiver's checkpoint. Requirements:
+// R-MEM-1..14 (R-MEM-6 with the answer of a halted node), R-MEM-16, R-CH-13,
+// R-VER-4; properties S4..S9 and S16, and the liveness of halt propagation.
 //
 // Abstractions (each one is stated so that a reader can judge what a green
 // run does and does not show):
@@ -20,27 +20,38 @@
 //   root key (L4); the bus must detect it, not prevent it.
 // - The recovery key may equivocate (two root change records of one
 //   generation, L6).
-// - A checkpoint bitmap is the set of valid passport numbers; the window
-//   (R-MEM-14) is not modelled.
-// - Rights are reduced to one bit: 1 = read, 0 = no read.
-// - A data message stands for a publication or a call: it carries the
-//   sender's device, passport number, and (generation, checkpoint number).
+// - A checkpoint carries its window start and the set of valid passport
+//   numbers in the window [start, nextNo) (R-MEM-14); a number below the
+//   start has no bit and is not valid. The Root moves the start as far as
+//   R-MEM-14 allows, past every leading cleared bit, with each checkpoint it
+//   issues, and reissues a passport (a change of rights to the same rights)
+//   when the window would grow beyond WINDOW numbers.
+// - Rights are the two bits that membership decisions read: bit 0 read,
+//   bit 1 publish (Appendix B, Section B.1). The relay and join-request bits
+//   are left to the relay and enrollment models.
+// - A data message stands for a publication or a key grant received from a
+//   source: it carries the sender's device, passport number, (generation,
+//   checkpoint number), and whether it is on channel 0. Calls are checked
+//   against permits in models/calls, not against these rights.
+// - The recipient's check of its own read right before it takes a grant
+//   (R-CH-13, last sentence) is not modelled; the source's check is.
 module membership {
   // ---------------------------------------------------------------- parameters
   const DEVICES: Set[str]
   const MAX_GEN: int      // highest root generation the recovery key may create
   const MAX_NO: int       // highest passport and checkpoint number per generation
+  const WINDOW: int       // the profile limit on the bitmap length (R-MEM-14)
   const MUTANT: str       // "none", or the name of a deliberate defect (R-VER-2)
   const TRACK_RECV: bool  // record processed checkpoints, passports and root change records (for convergence only)
 
   // --------------------------------------------------------------------- types
   type Passport = { gen: int, no: int, dev: str, rights: int }
-  type Checkpoint = { gen: int, no: int, valid: Set[int], nextNo: int }
+  type Checkpoint = { gen: int, no: int, start: int, valid: Set[int], nextNo: int }
   type RootChange = { gen: int, key: int }
   // A halt proof names the kind and the head it proves. It is valid by
   // construction: it is only ever created from two conflicting records.
   type HaltProof = { kind: str, gen: int, no: int }
-  type Data = { src: str, ppNo: int, gen: int, cpNo: int }
+  type Data = { src: str, ppNo: int, gen: int, cpNo: int, ch0: bool }
 
   type Node = {
     gen: int,
@@ -79,7 +90,7 @@ module membership {
 
   // An acceptance or a grant: the receiver's checkpoint at that moment, the
   // generation of the message, and the rights of the passport it relied on.
-  type Entry = { node: str, peer: str, ppNo: int, msgGen: int, rights: int, cp: Checkpoint, halted: bool }
+  type Entry = { node: str, peer: str, ppNo: int, msgGen: int, rights: int, ch0: bool, cp: Checkpoint, halted: bool }
 
   // ----------------------------------------------------------------- variables
   var nodes: str -> Node
@@ -94,7 +105,17 @@ module membership {
   var seen: Set[str]           // ghost: "accept" and "grant" once they happened (witnesses)
 
   // ------------------------------------------------------------------- helpers
-  pure def genesis(g: int): Checkpoint = { gen: g, no: 0, valid: Set(), nextNo: 1 }
+  pure def genesis(g: int): Checkpoint = { gen: g, no: 0, start: 1, valid: Set(), nextNo: 1 }
+
+  // Rights bits (Appendix B, Section B.1).
+  pure def canRead(r: int): bool = r % 2 == 1
+  pure def canPublish(r: int): bool = (r / 2) % 2 == 1
+  val RIGHTS = Set(0, 1, 2, 3)
+
+  // R-MEM-14: the window start moves only past cleared bits, so the farthest
+  // it may go is the lowest valid number, or the next number if none is valid.
+  pure def windowStart(valid: Set[int], nx: int): int =
+    valid.fold(nx, (m, k) => if (k < m) k else m)
 
   pure def lexGt(g1: int, c1: int, g2: int, c2: int): bool =
     g1 > g2 or (g1 == g2 and c1 > c2)
@@ -105,16 +126,21 @@ module membership {
   pure def ppConflict(a: Passport, b: Passport): bool =
     a.gen == b.gen and a.no == b.no and a != b
 
-  // R-MEM-2: valid for a verifier with checkpoint c.
-  // The set of valid numbers stands for the window and bitmap, so a number at
-  // or above nextNo is never in it: the check "number below next" is part of
-  // reading the bitmap and has no separate probe.
+  // R-MEM-2, R-MEM-14: valid for a verifier with checkpoint c. The bitmap
+  // covers [start, nextNo), so a number outside it is never in the set of
+  // valid numbers: the checks "number below next" and "number at or above the
+  // start" are part of reading the bitmap. The probe below_window_valid shows
+  // why the second one matters.
   pure def validIn(p: Passport, c: Checkpoint): bool =
-    p.gen == c.gen and p.no < c.nextNo and c.valid.contains(p.no)
+    p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
 
   // The check the nodes run; a probe may break it. Invariants use validIn.
+  // Mutant "below_window_valid": a number below the window start, which has
+  // no bit, is taken as valid.
   pure def validUnder(p: Passport, c: Checkpoint): bool =
-    if (MUTANT == "ignore_bitmap") p.gen == c.gen and p.no < c.nextNo else validIn(p, c)
+    if (MUTANT == "ignore_bitmap") p.gen == c.gen and p.no < c.nextNo
+    else if (MUTANT == "below_window_valid") validIn(p, c) or (p.gen == c.gen and p.no < c.start)
+    else validIn(p, c)
 
   pure def initNode: Node = {
     gen: 1, cp: genesis(1), pps: Set(), rc: -1, halted: false, forever: false,
@@ -158,7 +184,10 @@ module membership {
     .union(if (e.halted) Set("haltedIsInert") else Set())
     // R-CH-13: keys are granted only to passports with the read right, as
     // the granting node saw them, so an equivocated passport cannot mask it.
-    .union(if (isGrant and e.rights != 1) Set("grantsNeedRead") else Set())
+    .union(if (isGrant and not(canRead(e.rights))) Set("grantsNeedRead") else Set())
+    // R-CH-13: data is accepted only from a passport with the publish right,
+    // except on channel 0.
+    .union(if (not(isGrant) and not(e.ch0) and not(canPublish(e.rights))) Set("dataNeedsPublish") else Set())
 
   action commitWith(n2: str -> Node, r2: Root, p2: Pool, h2: Set[Checkpoint], extra: Set[str], tags: Set[str]): bool = all {
     nodes' = n2,
@@ -186,31 +215,40 @@ module membership {
   }
 
   // ------------------------------------------------------------- Root actions
+  // Mutant "window_past_set_bit": the start moves one past the lowest valid
+  // number, so the bit of a valid passport falls out of the window.
   def rootCheckpoint(valid: Set[int], nx: int): Checkpoint =
-    { gen: root.gen, no: root.cpNo + 1, valid: valid, nextNo: nx }
+    val s0 = windowStart(valid, nx)
+    val s = if (MUTANT == "window_past_set_bit" and s0 < nx) s0 + 1 else s0
+    { gen: root.gen, no: root.cpNo + 1, start: s, valid: valid.filter(k => k >= s), nextNo: nx }
 
   // Admit a device, or change its rights: the passport and the checkpoint are
-  // issued together (R-MEM-3, R-MEM-4).
+  // issued together (R-MEM-3, R-MEM-4). The window must stay within WINDOW
+  // numbers (R-MEM-14); mutant "unbounded_window" drops that limit.
   action rootIssue(d: str, rights: int, replaces: Set[int]): bool = all {
     root.nextNo <= MAX_NO,
     root.cpNo < MAX_NO,
     val p = { gen: root.gen, no: root.nextNo, dev: d, rights: rights }
     val v = root.valid.exclude(replaces).union(Set(root.nextNo))
     val c = rootCheckpoint(v, root.nextNo + 1)
-    commit(nodes,
-      { ...root, cpNo: root.cpNo + 1, nextNo: root.nextNo + 1, valid: v,
-        rights: root.rights.put(root.nextNo, rights), revoked: root.revoked.union(replaces) },
-      { ...pool, pp: pool.pp.union(Set(p)), cp: pool.cp.union(Set(c)) },
-      history.union(Set(c))),
+    all {
+      c.nextNo - c.start <= WINDOW or MUTANT == "unbounded_window",
+      commit(nodes,
+        { ...root, cpNo: root.cpNo + 1, nextNo: root.nextNo + 1, valid: v,
+          rights: root.rights.put(root.nextNo, rights), revoked: root.revoked.union(replaces) },
+        { ...pool, pp: pool.pp.union(Set(p)), cp: pool.cp.union(Set(c)) },
+        history.union(Set(c))),
+    }
   }
 
   action rootAdmit = {
     nondet d = DEVICES.oneOf()
-    nondet r = Set(0, 1).oneOf()
+    nondet r = RIGHTS.oneOf()
     rootIssue(d, r, Set())
   }
 
   // Change of rights: a new passport for the same device, the old one revoked.
+  // With the same rights this is the reissue that moves the window (R-MEM-14).
   action rootChangeRights = all {
     root.valid != Set(),
     nondet k = root.valid.oneOf()
@@ -218,7 +256,8 @@ module membership {
     all {
       old != Set(),
       nondet p = old.oneOf()
-      rootIssue(p.dev, 1 - root.rights.get(k), Set(k)),
+      nondet r = RIGHTS.oneOf()
+      rootIssue(p.dev, r, Set(k)),
     }
   }
 
@@ -241,7 +280,7 @@ module membership {
     nondet c = pool.cp.filter(c => c.gen == root.gen and c.no >= 1).oneOf()
     nondet k = 1.to(MAX_NO).oneOf()
     val v = if (c.valid.contains(k)) c.valid.exclude(Set(k)) else c.valid.union(Set(k))
-    val c2 = { ...c, valid: v.filter(x => x < c.nextNo) }
+    val c2 = { ...c, valid: v.filter(x => c.start <= x and x < c.nextNo) }
     all {
       c2 != c,
       commit(nodes, root, { ...pool, cp: pool.cp.union(Set(c2)) }, history),
@@ -251,7 +290,7 @@ module membership {
   // Equivocation: a second passport with an already used number.
   action rootEquivocatePp = {
     nondet p = pool.pp.filter(p => p.gen == root.gen).oneOf()
-    val p2 = { ...p, rights: 1 - p.rights }
+    val p2 = { ...p, rights: 3 - p.rights }
     commit(nodes, root, { ...pool, pp: pool.pp.union(Set(p2)) }, history)
   }
 
@@ -312,7 +351,10 @@ module membership {
       setNode(d, n, pool)
     else if (cpConflict(c, n.cp) and MUTANT != "no_halt")
       setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "cp", gen: c.gen, no: c.no })) })
-    else if (c.no > n.cp.no or acceptOld or (MUTANT == "accept_lower" and c.no < n.cp.no))
+    // Mutant "need_next": only the checkpoint right after the current one is
+    // taken, so the state depends on the order of arrival (S7).
+    else if ((c.no > n.cp.no and (MUTANT != "need_next" or c.no == n.cp.no + 1))
+             or acceptOld or (MUTANT == "accept_lower" and c.no < n.cp.no))
       setNode(d, { ...n, cp: c, gen: c.gen,
                    pps: if (MUTANT == "no_prune") n.pps else n.pps.filter(p => validUnder(p, c)) }, pool)
     else
@@ -405,11 +447,14 @@ module membership {
       not(n.halted),
       mine != Set(),
       nondet p = mine.oneOf()
-      setNode(d, n, { ...pool, data: pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen, cpNo: n.cp.no })) }),
+      nondet ch0 = Set(false, true).oneOf()
+      setNode(d, n, { ...pool, data: pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen, cpNo: n.cp.no, ch0: ch0 })) }),
     }
   }
 
-  // Accept data (R-MEM-6, R-MEM-12, S4, S5). A receiver with an older pair
+  // Accept data (R-MEM-6, R-MEM-12, R-CH-13, S4, S5). Off channel 0 the
+  // passport needs the publish right; mutant "accept_no_publish" skips that
+  // check. A receiver with an older pair
   // drops the message and requests the checkpoint; nothing changes in its
   // state. A message of an older generation names a passport of a replaced
   // Root and is dropped too: passport numbers start over in every generation.
@@ -423,8 +468,11 @@ module membership {
       not(lexGt(m.gen, m.cpNo, n.gen, n.cp.no)),
       known != Set(),
       nondet p = known.oneOf()
-      val e = { node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights, cp: n.cp, halted: n.halted }
-      commitWith(nodes, root, pool, history, entryProblems(e, history, false), Set("accept")),
+      val e = { node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights, ch0: m.ch0, cp: n.cp, halted: n.halted }
+      all {
+        m.ch0 or canPublish(p.rights) or MUTANT == "accept_no_publish",
+        commitWith(nodes, root, pool, history, entryProblems(e, history, false), Set("accept")),
+      },
     }
   }
 
@@ -436,9 +484,9 @@ module membership {
       nondet p = n.pps.oneOf()
       all {
         p.dev != d,
-        p.rights == 1 or MUTANT == "grant_no_right",
+        canRead(p.rights) or MUTANT == "grant_no_right",
         validUnder(p, n.cp),
-        val e = { node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, cp: n.cp, halted: n.halted }
+        val e = { node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, ch0: false, cp: n.cp, halted: n.halted }
         commitWith(nodes, root, pool, history, entryProblems(e, history, true), Set("grant")),
       },
     }
@@ -503,6 +551,16 @@ module membership {
 
   // R-CH-13 (see entryProblems).
   val grantsNeedRead = not(broken.contains("grantsNeedRead"))
+  val dataNeedsPublish = not(broken.contains("dataNeedsPublish"))
+
+  // R-MEM-14: every checkpoint the Root issues spans at most WINDOW numbers.
+  val windowBounded = history.forall(c => c.nextNo - c.start <= WINDOW)
+
+  // R-MEM-4, R-MEM-14: the Root's latest checkpoint has the bit of every
+  // passport the Root holds valid, so moving the window never revokes a
+  // member the owner did not revoke.
+  val windowKeepsValid = history.forall(c =>
+    (c.gen == root.gen and c.no == root.cpNo) implies (c.valid == root.valid and c.nextNo == root.nextNo))
 
   // S7: two nodes that processed the same records are in the same state, with
   // one exception: a node that saw two conflicting records halted while the
@@ -521,7 +579,8 @@ module membership {
 
   val safety = noRollback and currentGeneration and haltIsSticky and haltedIsInert
     and proofIsObeyed and rootHonorsRevocation and cacheConsistent
-    and revokedIsRejected and grantsNeedRead and convergence
+    and revokedIsRejected and grantsNeedRead and dataNeedsPublish
+    and windowBounded and windowKeepsValid and convergence
 
   // ------------------------------------------------------------- liveness
   // S8, R-MEM-10: while a halted peer of its generation exists, a node
@@ -549,6 +608,7 @@ module membership {
   val witnessAccept = not(seen.contains("accept"))
   val witnessGrant = not(seen.contains("grant"))
   val witnessRootChange = DEVICES.forall(d => nodes.get(d).gen == 1)
+  val witnessWindowMoves = history.forall(c => c.start == 1)
   val witnessRevokedSends = not(pool.data.exists(m =>
     DEVICES.exists(d => revokedBy(m.ppNo, nodes.get(d).cp) and nodes.get(d).gen == m.gen)))
 }

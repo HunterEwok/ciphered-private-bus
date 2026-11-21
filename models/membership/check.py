@@ -59,6 +59,11 @@ PROBES = [
     "reboot_rollback",
     "grant_no_right",
     "no_prune",
+    "accept_no_publish",
+    "below_window_valid",
+    "window_past_set_bit",
+    "unbounded_window",
+    "need_next",
 ]
 # Probes that random simulation rarely reaches are checked by a fixed scenario
 # in SCENARIOS instead: accept_old_data_gen, halted_silent.
@@ -69,10 +74,19 @@ WITNESSES = [
     "witnessGrant",
     "witnessRootChange",
     "witnessRevokedSends",
+    "witnessWindowMoves",
 ]
 SEED = "0x5eed"
 # Fixed scenarios in scenarios.qnt, one module each; every test must pass.
-SCENARIOS = ["scenarios", "scenarios_probe_accept_old_data_gen", "scenarios_probe_halted_silent"]
+SCENARIOS = [
+    "scenarios",
+    "scenarios_probe_accept_old_data_gen",
+    "scenarios_probe_halted_silent",
+    "scenarios_convergence",
+    "scenarios_probe_need_next",
+    "scenarios_window",
+    "scenarios_probe_below_window_valid",
+]
 
 
 def quint(args, timeout):

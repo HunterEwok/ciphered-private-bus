@@ -85,6 +85,5 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model enrollm
 | 2026-11-21 | `a8c801d73b0f` (commit 56d4c14) | TLC 1.7.4, `run-all.ps1 -Stages probes`, maintainer's server (49 workers) | 6 probes against `safety`, 5 witnesses on `tiny_root`, breadth-first until the first violation | 11 of 11 violated as expected, 1.0 to 17.4 min each (`probe_sig_key_only` the longest, 52 million distinct states at depth 8) |
 | 2026-11-21 | `a8c801d73b0f`, invariant `cda9bc51d3e4` (commit 56d4c14) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (2 checks at a time, 24 GB heap each) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.2 min, the 7 step branches in 11.2 to 17.4 min, `IndInv` implies `safety` in 6.3 min; 96 min in total. The branch `stepBadIssue`, enabled only by the mutant `acceptor_issues`, was also listed and reported a deadlock (no transition); it is no longer part of the proof. Safety holds in every reachable state of `small` |
 
-After the proof, commit 25f3a6e added only a three-line comment above `stepBadIssue` to
-`inductive.qnt`, so the file now hashes to `9a33443ad926`; `IndInv` and every step branch of the
-proof are unchanged (`git diff 56d4c14 25f3a6e -- models/enrollment/inductive.qnt`).
+After the proof, the only change to `inductive.qnt` was a three-line comment above `stepBadIssue`,
+so the file now hashes to `9a33443ad926`; `IndInv` and every step branch of the proof are unchanged.

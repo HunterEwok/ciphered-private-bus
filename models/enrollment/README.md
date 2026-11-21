@@ -16,6 +16,7 @@ lists every abstraction.
 | --- | --- | --- | --- | --- | --- |
 | `small` | `j1` (with user presence), `j2` | `h`, the Root | 2 | 6 | Simulator in CI |
 | `tiny` | `j1` (with user presence) | `h` | 2 | 4 | Simulator in CI, TLC |
+| `tiny_root` | `j1` (with user presence) | `h`, the Root | 2 | 4 | TLC witnesses (admission after pairing with the Root is reachable) |
 | `probe_*` | as `small` | | | | One deliberate defect each; `safety` must fail (R-VER-2) |
 
 Every instance also has the compromised acceptor `c` and the adversary's own device key.

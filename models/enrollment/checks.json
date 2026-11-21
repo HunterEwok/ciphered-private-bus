@@ -1,6 +1,6 @@
 {
   "tlcInstance": "tiny",
-  "witnessInstance": "tiny",
+  "witnessInstance": "tiny_root",
   "probes": [
     "no_fingerprint_compare",
     "sig_key_only",

@@ -12,6 +12,12 @@ module small {
 module tiny {
   import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h"), LIMIT = 2, MAX_TID = 4, MUTANT = "none").* from "./enrollment"
 }
+
+// `tiny` with the Root as a second honest acceptor, so that every witness,
+// including admission after pairing with the Root directly, is reachable (TLC).
+module tiny_root {
+  import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h", "root"), LIMIT = 2, MAX_TID = 4, MUTANT = "none").* from "./enrollment"
+}
 module probe_no_fingerprint_compare { import enrollment(JOINERS = Set("j1", "j2"), PRESENCE = Set("j1"), ACCEPTORS = Set("h", "root"), LIMIT = 2, MAX_TID = 6, MUTANT = "no_fingerprint_compare").* from "./enrollment" }
 module probe_sig_key_only { import enrollment(JOINERS = Set("j1", "j2"), PRESENCE = Set("j1"), ACCEPTORS = Set("h", "root"), LIMIT = 2, MAX_TID = 6, MUTANT = "sig_key_only").* from "./enrollment" }
 module probe_no_transcript_binding { import enrollment(JOINERS = Set("j1", "j2"), PRESENCE = Set("j1"), ACCEPTORS = Set("h", "root"), LIMIT = 2, MAX_TID = 6, MUTANT = "no_transcript_binding").* from "./enrollment" }

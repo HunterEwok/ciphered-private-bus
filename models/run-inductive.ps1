@@ -194,6 +194,9 @@ function Get-Verdict($C, [bool]$TimedOut) {
     $text = @()
     foreach ($f in @($C.Log, ($C.Log + ".err"))) { if (Test-Path $f) { $text += Get-Content $f } }
     if (($text -match '^\[ok\]').Count -gt 0) { return "holds" }
+    # Apalache checks for deadlock: a branch that no state enables is reported
+    # as one, which is not a counterexample to the invariant.
+    if (($text -match 'deadlock').Count -gt 0) { return "DEADLOCK (no transition of this branch is enabled), see $($C.Log)" }
     if (($text -match '^\[violation\]').Count -gt 0) { return "VIOLATED, see $($C.Log)" }
     # No verdict: name the first error found, the server's first (it is
     # usually the cause, for example an OutOfMemoryError), then Quint's.

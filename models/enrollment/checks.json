@@ -27,8 +27,7 @@
       "stepSend",
       "stepAdmit",
       "stepRequest",
-      "stepBadRequest",
-      "stepBadIssue"
+      "stepBadRequest"
     ]
   }
 }

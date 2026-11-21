@@ -9,14 +9,16 @@
 # the model's checks.json run too: each probe is a deliberate defect selected
 # with -D, and its lemma must be falsified (R-VER-2), or, for a lemma named
 # *_counterexample, its counterexample trace must be found. With -c only the quick
-# subset listed under "ci" in checks.json runs, as in CI.
+# subset listed under "ci" in checks.json runs, as in CI. With -o NAME only the
+# checks whose name (model or a probe) or lemma is NAME run; fewer provers at
+# a time means more memory for each.
 #
 # Tamarin and Maude are downloaded into the work folder on first use, at the
 # versions pinned in tools/versions/versions.toml, and checked against the
 # pinned SHA-256 of each archive on every run.
 #
 # Usage:
-#   proofs/run-tamarin.sh -m pairing -w ~/cpb-runs [-p] [-c] [-s 0.85] [-t HOURS]
+#   proofs/run-tamarin.sh -m pairing -w ~/cpb-runs [-p] [-c] [-o NAME] [-s 0.85] [-t HOURS]
 #
 # Exit status: 0 every outcome as expected, 1 otherwise.
 
@@ -28,9 +30,9 @@ MAUDE_VERSION="3.5.1"
 TAMARIN_SHA256="201be06f469e47cff554df6ca93db8366fc2c69d70c61fcbd1370a1074b469c6"
 MAUDE_SHA256="72ed1ca87e3b3d0dfc6ee1436baf154bf04c45ff97d521bec040c5e8dfc8f92c"
 
-MODEL=""; WORK=""; PROBES=0; CI=0; SHARE="0.85"; HOURS=0; INTERVAL=60
-USAGE="usage: $0 -m MODEL -w WORKDIR [-p] [-c] [-s SHARE] [-t HOURS]"
-while getopts "m:w:pcs:t:" opt; do
+MODEL=""; WORK=""; PROBES=0; CI=0; ONLY=""; SHARE="0.85"; HOURS=0; INTERVAL=60
+USAGE="usage: $0 -m MODEL -w WORKDIR [-p] [-c] [-o NAME] [-s SHARE] [-t HOURS]"
+while getopts "m:w:pco:s:t:" opt; do
   case "$opt" in
     m) MODEL="$OPTARG" ;;
     w) WORK="$OPTARG" ;;
@@ -38,6 +40,7 @@ while getopts "m:w:pcs:t:" opt; do
     c) CI=1; PROBES=1 ;;
     s) SHARE="$OPTARG" ;;
     t) HOURS="$OPTARG" ;;
+    o) ONLY="$OPTARG" ;;
     *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done
@@ -82,18 +85,15 @@ fi
 say "Tamarin $TAMARIN_VERSION and Maude $MAUDE_VERSION archives match their pinned SHA-256"
 export PATH="$TOOLS:$PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# Resources: every prover gets 2 cores; jobs and memory follow the share.
+# Resources of the machine; they are split once the checks are known.
 CORES=$(nproc)
 MEM_GB=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
-JOBS=$(python3 -c "print(max(1, int($CORES * $SHARE) // 2))")
-JOB_GB=$(python3 -c "print(max(2, int($MEM_GB * $SHARE) // $JOBS))")
 
 MODEL_HASH=$(sha256sum "$SPTHY" | cut -c1-12)
 COMMIT=$(git -C "$PROOFS" rev-parse --short HEAD 2>/dev/null || echo unknown)
 RUN="$WORK/tamarin-$MODEL-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN"
 say "Model $MODEL $MODEL_HASH, commit $COMMIT, Tamarin $TAMARIN_VERSION, run folder $RUN"
-say "$JOBS provers at a time, 2 cores and $JOB_GB GB each ($CORES cores, $MEM_GB GB RAM)"
 
 # Jobs: "name|define|lemma|expected". The model itself: every lemma verified
 # (an exists-trace lemma is verified when its trace is found). A probe
@@ -121,7 +121,17 @@ if probes:
             expected = "verified" if lemma.endswith("_counterexample") else "falsified"
             print(f"{define}|{define}|{lemma}|{expected}")
 EOF
+if [ -n "$ONLY" ]; then
+  awk -F'|' -v n="$ONLY" '$1 == n || $3 == n' "$JOBLIST" > "$JOBLIST.only"
+  mv "$JOBLIST.only" "$JOBLIST"
+fi
 TOTAL=$(wc -l < "$JOBLIST")
+[ "$TOTAL" -gt 0 ] || { say "No check matches -o $ONLY"; exit 2; }
+# Every prover gets 2 cores; the number at a time follows the share and the
+# number of checks, and the memory is split among them.
+JOBS=$(python3 -c "print(max(1, min($TOTAL, int($CORES * $SHARE) // 2)))")
+JOB_GB=$(python3 -c "print(max(2, int($MEM_GB * $SHARE) // $JOBS))")
+say "$JOBS provers at a time, 2 cores and $JOB_GB GB each ($CORES cores, $MEM_GB GB RAM)"
 
 # Every variant (the model and each probe) must parse before any prover starts.
 for define in - $(python3 -c 'import json, sys; print(*json.load(open(sys.argv[1]))["probes"])' "$CHECKS"); do
@@ -163,7 +173,7 @@ verdict() {
         "") cause="no exit status recorded" ;;
         *) cause="exit status $status" ;;
       esac
-      if grep -q "heap overflow\|out of memory" "$log"; then cause="out of memory (heap limit ${JOB_GB} GB)"
+      if [ "$status" = 251 ] || grep -qiE "heap overflow|heap exhausted|out of memory" "$log"; then cause="out of memory (heap limit ${JOB_GB} GB)"
       elif grep -qiE 'error|exception|unexpected' "$log"; then
         cause="$cause; $(grep -m1 -iE 'error|exception|unexpected' "$log" | cut -c1-120)"
       fi

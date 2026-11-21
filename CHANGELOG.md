@@ -27,6 +27,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   both sides, the joiner's signed payload, join requests, a compromised acceptor and a network
   adversary that guesses codes and relays payloads between sessions, and admission after the owner
   compares fingerprints; six probes, witnesses, fixed scenarios, an inductive invariant, and CI jobs.
+- Quint model of streams (`models/streams/`): a stream opened by the reply to a call in ordered or
+  lossy mode, chunks with data, credit and "end" in both directions, the limit on open streams, and
+  every event that closes a stream, with a network that replays and reorders chunks and a peer that
+  may overrun its credit; thirteen probes, witnesses, fixed scenarios, and a CI job.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a

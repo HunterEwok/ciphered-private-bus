@@ -92,5 +92,6 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model calls -
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-21 | `dfa55320e4e3` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 12 probes against `safety`, 6 witnesses on `tiny`, breadth-first until the first violation | 18 of 18 violated as expected, 1.0 to 1.3 min each |
 
-No run is recorded yet.
+`small_ind` ran out of the Java heap (8 GB, then 24 GB) in every branch of the step and has no verdict.

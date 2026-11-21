@@ -60,3 +60,4 @@ the logs, `results.txt` and `summary.txt` into a new run folder. `-t HOURS` limi
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
 | 2026-11-21 | `52e6b4ae98d7` | Tamarin 1.12.0, `run-tamarin.sh -c`, 4 cores, one prover at a time | the 3 CI lemmas verified, 4 of 4 probes falsified (`PROBE_NO_TRANSCRIPT` in 2.4 min, 35 steps); 10.2 min in total |
+| 2026-11-21 | `52e6b4ae98d7` | Tamarin 1.12.0, `run-tamarin.sh -p` (every lemma and every probe), maintainer's server (32 cores), 13 provers at a time, 4 GB each | 10 of 10 lemmas verified, 4 of 4 probes falsified (`PROBE_NO_TRANSCRIPT` in 1.3 min, `PROBE_SIG_KEY_ONLY` the longest at 4.4 min); 4.4 min in total |

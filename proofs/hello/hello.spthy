@@ -1,0 +1,156 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * The link hello (R-REL-1, R-FMT-15; Appendix B, Section B.4; property S14).
+ * Both sides of a link send a Hello with their supported versions, a fresh
+ * nonce, the bus, the root generation, the checkpoint number and their
+ * device identifier, present their passport, and then send Auth: a device
+ * key signature over
+ *   cpb hello v1 || 0x00 || SHA-256(own hello) || SHA-256(peer's hello).
+ * Verification level V1: a symbolic model, primitives are perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - A passport is the Root's signature over the bus, the device identifier
+ *   and the device key. A relay presents its ticket instead, which the Root
+ *   signs in the same way and which names the relay key; the model has one
+ *   credential for both. Revocation, generations and checkpoint contents are
+ *   left to the state model in models/membership; the generation and the
+ *   checkpoint number are opaque fields of the hello here.
+ * - The version list is an opaque term. The selected version is a function
+ *   of both lists, so agreement on both lists is agreement on the version.
+ * - Both sides run the same rules: either may speak first, and a side may
+ *   run any number of hellos at once.
+ * - Receivers match every field untyped: the adversary may send any term.
+ * - Compromise: RevealDev gives a device signing key, RevealRoot the root
+ *   key of a bus. A key counts against a property only if it was revealed
+ *   before the event.
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_NO_PEER_HELLO  Auth signs the own hello only, not the peer's
+ *                        (so not the peer's nonce)            -> peer_authentic
+ *   PROBE_NO_VERSIONS    the hello hash leaves out the version
+ *                        list                                 -> no_downgrade
+ */
+
+theory CpbHello
+begin
+
+builtins: hashing, signing
+
+// The part of a hello that its hash covers.
+#ifdef PROBE_NO_VERSIONS
+macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', n, bus, gen, cp, d>)
+#else
+macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', vs, n, bus, gen, cp, d>)
+#endif
+
+// What Auth signs: the hashes of the own hello and of the peer's hello.
+#ifdef PROBE_NO_PEER_HELLO
+macros: authmsg(own, peer) = <'cpb hello v1', own>
+#else
+macros: authmsg(own, peer) = <'cpb hello v1', own, peer>
+#endif
+
+restriction OneBus:
+  "All b #i #j. NewBus(b) @ i & NewBus(b) @ j ==> #i = #j"
+
+restriction OneDevice:
+  "All b d #i #j. NewDevice(b, d) @ i & NewDevice(b, d) @ j ==> #i = #j"
+
+/* ------------------------------------------------------------ bus and keys */
+
+rule NewBus:
+    [ Fr(~rk) ]
+  --[ NewBus($B) ]->
+    [ !RootLtk($B, ~rk), !Root($B, pk(~rk)), Out(pk(~rk)) ]
+
+// The Root issues a passport: its signature over the bus, the device and the
+// device key.
+rule NewDevice:
+    [ !RootLtk(B, rk), Fr(~ltk) ]
+  --[ NewDevice(B, $D) ]->
+    [ !Ltk(B, $D, ~ltk),
+      Out(<pk(~ltk), sign(<'cpb passport v1', B, $D, pk(~ltk)>, rk)>) ]
+
+rule RevealDev:
+    [ !Ltk(B, D, ltk) ]
+  --[ RevealDev(B, D) ]->
+    [ Out(ltk) ]
+
+rule RevealRoot:
+    [ !RootLtk(B, rk) ]
+  --[ RevealRoot(B) ]->
+    [ Out(rk) ]
+
+/* ------------------------------------------------------------------- hello */
+
+// A side sends its hello with its supported versions $V.
+rule SendHello:
+    [ !Ltk(B, X, ltk), Fr(~n) ]
+  --[ HelloSent(B, X, $V, ~n) ]->
+    [ HelloState(B, X, ltk, $V, ~n, $G, $C),
+      Out(<'hello', $V, ~n, B, $G, $C, X>) ]
+
+// It receives the peer's hello and passport, checks the passport against the
+// root key of its bus, and signs both hellos.
+rule ReceiveHello:
+    let own  = hhash(V, n, B, G, C, X)
+        peer = hhash(vy, ny, B, gy, cy, Y)
+    in
+    [ HelloState(B, X, ltk, V, n, G, C), !Root(B, pk(rk)),
+      In(<'hello', vy, ny, B, gy, cy, Y>),
+      In(<pky, sign(<'cpb passport v1', B, Y, pky>, rk)>) ]
+  --[ Signed(B, X, V, n, Y, vy, ny) ]->
+    [ AuthState(B, X, V, n, Y, vy, ny, pky, own, peer),
+      Out(sign(authmsg(own, peer), ltk)) ]
+
+// It accepts the peer's Auth: the peer's device key over the peer's hello
+// first and its own hello second.
+rule ReceiveAuth:
+    [ AuthState(B, X, V, n, Y, vy, ny, pk(ly), own, peer),
+      In(sign(authmsg(peer, own), ly)) ]
+  --[ Accepted(B, X, V, n, Y, vy, ny) ]->
+    [ ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+lemma executable:
+  exists-trace
+  "Ex B X Y vx nx vy ny #i #j.
+     Accepted(B, X, vx, nx, Y, vy, ny) @ i & Accepted(B, Y, vy, ny, X, vx, nx) @ j
+     & not X = Y
+     & (not Ex b d #k. RevealDev(b, d) @ k)
+     & (not Ex b #k. RevealRoot(b) @ k)"
+
+// S14, R-REL-1: a side accepts a peer only if that peer signed exactly these
+// two hellos, after it received this side's hello: the peer took part in
+// this link, with this side's fresh nonce. The order of the hashes stops a
+// reflected Auth; the lemma also covers a peer with the side's own name.
+lemma peer_authentic:
+  "All B X vx nx Y vy ny #i.
+     Accepted(B, X, vx, nx, Y, vy, ny) @ i
+     ==> (Ex #j. Signed(B, Y, vy, ny, X, vx, nx) @ j & j < i)
+       | (Ex #r. RevealDev(B, Y) @ r & r < i)
+       | (Ex #r. RevealRoot(B) @ r & r < i)"
+
+// R-FMT-15: the network and relays cannot force a downgrade. A side that
+// accepts a peer saw the version list the peer sent, and the peer saw the
+// list this side sent; so both select the same version.
+lemma no_downgrade:
+  "All B X vx nx Y vy ny #i.
+     Accepted(B, X, vx, nx, Y, vy, ny) @ i
+     ==> ((Ex #j. HelloSent(B, Y, vy, ny) @ j)
+          & (Ex #k vz. Signed(B, Y, vz, ny, X, vx, nx) @ k))
+       | (Ex #r. RevealDev(B, Y) @ r & r < i)
+       | (Ex #r. RevealRoot(B) @ r & r < i)"
+
+// One acceptance per hello: the fresh nonce of a side makes every accepted
+// link a different one, so a recorded hello and Auth cannot be replayed.
+lemma one_accept_per_hello:
+  "All B X vx nx Y vy ny Z vz nz #i #j.
+     Accepted(B, X, vx, nx, Y, vy, ny) @ i & Accepted(B, X, vx, nx, Z, vz, nz) @ j
+     ==> #i = #j"
+
+end

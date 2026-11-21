@@ -1,0 +1,18 @@
+{
+  "probes": {
+    "PROBE_NO_PEER_HELLO": "peer_authentic",
+    "PROBE_NO_VERSIONS": "no_downgrade"
+  },
+  "ci": {
+    "lemmas": [
+      "executable",
+      "peer_authentic",
+      "no_downgrade",
+      "one_accept_per_hello"
+    ],
+    "probes": [
+      "PROBE_NO_PEER_HELLO",
+      "PROBE_NO_VERSIONS"
+    ]
+  }
+}

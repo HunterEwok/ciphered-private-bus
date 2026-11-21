@@ -106,7 +106,9 @@ module enrollment {
   action pairHonest(j: str, a: str): bool = all {
     tid < MAX_TID,
     joinerTries.get(j) < LIMIT,
-    not(ACCEPTORS.contains(a)) or acceptorTries.get(a).get(j) < LIMIT,
+    // An if, not "or": TLC evaluates both sides of a disjunction in a step,
+    // and the compromised acceptor has no counter.
+    if (ACCEPTORS.contains(a)) acceptorTries.get(a).get(j) < LIMIT else true,
     val t = tid + 1
     commit(t, sessions.union(Set({ tid: t, joiner: j, acceptor: a })), current.set(j, t),
       joinerTries.setBy(j, n => n + 1),

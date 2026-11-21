@@ -136,21 +136,38 @@ if ($LASTEXITCODE -eq 0) { $compat = @("--sun-misc-unsafe-memory-access=allow") 
 $ErrorActionPreference = $saved
 Say ("{0} checks, {1} at a time, heap {2} GB each, {3} GB RAM, {4} cores" -f $jobs.Count, $Parallel, $heapGb, $memGb, $cores)
 
+# Stopping never throws: a process that is already gone, or a child that
+# Windows refuses to stop, must not end the run.
 function Stop-Tree($Proc) {
-    if ($Proc -and -not $Proc.HasExited) {
-        if ($OnWindows) { & taskkill /PID $Proc.Id /T /F 2>&1 | Out-Null } else { Stop-Process -Id $Proc.Id -Force }
-    }
+    if (-not $Proc -or $Proc.HasExited) { return }
+    $saved = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try {
+        if ($OnWindows) { & taskkill /PID $Proc.Id /T /F 2>&1 | Out-Null }
+        if (-not $Proc.HasExited) { Stop-Process -Id $Proc.Id -Force -ErrorAction SilentlyContinue }
+        $Proc.WaitForExit(10000) | Out-Null
+    } catch { } finally { $ErrorActionPreference = $saved }
 }
 
 function Test-Port([int]$P) {
     try { $tcp = New-Object System.Net.Sockets.TcpClient; $tcp.Connect("127.0.0.1", $P); $tcp.Close(); return $true } catch { return $false }
 }
 
+# Every check gets a port of its own, counting up from -Port and skipping
+# ports in use, so that a server still shutting down (or left over from an
+# earlier run) never stops the run.
+$script:NextPort = $Port
+function Get-FreePort {
+    for ($k = 0; $k -lt 1000; $k++) {
+        $p = $script:NextPort; $script:NextPort++
+        if (-not (Test-Port $p)) { return $p }
+    }
+    throw "No free port from $Port to $($script:NextPort); pass another -Port"
+}
+
 # Starts the server of a slot; the check itself starts once the port answers.
 function Start-Check([int]$Index, [int]$Slot) {
     $j = $jobs[$Index]
-    $p = $Port + $Slot
-    if (Test-Port $p) { throw "Port $p is already in use; pass another -Port" }
+    $p = Get-FreePort
     $tag = "{0:d2}-{1}" -f ($Index + 1), ($j[2] -replace '^step', '')
     $serverLog = Join-Path $RunDir "$tag-server.log"
     $sargs = $compat + @("-Xmx${heapGb}g", "-jar", "`"$($jar.FullName)`"", "server", "--port=$p")
@@ -178,7 +195,15 @@ function Get-Verdict($C, [bool]$TimedOut) {
     foreach ($f in @($C.Log, ($C.Log + ".err"))) { if (Test-Path $f) { $text += Get-Content $f } }
     if (($text -match '^\[ok\]').Count -gt 0) { return "holds" }
     if (($text -match '^\[violation\]').Count -gt 0) { return "VIOLATED, see $($C.Log)" }
-    return "no verdict, see $($C.Log) and $($C.ServerLog)"
+    # No verdict: name the first error found, the server's first (it is
+    # usually the cause, for example an OutOfMemoryError), then Quint's.
+    $cause = ""
+    foreach ($f in @($C.ServerLog, ($C.ServerLog + ".err"), $C.Log, ($C.Log + ".err"))) {
+        if ($cause -or -not (Test-Path $f)) { continue }
+        $hit = Get-Content $f | Where-Object { $_ -match 'OutOfMemory|Exception|[Ee]rror' } | Select-Object -First 1
+        if ($hit) { $cause = ": " + $hit.Trim().Substring(0, [math]::Min(160, $hit.Trim().Length)) }
+    }
+    return "no verdict$cause; see $($C.Log) and $($C.ServerLog)"
 }
 
 $results = @{}

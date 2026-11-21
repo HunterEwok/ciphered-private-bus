@@ -21,7 +21,7 @@ module probe_accept_old_gen { import membership(DEVICES = Set("a", "b", "c"), MA
 module probe_accept_lower { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "accept_lower", TRACK_RECV = true).* from "./membership" }
 module probe_no_halt { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "no_halt", TRACK_RECV = true).* from "./membership" }
 module probe_halted_accepts { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "halted_accepts", TRACK_RECV = true).* from "./membership" }
-module probe_rc_no_forever { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "rc_no_forever", TRACK_RECV = true).* from "./membership" }
+module probe_rc_no_forever { import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, WINDOW = 2, MUTANT = "rc_no_forever", TRACK_RECV = false).* from "./membership" }
 module probe_proof_needs_cp { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "proof_needs_cp", TRACK_RECV = true).* from "./membership" }
 module probe_reboot_rollback { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "reboot_rollback", TRACK_RECV = true).* from "./membership" }
 module probe_grant_no_right { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "grant_no_right", TRACK_RECV = true).* from "./membership" }

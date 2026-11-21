@@ -19,7 +19,7 @@ acceptance of data and key grants against the read and publish rights. The heade
 | `tiny_tlc` | 2 | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
 | `conv_tlc` | 2 | 2 | 1 | 1 | TLC of `safety` including `convergence`, with the processed-record sets; two checkpoints out of order need two numbers and are covered by a scenario and the probe `need_next` |
 | `live_tlc` | 2 | 2 | 1 | 1 | TLC of the liveness property `haltPropagates` |
-| `probe_*` | 3 | 2 | 3 | 2 | One deliberate defect each; `safety` must fail (R-VER-2). `accept_old_data_gen`, `halted_silent` and `need_next` have the size of `tiny_tlc`, which their defects need, so that TLC reaches them quickly; `halted_silent_live` has the size of `live_tlc` |
+| `probe_*` | 3 | 2 | 3 | 2 | One deliberate defect each; `safety` must fail (R-VER-2). `rc_no_forever`, `accept_old_data_gen`, `halted_silent` and `need_next` have the size of `tiny_tlc`, so that breadth-first TLC reaches their deep traces before its queue spills to disk; `halted_silent_live` has the size of `live_tlc` |
 
 With three numbers per generation a window of two binds: the Root has to reissue a passport
 before it can issue a third. With two numbers it never binds, but the window start still moves

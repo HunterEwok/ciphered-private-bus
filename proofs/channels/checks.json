@@ -1,0 +1,24 @@
+{
+  "probes": {
+    "PROBE_UNSIGNED_CLAIM": "channel_key_secrecy",
+    "PROBE_NO_ERASE": "channel_key_secrecy",
+    "PROBE_NO_GRANT_SIG": "grant_authenticity",
+    "PROBE_PUB_SIG_HEADER": "source_authenticity"
+  },
+  "ci": {
+    "lemmas": [
+      "executable",
+      "channel_key_secrecy",
+      "content_secrecy",
+      "grant_authenticity",
+      "source_authenticity",
+      "content_agreement"
+    ],
+    "probes": [
+      "PROBE_UNSIGNED_CLAIM",
+      "PROBE_NO_ERASE",
+      "PROBE_NO_GRANT_SIG",
+      "PROBE_PUB_SIG_HEADER"
+    ]
+  }
+}

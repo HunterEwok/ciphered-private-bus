@@ -1,0 +1,282 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * Channel keys and publications (requirements R-KEY-2, R-CH-1..4, R-CH-7;
+ * Appendix B, Sections B.3 SealClaim, B.5 KeyGrant and Publication, B.8): a
+ * device announces its sealing key in a signed claim, a source grants the
+ * channel key to a reader sealed to that key, and publishes content under a
+ * key derived from the channel key and the header. Verification level V1
+ * (Section 14.1): a symbolic model, primitives are perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - Membership is reduced to a public registry !DevKey(bus, device, key):
+ *   every device in it is a valid member with the needed rights. Passports,
+ *   checkpoints, revocation, rights bits and rotation on removal (S4, S5,
+ *   R-CH-5, R-CH-13) are the subject of the state models in models/.
+ * - Numbers and freshness (key generation, publication number, window;
+ *   S12, R-CH-8, R-CH-9) are the subject of models/channels. Here the
+ *   publication number is a fresh value, so every header is unique.
+ * - The sealing key epoch is the sealing key itself: a grant header names
+ *   the reader's sealing public key instead of its epoch number. A node may
+ *   hold several epochs at once and erases any of them (R-KEY-4).
+ * - HPKE with X-Wing is asymmetric encryption with the info label and the
+ *   associated data inside the plaintext. HKDF and SHA-256 are the hash h
+ *   over tagged tuples with the labels of B.8. ChaCha20-Poly1305 is
+ *   symmetric encryption with the associated data inside the plaintext.
+ *   Padding, blobs and channel numbers inside the content are not modelled.
+ * - Symbolic encryption commits to its key: a ciphertext opens under one key
+ *   only. Content agreement (S3) therefore holds here even without the key
+ *   commitment, which exists because ChaCha20-Poly1305 does not commit; that
+ *   reliance is checked by test vectors, not by this model.
+ * - Compromise: RevealDev gives the adversary a device signing key (also the
+ *   way a quantum adversary breaks ES256 later); RevealSeal a sealing private
+ *   key the node still holds; RevealSource and RevealReaderKey a channel key
+ *   held by the source or a reader. Keys are persistent facts; erasure is an
+ *   action after which a restriction forbids any use or reveal of that key.
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_UNSIGNED_CLAIM   the source seals to an unsigned claim -> channel_key_secrecy
+ *   PROBE_NO_ERASE         erasing a sealing key keeps it        -> channel_key_secrecy
+ *   PROBE_NO_GRANT_SIG     the reader skips the grant signature  -> grant_authenticity
+ *   PROBE_PUB_SIG_HEADER   the publication signature omits the content hash -> source_authenticity
+ */
+
+theory CpbChannels
+begin
+
+builtins: hashing, signing, symmetric-encryption, asymmetric-encryption
+
+// What the source signs in a publication (R-CH-4).
+#ifdef PROBE_PUB_SIG_HEADER
+macros: pubsigmsg(hdr, c) = <'cpb publication v1', h(hdr)>
+#else
+macros: pubsigmsg(hdr, c) = <'cpb publication v1', h(hdr), h(c)>
+#endif
+
+// Erasure (R-KEY-4, R-CH-7): keys are persistent facts, and nothing uses a
+// key after it was erased. Every use, including a reveal by a compromise,
+// carries a Use action. The probe PROBE_NO_ERASE drops the rule for sealing
+// keys: an erased sealing key can still be revealed.
+#ifdef not PROBE_NO_ERASE
+restriction NoSealUseAfterErase:
+  "All bus d sk #e #u. ErasedSeal(bus, d, sk) @ e & UseSeal(bus, d, sk) @ u ==> u < e"
+#endif
+
+restriction NoReaderKeyUseAfterErase:
+  "All bus r k #e #u. ErasedReaderKey(bus, r, k) @ e & UseReaderKey(bus, r, k) @ u ==> u < e"
+
+restriction OneDevice:
+  "All bus d #i #j. NewDevice(bus, d) @ i & NewDevice(bus, d) @ j ==> #i = #j"
+
+/* ---------------------------------------------------------------- devices */
+
+// A member of the bus: its device key is in the registry.
+rule NewDevice:
+    [ Fr(~ltk) ]
+  --[ NewDevice($bus, $D) ]->
+    [ !Ltk($bus, $D, ~ltk), !DevKey($bus, $D, pk(~ltk)), Out(pk(~ltk)) ]
+
+rule RevealDev:
+    [ !Ltk(bus, D, ltk) ]
+  --[ RevealDev(bus, D) ]->
+    [ Out(ltk) ]
+
+// A new sealing key epoch and its claim, signed by the device key (R-KEY-2).
+rule NewSealKey:
+    let claim = <'claim', bus, D, pk(~sk)> in
+    [ !Ltk(bus, D, ltk), Fr(~sk) ]
+  --[ NewSeal(bus, D, ~sk) ]->
+    [ !SealKey(bus, D, ~sk), Out(<claim, sign(<'cpb seal claim v1', bus, D, pk(~sk)>, ltk)>) ]
+
+rule RevealSeal:
+    [ !SealKey(bus, D, sk) ]
+  --[ RevealSeal(bus, D, sk), UseSeal(bus, D, sk) ]->
+    [ Out(sk) ]
+
+rule EraseSeal:
+    [ !SealKey(bus, D, sk) ]
+  --[ ErasedSeal(bus, D, sk) ]->
+    [ ]
+
+/* ----------------------------------------------------------------- source */
+
+// The channel key K: 32 random bytes for the pair (source, channel) (R-CH-1).
+rule NewChannelKey:
+    [ !Ltk(bus, S, ltk), Fr(~K) ]
+  --[ NewChannelKey(bus, S, $ch, ~K) ]->
+    [ !SourceKey(bus, S, $ch, ~K) ]
+
+rule RevealSource:
+    [ !SourceKey(bus, S, ch, K) ]
+  --[ RevealSource(bus, S, K) ]->
+    [ Out(K) ]
+
+// The grant (R-CH-2, B.5): the key sealed to the reader's claimed sealing key,
+// with the header hash as associated data, signed over the header hash and
+// the wrapped-key hash (R-CH-4).
+#ifdef PROBE_UNSIGNED_CLAIM
+rule Grant:
+    let label  = h(<'cpb chan label v1', bus, S, ch>)
+        commit = h(<'cpb chan commit v1', K>)
+        epk    = pk(xe)
+        hdr    = <'grant', bus, S, label, R, epk, commit>
+        wrap   = aenc(<'cpb grant seal v1', K, h(hdr)>, epk)
+        claim  = <'claim', bus, R, epk>
+    in
+    [ !SourceKey(bus, S, ch, K), !Ltk(bus, S, ltk), !DevKey(bus, R, pk(xr)),
+      In(claim) ]
+  --[ Granted(bus, S, label, R, K, epk) ]->
+    [ Out(<hdr, wrap, sign(<'cpb key grant v1', h(hdr), h(wrap)>, ltk)>) ]
+#else
+rule Grant:
+    let label  = h(<'cpb chan label v1', bus, S, ch>)
+        commit = h(<'cpb chan commit v1', K>)
+        epk    = pk(xe)
+        hdr    = <'grant', bus, S, label, R, epk, commit>
+        wrap   = aenc(<'cpb grant seal v1', K, h(hdr)>, epk)
+        claim  = <'claim', bus, R, epk>
+    in
+    [ !SourceKey(bus, S, ch, K), !Ltk(bus, S, ltk), !DevKey(bus, R, pk(xr)),
+      In(<claim, sign(<'cpb seal claim v1', bus, R, epk>, xr)>) ]
+  --[ Granted(bus, S, label, R, K, epk) ]->
+    [ Out(<hdr, wrap, sign(<'cpb key grant v1', h(hdr), h(wrap)>, ltk)>) ]
+#endif
+
+// A publication (R-CH-3, B.5): the content key comes from K and the header
+// hash; the signature covers the header hash and the content hash.
+rule Publish:
+    let label  = h(<'cpb chan label v1', bus, S, ch>)
+        commit = h(<'cpb chan commit v1', K>)
+        hdr    = <'pub', bus, S, ~no, label, commit>
+        ck     = h(<'cpb content v1', K, h(hdr)>)
+        c      = senc(<~m, h(hdr)>, ck)
+    in
+    [ !SourceKey(bus, S, ch, K), !Ltk(bus, S, ltk), Fr(~no), Fr(~m) ]
+  --[ Published(bus, S, label, hdr, K, ~m) ]->
+    [ Out(<hdr, c, sign(pubsigmsg(hdr, c), ltk)>) ]
+
+/* ----------------------------------------------------------------- reader */
+
+// The reader opens the grant with a sealing key it holds, checks the source
+// signature and the commitment (R-CH-2, R-CH-4).
+#ifdef PROBE_NO_GRANT_SIG
+rule ReaderGrant:
+    let commit = h(<'cpb chan commit v1', ~K>)
+        hdr    = <'grant', bus, S, label, R, pk(sk), commit>
+        wrap   = aenc(<'cpb grant seal v1', ~K, h(hdr)>, pk(sk))
+    in
+    [ !SealKey(bus, R, sk), !DevKey(bus, S, pk(xs)),
+      In(<hdr, wrap, gsig>) ]
+  --[ ReaderGotKey(bus, R, S, label, ~K), UseSeal(bus, R, sk) ]->
+    [ !ReaderKey(bus, R, S, label, ~K) ]
+#else
+rule ReaderGrant:
+    let commit = h(<'cpb chan commit v1', ~K>)
+        hdr    = <'grant', bus, S, label, R, pk(sk), commit>
+        wrap   = aenc(<'cpb grant seal v1', ~K, h(hdr)>, pk(sk))
+    in
+    [ !SealKey(bus, R, sk), !DevKey(bus, S, pk(xs)),
+      In(<hdr, wrap, sign(<'cpb key grant v1', h(hdr), h(wrap)>, xs)>) ]
+  --[ ReaderGotKey(bus, R, S, label, ~K), UseSeal(bus, R, sk) ]->
+    [ !ReaderKey(bus, R, S, label, ~K) ]
+#endif
+
+// The reader checks the signature before decrypting (R-CH-4).
+rule ReaderAccept:
+    let commit = h(<'cpb chan commit v1', ~K>)
+        hdr    = <'pub', bus, S, no, label, commit>
+        ck     = h(<'cpb content v1', ~K, h(hdr)>)
+        c      = senc(<~m, h(hdr)>, ck)
+    in
+    [ !ReaderKey(bus, R, S, label, ~K), !DevKey(bus, S, pk(xs)),
+      In(<hdr, c, sign(pubsigmsg(hdr, c), xs)>) ]
+  --[ Accepted(bus, R, S, label, hdr, c, ~m), UseReaderKey(bus, R, ~K) ]->
+    [ ]
+
+// A compromised reader discloses a channel key it still holds. Only keys of
+// an honest source are modelled here: a key a compromised source made is
+// known to the adversary anyway, and without this premise any value a reader
+// ever accepted could be revealed, which sends the search into a loop.
+rule RevealReaderKey:
+    [ !ReaderKey(bus, R, S, label, ~K), !SourceKey(bus, S, ch, ~K) ]
+  --[ RevealReaderKey(bus, R, ~K), UseReaderKey(bus, R, ~K) ]->
+    [ Out(~K) ]
+
+// R-CH-7: the reader erases a channel key it no longer needs.
+rule EraseReaderKey:
+    [ !ReaderKey(bus, R, S, label, ~K) ]
+  --[ ErasedReaderKey(bus, R, ~K) ]->
+    [ ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+// Sanity: a reader accepts a publication with nothing revealed.
+lemma executable:
+  exists-trace
+  "Ex bus R S label hdr c m #i.
+     Accepted(bus, R, S, label, hdr, c, m) @ i
+     & not (R = S)
+     & (not Ex b d #k. RevealDev(b, d) @ k)
+     & (not Ex b d sk #k. RevealSeal(b, d, sk) @ k)
+     & (not Ex b s k #r. RevealSource(b, s, k) @ r)
+     & (not Ex b r k #r. RevealReaderKey(b, r, k) @ r)"
+
+// S1, S13, R-CH-2, R-KEY-2: a channel key is learned only through one of the
+// readers the source named, and only through a key that reader still held:
+// its device key (so the adversary could claim its own sealing key for it),
+// a sealing key revealed before it was erased, or the channel key revealed
+// before the reader erased it; or from the source itself. Signing keys of
+// everyone else, including the source's, do not matter, so the property
+// holds also against an adversary that breaks the signatures later.
+lemma channel_key_secrecy [reuse]:
+  "All bus S ch K #i #j.
+     NewChannelKey(bus, S, ch, K) @ i & K(K) @ j
+     ==> (Ex #r. RevealSource(bus, S, K) @ r)
+       | (Ex label R e #g #r. Granted(bus, S, label, R, K, e) @ g & RevealDev(bus, R) @ r)
+       | (Ex label R sk #g #r. Granted(bus, S, label, R, K, pk(sk)) @ g
+            & RevealSeal(bus, R, sk) @ r
+            & (All #e. ErasedSeal(bus, R, sk) @ e ==> r < e))
+       | (Ex R #r. RevealReaderKey(bus, R, K) @ r
+            & (All #e. ErasedReaderKey(bus, R, K) @ e ==> r < e))"
+
+// S1: the content of a publication is learned only in the same ways as its
+// channel key.
+lemma content_secrecy:
+  "All bus S label hdr K m #i #j.
+     Published(bus, S, label, hdr, K, m) @ i & K(m) @ j
+     ==> (Ex #r. RevealSource(bus, S, K) @ r)
+       | (Ex label2 R e #g #r. Granted(bus, S, label2, R, K, e) @ g & RevealDev(bus, R) @ r)
+       | (Ex label2 R sk #g #r. Granted(bus, S, label2, R, K, pk(sk)) @ g
+            & RevealSeal(bus, R, sk) @ r
+            & (All #e. ErasedSeal(bus, R, sk) @ e ==> r < e))
+       | (Ex R #r. RevealReaderKey(bus, R, K) @ r
+            & (All #e. ErasedReaderKey(bus, R, K) @ e ==> r < e))"
+
+// R-CH-2, R-CH-4: a reader takes a channel key only from a grant its source
+// made for it, on this bus, unless the source's device key is known.
+lemma grant_authenticity:
+  "All bus R S label K #i.
+     ReaderGotKey(bus, R, S, label, K) @ i
+     ==> (Ex e #g. Granted(bus, S, label, R, K, e) @ g & g < i)
+       | (Ex #r. RevealDev(bus, S) @ r)"
+
+// S2, R-CH-4: a reader accepts content only as the source published it,
+// unless the source's device key is known. Other readers hold the channel
+// key and still cannot present their own content as the source's.
+lemma source_authenticity:
+  "All bus R S label hdr c m #i.
+     Accepted(bus, R, S, label, hdr, c, m) @ i
+     ==> (Ex K #p. Published(bus, S, label, hdr, K, m) @ p & p < i)
+       | (Ex #r. RevealDev(bus, S) @ r)"
+
+// S3: two readers that accept the same publication read the same content,
+// even with a compromised source (see the header on key commitment).
+lemma content_agreement:
+  "All bus R1 R2 S label hdr c m1 m2 #i #j.
+     Accepted(bus, R1, S, label, hdr, c, m1) @ i
+     & Accepted(bus, R2, S, label, hdr, c, m2) @ j
+     ==> m1 = m2"
+
+end

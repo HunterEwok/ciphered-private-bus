@@ -39,3 +39,21 @@ jobs:
           name: pairing-logs
           path: ${{ runner.temp }}/tamarin/tamarin-pairing-*
           retention-days: 14
+
+  channels:
+    name: channels (Tamarin, CI subset)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove the CI lemmas and falsify the CI probes
+        run: proofs/run-tamarin.sh -m channels -w "$RUNNER_TEMP/tamarin" -c -t 1
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: channels-logs
+          path: ${{ runner.temp }}/tamarin/tamarin-channels-*
+          retention-days: 14

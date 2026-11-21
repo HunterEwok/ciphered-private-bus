@@ -19,6 +19,7 @@
   "inductive": {
     "instance": "small_ind",
     "smallInstance": "tiny_ind",
+    "parallel": 2,
     "steps": [
       "stepPairHonest",
       "stepAdvJoiner",

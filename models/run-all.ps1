@@ -19,7 +19,8 @@
 #
 # Example:
 #   powershell -ExecutionPolicy Bypass -File models\run-all.ps1 `
-#     -WorkDir D:\runs -Java C:\jdk\bin\java.exe -MemoryGB 100
+#     -WorkDir D:\runs -Java C:\jdk\bin\java.exe -MemoryGB 100 `
+#     -Models calls,enrollment -Stages inductive
 #
 # Exit status: 0 every stage as expected, 1 otherwise.
 
@@ -36,6 +37,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ModelsDir = $PSScriptRoot
+# With -File, PowerShell passes "a,b" as one string: split it here.
+$Models = @($Models | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$Stages = @($Stages | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $OnWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
 
 function Say([string]$Text) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $Text) }

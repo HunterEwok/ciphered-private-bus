@@ -45,6 +45,6 @@
       "stepSend",
       "stepGrant"
     ],
-    "parallel": 4
+    "parallel": 3
   }
 }

@@ -82,5 +82,4 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model enrollm
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-
-No run is recorded yet.
+| 2026-11-21 | `a8c801d73b0f`, invariant `cda9bc51d3e4` (commit 56d4c14) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (2 checks at a time, 24 GB heap each) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.2 min, the 7 step branches in 11.2 to 17.4 min, `IndInv` implies `safety` in 6.3 min; 96 min in total. The branch `stepBadIssue`, enabled only by the mutant `acceptor_issues`, was also listed and reported a deadlock (no transition); it is no longer part of the proof. Safety holds in every reachable state of `small` |

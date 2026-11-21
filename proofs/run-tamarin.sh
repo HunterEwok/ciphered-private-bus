@@ -7,11 +7,13 @@
 # a separate prover process, so lemmas run in parallel; together they take at
 # most -s (default 0.85) of the cores and memory. With -p the probes listed in
 # the model's checks.json run too: each probe is a deliberate defect selected
-# with -D, and its lemma must be falsified (R-VER-2). With -c only the quick
+# with -D, and its lemma must be falsified (R-VER-2), or, for a lemma named
+# *_counterexample, its counterexample trace must be found. With -c only the quick
 # subset listed under "ci" in checks.json runs, as in CI.
 #
 # Tamarin and Maude are downloaded into the work folder on first use, at the
-# versions pinned in tools/versions/versions.toml.
+# versions pinned in tools/versions/versions.toml, and checked against the
+# pinned SHA-256 of each archive on every run.
 #
 # Usage:
 #   proofs/run-tamarin.sh -m pairing -w ~/cpb-runs [-p] [-c] [-s 0.85] [-t HOURS]
@@ -22,6 +24,9 @@ set -euo pipefail
 
 TAMARIN_VERSION="1.12.0"
 MAUDE_VERSION="3.5.1"
+# SHA-256 of the release archives; change them together with the versions.
+TAMARIN_SHA256="201be06f469e47cff554df6ca93db8366fc2c69d70c61fcbd1370a1074b469c6"
+MAUDE_SHA256="72ed1ca87e3b3d0dfc6ee1436baf154bf04c45ff97d521bec040c5e8dfc8f92c"
 
 MODEL=""; WORK=""; PROBES=0; CI=0; SHARE="0.85"; HOURS=0; INTERVAL=60
 USAGE="usage: $0 -m MODEL -w WORKDIR [-p] [-c] [-s SHARE] [-t HOURS]"
@@ -47,20 +52,34 @@ CHECKS="$DIR/checks.json"
 [ -f "$SPTHY" ] && [ -f "$CHECKS" ] || { echo "no model $MODEL ($SPTHY, $CHECKS)" >&2; exit 2; }
 mkdir -p "$WORK"; WORK="$(cd "$WORK" && pwd)"
 
-# Tools.
+# Tools. The archives are kept and checked on every run; the binaries are
+# extracted again from a checked archive whenever they are missing.
 TOOLS="$WORK/tools-tamarin-$TAMARIN_VERSION-maude-$MAUDE_VERSION"
+mkdir -p "$TOOLS"
+fetch() {
+  local file="$1" url="$2" sum="$3"
+  if [ ! -f "$TOOLS/$file" ]; then
+    say "Downloading $url"
+    curl -fsSL -o "$TOOLS/$file.part" "$url"
+    mv "$TOOLS/$file.part" "$TOOLS/$file"
+  fi
+  if ! echo "$sum  $TOOLS/$file" | sha256sum -c --quiet -; then
+    say "SHA-256 of $TOOLS/$file does not match the pinned $sum; delete the file to download it again"
+    exit 1
+  fi
+}
+fetch tamarin.tgz \
+  "https://github.com/tamarin-prover/tamarin-prover/releases/download/$TAMARIN_VERSION/tamarin-prover-$TAMARIN_VERSION-linux64-ubuntu.tar.gz" \
+  "$TAMARIN_SHA256"
+fetch maude.zip \
+  "https://github.com/maude-lang/Maude/releases/download/Maude$MAUDE_VERSION/Maude-$MAUDE_VERSION-linux-x86_64.zip" \
+  "$MAUDE_SHA256"
 if [ ! -x "$TOOLS/tamarin-prover" ] || [ ! -x "$TOOLS/maude" ]; then
-  say "Downloading Tamarin $TAMARIN_VERSION and Maude $MAUDE_VERSION into $TOOLS"
-  mkdir -p "$TOOLS"
-  curl -fsSL -o "$TOOLS/tamarin.tgz" \
-    "https://github.com/tamarin-prover/tamarin-prover/releases/download/$TAMARIN_VERSION/tamarin-prover-$TAMARIN_VERSION-linux64-ubuntu.tar.gz"
   tar -xzf "$TOOLS/tamarin.tgz" -C "$TOOLS"
-  curl -fsSL -o "$TOOLS/maude.zip" \
-    "https://github.com/maude-lang/Maude/releases/download/Maude$MAUDE_VERSION/Maude-$MAUDE_VERSION-linux-x86_64.zip"
   (cd "$TOOLS" && python3 -c "import zipfile; zipfile.ZipFile('maude.zip').extractall('.')")
   chmod +x "$TOOLS/tamarin-prover" "$TOOLS/maude"
-  rm -f "$TOOLS/tamarin.tgz" "$TOOLS/maude.zip"
 fi
+say "Tamarin $TAMARIN_VERSION and Maude $MAUDE_VERSION archives match their pinned SHA-256"
 export PATH="$TOOLS:$PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # Resources: every prover gets 2 cores; jobs and memory follow the share.
@@ -77,7 +96,10 @@ say "Model $MODEL $MODEL_HASH, commit $COMMIT, Tamarin $TAMARIN_VERSION, run fol
 say "$JOBS provers at a time, 2 cores and $JOB_GB GB each ($CORES cores, $MEM_GB GB RAM)"
 
 # Jobs: "name|define|lemma|expected". The model itself: every lemma verified
-# (an exists-trace lemma is verified when its trace is found).
+# (an exists-trace lemma is verified when its trace is found). A probe
+# falsifies its lemma; a lemma named *_counterexample is an exists-trace
+# search for a counterexample to a property, so a probe must find its trace
+# (verified), and the model itself does not run it.
 LEMMAS=$(grep -oE '^lemma [A-Za-z0-9_]+' "$SPTHY" | awk '{print $2}')
 JOBLIST="$RUN/jobs.txt"
 # shellcheck disable=SC2086
@@ -91,11 +113,13 @@ if ci:
         sys.exit(f"checks.json: ci names unknown lemmas {unknown}")
     lemmas = checks["ci"]["lemmas"]
 for lemma in lemmas:
-    print(f"model|-|{lemma}|verified")
+    if not lemma.endswith("_counterexample"):
+        print(f"model|-|{lemma}|verified")
 if probes:
     for define, lemma in checks["probes"].items():
         if not ci or define in checks["ci"]["probes"]:
-            print(f"{define}|{define}|{lemma}|falsified")
+            expected = "verified" if lemma.endswith("_counterexample") else "falsified"
+            print(f"{define}|{define}|{lemma}|{expected}")
 EOF
 TOTAL=$(wc -l < "$JOBLIST")
 
@@ -116,8 +140,10 @@ run_one() {
   [ "$define" != "-" ] && dflag=("-D$define")
   local limit=()
   [ "$HOURS" != 0 ] && limit=(timeout "$(python3 -c "print(int($HOURS * 3600))")")
+  local status=0
   nice -n 10 "${limit[@]}" tamarin-prover "${dflag[@]}" --prove="$lemma" "$SPTHY" \
-    +RTS -N2 -M"${JOB_GB}"G -RTS > "$log" 2>&1 || true
+    +RTS -N2 -M"${JOB_GB}"G -RTS > "$log" 2>&1 || status=$?
+  echo "prover exit status: $status" >> "$log"
 }
 
 verdict() {
@@ -129,9 +155,19 @@ verdict() {
     *": falsified"*) echo falsified ;;
     *"analysis incomplete"*) echo "no verdict" ;;
     *)
-      if grep -q "heap overflow\|out of memory" "$log"; then echo "no verdict: out of memory"
-      elif [ ! -s "$log" ]; then echo "no verdict: empty log"
-      else echo "no verdict: $(grep -m1 -iE 'error|exception|unexpected' "$log" | cut -c1-120)"; fi ;;
+      local status cause
+      status=$(sed -n 's/^prover exit status: //p' "$log" | tail -1)
+      case "$status" in
+        124) cause="time limit (-t) reached" ;;
+        137) cause="killed (SIGKILL), most likely by the kernel for lack of memory; see dmesg" ;;
+        "") cause="no exit status recorded" ;;
+        *) cause="exit status $status" ;;
+      esac
+      if grep -q "heap overflow\|out of memory" "$log"; then cause="out of memory (heap limit ${JOB_GB} GB)"
+      elif grep -qiE 'error|exception|unexpected' "$log"; then
+        cause="$cause; $(grep -m1 -iE 'error|exception|unexpected' "$log" | cut -c1-120)"
+      fi
+      echo "no verdict: $cause" ;;
   esac
 }
 

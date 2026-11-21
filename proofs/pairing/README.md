@@ -21,6 +21,7 @@ reveal device keys. The header of `pairing.spthy` lists every abstraction.
 | `acceptor_agreement` | R-JOIN-1 | the acceptor confirms only a run the joiner confirmed with the same key |
 | `bus_authenticity` | R-JOIN-2 | the joiner takes bus parameters only from the acceptor that showed the code |
 | `device_binding` | R-JOIN-4 | the acceptor takes an honest device's key only with a signature made in this run, even if the code leaked |
+| `device_binding_counterexample` | R-JOIN-4, R-VER-2 | a trace is a counterexample to `device_binding`; it names the run the device did sign, which guides the search. Run only for `PROBE_NO_TRANSCRIPT`, where its trace must be found |
 | `admission_via_request` | S4, R-JOIN-5..7 | a passport issued through a join request goes only to a device that paired for this bus, with the presence key and name it signed, even with a compromised acceptor and a leaked code |
 | `admission_direct` | R-JOIN-9 | the same when the Root pairs directly, unless the code leaked |
 
@@ -29,11 +30,11 @@ Probes, each a deliberate defect selected with `-D`, each expected to falsify it
 | Probe | Defect | Lemma |
 | --- | --- | --- |
 | `PROBE_NO_FINGERPRINT` | the Root admits without the fingerprint comparison | `admission_via_request` |
-| `PROBE_NO_TRANSCRIPT` | the joiner's signature omits `pairing_hash` | `device_binding` |
+| `PROBE_NO_TRANSCRIPT` | the joiner's signature omits `pairing_hash` | `device_binding_counterexample` (trace found) |
 | `PROBE_SIG_KEY_ONLY` | the joiner's signature covers only the device key | `admission_via_request` |
 | `PROBE_NO_CONFIRM` | the acceptor skips the joiner's confirmation | `acceptor_agreement` |
 
-[`checks.json`](checks.json) lists the probes and the quick subset that CI runs.
+[`checks.json`](checks.json) lists the probes and what CI runs: three quick lemmas and every probe.
 
 Tamarin warns that some variables of `Acceptor_Request`, `Root_Admit` and `Root_AdmitDirect` are not
 derivable from their premises. This is intended: signature checks are written as pattern matches on

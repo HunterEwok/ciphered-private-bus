@@ -26,7 +26,7 @@
   "inductive": {
     "instance": "mid_ind",
     "smallInstance": "tiny_ind",
-    "parallel": 2,
+    "parallel": 1,
     "steps": [
       "stepAnswer",
       "stepLearn",

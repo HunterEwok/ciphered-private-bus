@@ -13,7 +13,7 @@
 # number of inductive checks at a time; each gets MemoryGB / 2 / Parallel of
 # heap. A model whose checks.json sets "inductive.parallel" uses that number
 # instead (fewer checks with more memory each, for the large membership
-# instance). -TimeoutHours bounds each inductive check, so that a run fits a
+# instance), unless -Parallel is given explicitly. -TimeoutHours bounds each inductive check, so that a run fits a
 # night; a check stopped at the limit has no verdict. A stage that fails does
 # not stop the next one.
 #
@@ -70,7 +70,8 @@ foreach ($model in $Models) {
         } elseif ($stage -eq "inductive") {
             $script = Join-Path $ModelsDir "run-inductive.ps1"
             $ind = (Get-Content (Join-Path (Join-Path $ModelsDir $model) "checks.json") -Raw | ConvertFrom-Json).inductive
-            $par = if ($ind -and $ind.parallel) { [int]$ind.parallel } else { $Parallel }
+            # -Parallel given on the command line wins over the model's own setting.
+            $par = if ($PSBoundParameters.ContainsKey("Parallel") -or -not ($ind -and $ind.parallel)) { $Parallel } else { [int]$ind.parallel }
             $stageArgs = @("-Model", $model, "-Split", "-Parallel", $par, "-Share", $shareText, "-TimeoutHours", $TimeoutHours)
         } else { throw "Unknown stage $stage (probes or inductive)" }
         Say ("===== {0}: {1} =====" -f $model, $stage)

@@ -53,12 +53,12 @@ builtins: diffie-hellman, hashing, signing, symmetric-encryption, asymmetric-enc
 // pairing_hash, and the hash of fields 1..3 (device key, presence key, name).
 #ifdef PROBE_NO_TRANSCRIPT
 macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, h(<dk, pres, name>)>
-#else
+#endif
 #ifdef PROBE_SIG_KEY_ONLY
 macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, ph, dk>
-#else
-macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, ph, h(<dk, pres, name>)>
 #endif
+#ifdef not PROBE_NO_TRANSCRIPT & not PROBE_SIG_KEY_ONLY
+macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, ph, h(<dk, pres, name>)>
 #endif
 
 restriction Eq:

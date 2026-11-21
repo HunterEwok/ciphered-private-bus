@@ -98,6 +98,16 @@ if probes:
             print(f"{define}|{define}|{lemma}|falsified")
 EOF
 TOTAL=$(wc -l < "$JOBLIST")
+
+# Every variant (the model and each probe) must parse before any prover starts.
+for define in - $(python3 -c 'import json, sys; print(*json.load(open(sys.argv[1]))["probes"])' "$CHECKS"); do
+  dflag=(); [ "$define" != "-" ] && dflag=("-D$define")
+  if ! tamarin-prover "${dflag[@]}" --derivcheck-timeout=0 "$SPTHY" > "$RUN/parse-$define.log" 2>&1; then
+    say "The model does not parse with ${dflag[*]:-no defines}:"; sed 's/^/  /' "$RUN/parse-$define.log" | tail -15
+    exit 1
+  fi
+done
+say "The model and every probe parse"
 say "$TOTAL lemma checks"
 
 run_one() {
@@ -121,7 +131,7 @@ verdict() {
     *)
       if grep -q "heap overflow\|out of memory" "$log"; then echo "no verdict: out of memory"
       elif [ ! -s "$log" ]; then echo "no verdict: empty log"
-      else echo "no verdict: $(grep -m1 -iE 'error|exception' "$log" | cut -c1-120)"; fi ;;
+      else echo "no verdict: $(grep -m1 -iE 'error|exception|unexpected' "$log" | cut -c1-120)"; fi ;;
   esac
 }
 

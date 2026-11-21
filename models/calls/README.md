@@ -70,8 +70,10 @@ in class, key, and idempotence, and all bodies of a call that is not idempotent 
 call that was executed and is not idempotent has consumed that nonce; a commander's pending call is in
 the pool and is its latest call. Together they make `atMostOnce` and `freshNonce` follow.
 
-The instances are `tiny_ind` (one commander and the root, 3 nonces, checked in CI) and `small_ind`
-(the size of `small`) for a long run.
+The instances are `tiny_ind` (one commander and the root, 3 nonces, checked in CI), `mid_ind` (both
+kinds of commander and the root, 4 nonces, one reset, no outsider: a commander removed from the
+passport stands for one) for a long run, and `small_ind` (the size of `small`), which ran out of a
+24 GB heap.
 
 ## Running
 

@@ -24,7 +24,7 @@
     "witnessMismatchRetryExecuted"
   ],
   "inductive": {
-    "instance": "small_ind",
+    "instance": "mid_ind",
     "smallInstance": "tiny_ind",
     "parallel": 2,
     "steps": [

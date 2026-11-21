@@ -197,11 +197,16 @@ function Get-Verdict($C, [bool]$TimedOut) {
     if (($text -match '^\[violation\]').Count -gt 0) { return "VIOLATED, see $($C.Log)" }
     # No verdict: name the first error found, the server's first (it is
     # usually the cause, for example an OutOfMemoryError), then Quint's.
+    # Running out of memory first, since the solver's log has other lines
+    # that mention errors; Java's protobuf warning is not one.
     $cause = ""
-    foreach ($f in @($C.ServerLog, ($C.ServerLog + ".err"), $C.Log, ($C.Log + ".err"))) {
-        if ($cause -or -not (Test-Path $f)) { continue }
-        $hit = Get-Content $f | Where-Object { $_ -match 'OutOfMemory|Exception|[Ee]rror' } | Select-Object -First 1
-        if ($hit) { $cause = ": " + $hit.Trim().Substring(0, [math]::Min(160, $hit.Trim().Length)) }
+    $files = @($C.ServerLog, ($C.ServerLog + ".err"), $C.Log, ($C.Log + ".err")) | Where-Object { Test-Path $_ }
+    foreach ($pattern in @('OutOfMemory|Ran out of heap', 'Exception|[Ee]rror')) {
+        foreach ($f in $files) {
+            if ($cause) { break }
+            $hit = Get-Content $f | Where-Object { $_ -match $pattern -and $_ -notmatch 'protobuf|gencode' } | Select-Object -First 1
+            if ($hit) { $cause = ": " + $hit.Trim().Substring(0, [math]::Min(160, $hit.Trim().Length)) }
+        }
     }
     return "no verdict$cause; see $($C.Log) and $($C.ServerLog)"
 }

@@ -1,0 +1,340 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * Root change, recovery and halt proofs (requirements R-MEM-8, R-MEM-10,
+ * R-MEM-11, R-MEM-13, R-JOIN-2, R-FMT-9; Appendix B, Sections B.1 and B.3;
+ * properties S8 and S9; limitation L2): the bus identifier binds the first
+ * root key and both halves of the recovery key, a root change record signed
+ * by K1 and K2 designates the root key of a new generation, the root signs
+ * passports and checkpoints of its generation, and a halt proof of two
+ * records with one head halts a node. Verification level V1 (Section 14.1):
+ * a symbolic model, primitives are perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - The bus identifier reaches a joiner authentically through pairing
+ *   (proofs/pairing, bus_authenticity); here Pair hands it over. The joiner
+ *   receives the first root key, K1 and K2 from anyone and checks that they
+ *   hash to the identifier (R-JOIN-2, R-FMT-9).
+ * - Generations are public names; the first generation is '1'. Which
+ *   generation is current, the order of generations, counters, revocation
+ *   and the halted state's effects are in models/membership. A node keeps
+ *   the root key of every generation it accepted; what is proven is who can
+ *   make a node take a root key and a record of a generation.
+ * - Records with a head are signed over <label, h(head), h(rest)>
+ *   (Appendix B, Section B.1). A passport and a checkpoint have the head
+ *   <bus, generation, number> and a fresh rest; a root change record has
+ *   the head <bus, generation> and the new root key as its rest.
+ * - The recovery key is offline but may sign two records of one generation
+ *   (L6), and a root may sign two records with one head (S8); both are
+ *   the faults that halt proofs expose.
+ * - Compromise: RevealRoot gives the root key of one generation, RevealK1
+ *   and RevealK2 one half of the recovery key. Quantum stands for an
+ *   adversary with a quantum computer: it gives every classical signing key
+ *   of the bus (the root keys and K1, ECDSA P-256), but not K2 (SLH-DSA).
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_K1_ONLY         a root change record is accepted with K1 alone   -> root_change_quantum
+ *   PROBE_K2_ONLY         a root change record is accepted with K2 alone   -> root_change_authentic
+ *   PROBE_ROOT_ANY_GEN    a record is accepted from the root of any accepted generation -> old_root_powerless
+ *   PROBE_NO_BUS_CHECK    the joiner does not check the bus identifier     -> join_authentic
+ *   PROBE_HALT_SAME_REST  a halt proof is accepted with two equal rests    -> halt_proof_authentic
+ *   PROBE_NO_LABEL        records are signed without the label of their kind -> halt_proof_authentic
+ */
+
+theory CpbRoot
+begin
+
+builtins: hashing, signing
+
+// What a record with a head is signed over (Appendix B, Section B.1).
+#ifdef PROBE_NO_LABEL
+macros: recmsg(lbl, head, rh) = <h(head), rh>
+#else
+macros: recmsg(lbl, head, rh) = <lbl, h(head), rh>
+#endif
+
+restriction Inequality:
+  "All x #i. Neq(x, x) @ i ==> F"
+
+#ifdef PROBE_ROOT_ANY_GEN
+// The attack needs one bus, one root change and one node; these
+// restrictions keep the search to that. A restriction only removes traces,
+// so a trace found here is a trace of the unrestricted model.
+restriction OneBus:
+  "All a b #i #j. NewBus(a) @ i & NewBus(b) @ j ==> #i = #j"
+restriction OneRootChange:
+  "All b1 b2 g1 g2 k1 k2 #i #j. Designated(b1, g1, k1) @ i & Designated(b2, g2, k2) @ j ==> #i = #j"
+restriction OneNode:
+  "All d1 d2 b1 b2 #i #j. Paired(d1, b1) @ i & Paired(d2, b2) @ j ==> #i = #j"
+#endif
+
+restriction LaterGeneration:
+  "All g #i. NotFirst(g) @ i ==> not (g = '1')"
+
+/* -------------------------------------------------------------------- bus */
+
+// Bus creation (R-JOIN-10): the root key, K1 and K2, and the identifier
+// derived from them (R-FMT-9).
+rule NewBus:
+    let bus = h(<'cpb bus v1', pk(~rk), pk(~k1), pk(~k2)>) in
+    [ Fr(~rk), Fr(~k1), Fr(~k2) ]
+  --[ NewBus(bus), FirstRoot(bus, pk(~rk)), Recovery(bus, pk(~k1), pk(~k2)) ]->
+    [ !Recovery(bus, ~k1, ~k2), !RootLtk(bus, '1', ~rk), !Bus(bus),
+      Out(<pk(~rk), pk(~k1), pk(~k2)>) ]
+
+// Recovery: a root change record of a later generation, signed by K1 and K2
+// (R-MEM-11). The recovery key may sign several records of one generation.
+rule Recover:
+    let head = <bus, $g>
+        rest = pk(~rk)
+        m    = <'cpb root change v1', h(head), h(rest)>
+    in
+    [ !Recovery(bus, k1, k2), Fr(~rk) ]
+  --[ Designated(bus, $g, pk(~rk)), RcSigned(bus, head, h(rest)), NotFirst($g) ]->
+    [ !RootLtk(bus, $g, ~rk), Out(<head, rest, sign(m, k1), sign(m, k2)>) ]
+
+// The root of a generation signs passports and checkpoints of it.
+rule RootPassport:
+    let head = <bus, g, $no>
+        rest = ~c
+    in
+    [ !RootLtk(bus, g, rk), Fr(~c) ]
+  --[ RootSigned(bus, g, 'cpb passport v1', head, h(rest)) ]->
+    [ Out(<'cpb passport v1', head, rest, sign(recmsg('cpb passport v1', head, h(rest)), rk)>) ]
+
+rule RootCheckpoint:
+    let head = <bus, g, $no>
+        rest = ~c
+    in
+    [ !RootLtk(bus, g, rk), Fr(~c) ]
+  --[ RootSigned(bus, g, 'cpb checkpoint v1', head, h(rest)) ]->
+    [ Out(<'cpb checkpoint v1', head, rest, sign(recmsg('cpb checkpoint v1', head, h(rest)), rk)>) ]
+
+rule RevealRoot:
+    [ !RootLtk(bus, g, rk) ]
+  --[ RevealRoot(bus, g) ]->
+    [ Out(rk) ]
+
+rule RevealK1:
+    [ !Recovery(bus, k1, k2) ]
+  --[ RevealK1(bus) ]->
+    [ Out(k1) ]
+
+rule RevealK2:
+    [ !Recovery(bus, k1, k2) ]
+  --[ RevealK2(bus) ]->
+    [ Out(k2) ]
+
+// A quantum adversary forges every classical signature of the bus (L2).
+rule QuantumK1:
+    [ !Recovery(bus, k1, k2) ]
+  --[ Quantum(bus) ]->
+    [ Out(k1) ]
+
+rule QuantumRoot:
+    [ !RootLtk(bus, g, rk) ]
+  --[ Quantum(bus) ]->
+    [ Out(rk) ]
+
+/* ------------------------------------------------------------------- node */
+
+// Pairing hands the joiner the bus identifier.
+rule Pair:
+    [ !Bus(bus) ]
+  --[ Paired($D, bus) ]->
+    [ !PairedBus($D, bus) ]
+
+// The joiner takes the first root key, K1 and K2 only if they hash to the
+// bus identifier (R-JOIN-2).
+#ifdef PROBE_NO_BUS_CHECK
+rule NodeJoin:
+    [ !PairedBus(D, bus), In(<pk(xr), pk(x1), pk(x2)>) ]
+  --[ JoinRoot(D, bus, pk(xr), pk(x1), pk(x2)) ]->
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)), !NodeRoot(D, bus, '1', pk(xr)) ]
+#else
+rule NodeJoin:
+    let bus = h(<'cpb bus v1', pk(xr), pk(x1), pk(x2)>) in
+    [ !PairedBus(D, bus), In(<pk(xr), pk(x1), pk(x2)>) ]
+  --[ JoinRoot(D, bus, pk(xr), pk(x1), pk(x2)) ]->
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)), !NodeRoot(D, bus, '1', pk(xr)) ]
+#endif
+
+// A root change record is accepted with both K1 and K2 from the bus
+// identifier, for a later generation (R-MEM-11).
+#ifdef PROBE_K1_ONLY
+rule NodeAcceptRoot:
+    let head = <bus, g>
+        m    = <'cpb root change v1', h(head), h(pk(xn))>
+    in
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)), In(<head, pk(xn), sign(m, x1), s2>) ]
+  --[ AcceptRoot(D, bus, g, pk(xn)), NotFirst(g) ]->
+    [ !NodeRoot(D, bus, g, pk(xn)) ]
+#endif
+#ifdef PROBE_K2_ONLY
+rule NodeAcceptRoot:
+    let head = <bus, g>
+        m    = <'cpb root change v1', h(head), h(pk(xn))>
+    in
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)), In(<head, pk(xn), s1, sign(m, x2)>) ]
+  --[ AcceptRoot(D, bus, g, pk(xn)), NotFirst(g) ]->
+    [ !NodeRoot(D, bus, g, pk(xn)) ]
+#endif
+#ifdef not PROBE_K1_ONLY & not PROBE_K2_ONLY
+rule NodeAcceptRoot:
+    let head = <bus, g>
+        m    = <'cpb root change v1', h(head), h(pk(xn))>
+    in
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)), In(<head, pk(xn), sign(m, x1), sign(m, x2)>) ]
+  --[ AcceptRoot(D, bus, g, pk(xn)), NotFirst(g) ]->
+    [ !NodeRoot(D, bus, g, pk(xn)) ]
+#endif
+
+// A passport or checkpoint is accepted only with the signature of the root
+// of the generation in its head (R-MEM-12).
+#ifdef PROBE_ROOT_ANY_GEN
+rule NodeAcceptRecord:
+    let head = <bus, g, no> in
+    [ !NodeRoot(D, bus, g2, pk(xr)), In(<lbl, head, rest, sign(recmsg(lbl, head, h(rest)), xr)>) ]
+  --[ AcceptRecord(D, bus, g, lbl, head, h(rest)) ]->
+    [ ]
+#else
+rule NodeAcceptRecord:
+    let head = <bus, g, no> in
+    [ !NodeRoot(D, bus, g, pk(xr)), In(<lbl, head, rest, sign(recmsg(lbl, head, h(rest)), xr)>) ]
+  --[ AcceptRecord(D, bus, g, lbl, head, h(rest)) ]->
+    [ ]
+#endif
+
+// A halt proof of a passport or checkpoint (Appendix B, Section B.3, rule
+// 1): one head, two different rests, both signed by the root of the
+// generation in the head (R-MEM-8, R-MEM-10).
+#ifdef PROBE_HALT_SAME_REST
+rule NodeAcceptHalt:
+    let head = <bus, g, no> in
+    [ !NodeRoot(D, bus, g, pk(xr)),
+      In(<'halt', lbl, head, ra, sign(recmsg(lbl, head, ra), xr), rb, sign(recmsg(lbl, head, rb), xr)>) ]
+  --[ AcceptHalt(D, bus, g, lbl, head) ]->
+    [ ]
+#else
+rule NodeAcceptHalt:
+    let head = <bus, g, no> in
+    [ !NodeRoot(D, bus, g, pk(xr)),
+      In(<'halt', lbl, head, ra, sign(recmsg(lbl, head, ra), xr), rb, sign(recmsg(lbl, head, rb), xr)>) ]
+  --[ AcceptHalt(D, bus, g, lbl, head), Neq(ra, rb) ]->
+    [ ]
+#endif
+
+// A halt proof of two root change records of one generation, verified with
+// K1 and K2 alone (R-MEM-13, L6).
+rule NodeAcceptPermanentHalt:
+    let head = <bus, g>
+        ma   = <'cpb root change v1', h(head), ra>
+        mb   = <'cpb root change v1', h(head), rb>
+    in
+    [ !NodeTrust(D, bus, pk(x1), pk(x2)),
+      In(<'halt', 'cpb root change v1', head, ra, sign(ma, x1), sign(ma, x2), rb, sign(mb, x1), sign(mb, x2)>) ]
+  --[ AcceptPermanentHalt(D, bus, g), Neq(ra, rb) ]->
+    [ ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+lemma executable:
+  exists-trace
+  "Ex D bus g rk lbl head rh #a #r.
+     AcceptRoot(D, bus, g, rk) @ a & AcceptRecord(D, bus, g, lbl, head, rh) @ r & a < r
+     & (not Ex b x #k. RevealRoot(b, x) @ k)
+     & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
+     & (not Ex b #k. Quantum(b) @ k)"
+
+// Non-vacuity of the halt lemmas: a root that signs two records with one
+// head halts a node, and so does a recovery key that signs two root change
+// records of one generation, with no key revealed.
+lemma executable_halt:
+  exists-trace
+  "Ex D bus g lbl head #h.
+     AcceptHalt(D, bus, g, lbl, head) @ h
+     & (not Ex b x #k. RevealRoot(b, x) @ k)
+     & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
+     & (not Ex b #k. Quantum(b) @ k)"
+
+lemma executable_permanent_halt:
+  exists-trace
+  "Ex D bus g #h.
+     AcceptPermanentHalt(D, bus, g) @ h
+     & (not Ex b x #k. RevealRoot(b, x) @ k)
+     & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
+     & (not Ex b #k. Quantum(b) @ k)"
+
+// S4, S9, R-JOIN-2, R-FMT-9: a joiner takes as the first root key and the
+// recovery key exactly those of the bus it paired with.
+lemma join_authentic:
+  "All D bus rk p1 p2 #j.
+     JoinRoot(D, bus, rk, p1, p2) @ j
+     ==> (Ex #b. FirstRoot(bus, rk) @ b) & (Ex #b. Recovery(bus, p1, p2) @ b)"
+
+// S9, R-MEM-11: a node takes a root key for a generation only from the
+// recovery key of its bus, unless both halves of the recovery key were known
+// before. In every lemma below a key counts only if it was revealed before
+// the event: a key broken later does not undo what a node accepted.
+lemma root_change_authentic:
+  "All D bus g rk #a.
+     AcceptRoot(D, bus, g, rk) @ a
+     ==> (Ex #d. Designated(bus, g, rk) @ d)
+       | ((Ex #k. RevealK1(bus) @ k & k < a) & (Ex #k. RevealK2(bus) @ k & k < a))
+       | ((Ex #k. Quantum(bus) @ k & k < a) & (Ex #k. RevealK2(bus) @ k & k < a))"
+
+// S9 against a quantum adversary (Section 14.1, V1): with every classical
+// key forgeable, a root change still needs K2.
+lemma root_change_quantum:
+  "All D bus g rk #a.
+     AcceptRoot(D, bus, g, rk) @ a
+     ==> (Ex #d. Designated(bus, g, rk) @ d)
+       | (Ex #k. RevealK2(bus) @ k & k < a)"
+
+// S9, R-MEM-12: a passport or checkpoint of a generation is accepted only as
+// the root of that generation signed it. The keys of earlier roots do not
+// matter: after a root change the previous root has no power.
+lemma old_root_powerless:
+  "All D bus g lbl head rh #r.
+     AcceptRecord(D, bus, g, lbl, head, rh) @ r
+     ==> (Ex #s. RootSigned(bus, g, lbl, head, rh) @ s)
+       | (Ex #k. RevealRoot(bus, g) @ k & k < r)
+       | (Ex #k. Quantum(bus) @ k & k < r)
+       | ((Ex #k. RevealK1(bus) @ k & k < r) & (Ex #k. RevealK2(bus) @ k & k < r))"
+
+// L2: a quantum adversary forges records of the current root. This is a
+// stated limitation, not a property: the trace must exist.
+lemma quantum_forges_records:
+  exists-trace
+  "Ex D bus g lbl head rh #r.
+     AcceptRecord(D, bus, g, lbl, head, rh) @ r
+     & (not Ex #s. RootSigned(bus, g, lbl, head, rh) @ s)
+     & (Ex #q. Quantum(bus) @ q)
+     & (not Ex b x #k. RevealRoot(b, x) @ k)
+     & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)"
+
+// S8, R-MEM-8, Section 15.5: a halt proof convicts the root of the
+// generation in its head: it signed two records of one kind with that head.
+// No one else can make one without that root's key.
+lemma halt_proof_authentic:
+  "All D bus g lbl head #h.
+     AcceptHalt(D, bus, g, lbl, head) @ h
+     ==> (Ex ra rb #a #b. RootSigned(bus, g, lbl, head, ra) @ a
+            & RootSigned(bus, g, lbl, head, rb) @ b & not (ra = rb))
+       | (Ex #k. RevealRoot(bus, g) @ k & k < h)
+       | (Ex #k. Quantum(bus) @ k & k < h)
+       | ((Ex #k. RevealK1(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))"
+
+// S8, R-MEM-13, L6: a permanent halt proof convicts the recovery key: it
+// signed two root change records of one generation.
+lemma permanent_halt_authentic:
+  "All D bus g #h.
+     AcceptPermanentHalt(D, bus, g) @ h
+     ==> (Ex ra rb #a #b. RcSigned(bus, <bus, g>, ra) @ a
+            & RcSigned(bus, <bus, g>, rb) @ b & not (ra = rb))
+       | ((Ex #k. RevealK1(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))
+       | ((Ex #k. Quantum(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))"
+
+end

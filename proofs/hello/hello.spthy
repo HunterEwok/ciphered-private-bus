@@ -32,6 +32,8 @@
  *                        (so not the peer's nonce)            -> peer_authentic
  *   PROBE_NO_VERSIONS    the hello hash leaves out the version
  *                        list                                 -> no_downgrade
+ *   PROBE_SELF_HELLO     a hello naming the receiver's own device or
+ *                        repeating its nonce is not rejected  -> no_self_connection
  */
 
 theory CpbHello
@@ -55,6 +57,12 @@ macros: authmsg(own, peer) = <'cpb hello v1', own, peer>
 
 restriction OneBus:
   "All b #i #j. NewBus(b) @ i & NewBus(b) @ j ==> #i = #j"
+
+// The probe drops the check of B.4 by dropping the restriction it relies on.
+#ifdef not PROBE_SELF_HELLO
+restriction Inequality:
+  "All x #i. Neq(x, x) @ i ==> F"
+#endif
 
 restriction OneDevice:
   "All b d #i #j. NewDevice(b, d) @ i & NewDevice(b, d) @ j ==> #i = #j"
@@ -93,7 +101,8 @@ rule SendHello:
     [ HelloState(B, X, ltk, $V, ~n, $G, $C),
       Out(<'hello', $V, ~n, B, $G, $C, X>) ]
 
-// It receives the peer's hello and passport, checks the passport against the
+// It receives the peer's hello and passport, rejects a hello that names its
+// own device or repeats its own nonce (B.4), checks the passport against the
 // root key of its bus, and signs both hellos.
 rule ReceiveHello:
     let own  = hhash(V, n, B, G, C, X)
@@ -102,7 +111,7 @@ rule ReceiveHello:
     [ HelloState(B, X, ltk, V, n, G, C), !Root(B, pk(rk)),
       In(<'hello', vy, ny, B, gy, cy, Y>),
       In(<pky, sign(<'cpb passport v1', B, Y, pky>, rk)>) ]
-  --[ Signed(B, X, V, n, Y, vy, ny) ]->
+  --[ Signed(B, X, V, n, Y, vy, ny), Neq(Y, X), Neq(ny, n) ]->
     [ AuthState(B, X, V, n, Y, vy, ny, pky, own, peer),
       Out(sign(authmsg(own, peer), ltk)) ]
 
@@ -126,8 +135,8 @@ lemma executable:
 
 // S14, R-REL-1: a side accepts a peer only if that peer signed exactly these
 // two hellos, after it received this side's hello: the peer took part in
-// this link, with this side's fresh nonce. The order of the hashes stops a
-// reflected Auth; the lemma also covers a peer with the side's own name.
+// this link, with this side's fresh nonce. The order of the hashes stops an
+// Auth reflected between two devices.
 lemma peer_authentic:
   "All B X vx nx Y vy ny #i.
      Accepted(B, X, vx, nx, Y, vy, ny) @ i
@@ -145,6 +154,11 @@ lemma no_downgrade:
           & (Ex #k vz. Signed(B, Y, vz, ny, X, vx, nx) @ k))
        | (Ex #r. RevealDev(B, Y) @ r & r < i)
        | (Ex #r. RevealRoot(B) @ r & r < i)"
+
+// B.4: a side never accepts a link with itself, even when the adversary
+// reflects its own hello and Auth back to it.
+lemma no_self_connection:
+  "All B X vx nx vy ny #i. Accepted(B, X, vx, nx, X, vy, ny) @ i ==> F"
 
 // One acceptance per hello: the fresh nonce of a side makes every accepted
 // link a different one, so a recorded hello and Auth cannot be replayed.

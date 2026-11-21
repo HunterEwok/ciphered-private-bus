@@ -48,7 +48,7 @@ network is the Dolev-Yao adversary, which is the transport assumption of R-ARC-5
 | R-CALL-9 | calls | `reply_secrecy`, `reply_binding` |
 | R-STR-1 | calls | `reply_secrecy`, `stream_secrecy`, `stream_binding` |
 | R-STR-2 | calls | `stream_binding` |
-| R-REL-1 | hello | `peer_authentic`, `no_downgrade`, `one_accept_per_hello` |
+| R-REL-1 | hello | `peer_authentic`, `no_self_connection`, `no_downgrade`, `one_accept_per_hello` |
 | R-API-3 | calls | `call_integrity_confirm` (with `PROBE_CONFIRM_DEVICE_KEY`) |
 
 R-FMT-15 is verified by the release process; the property it states for the hello, that the version list

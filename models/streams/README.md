@@ -75,22 +75,47 @@ Witnesses (`witness*`) state that a behaviour never happens and are expected to 
 data taken, credit added, a gap skipped in lossy mode, an opening refused at the limit, a stale chunk
 dropped, a stream closed by "reset nonces", by a chunk out of order, and by a chunk beyond the credit.
 
+## Inductive invariant
+
+[`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`; Apalache proves the same three
+obligations as for the other models: the initial state satisfies `IndInv`, every step keeps it, and
+`IndInv` implies `safety`. Besides the bounds of every variable and `broken` staying empty, `IndInv`
+states these lemmas:
+
+- there is one call and at most one reply for each call number, and a reply is only for a call the
+  target has taken;
+- every open stream was opened by a successful reply with its number and a call in its mode, and the
+  commander's side belongs to a call that is no longer pending;
+- every chunk sent has a number below the sender's next number, chunks are unique by key, direction
+  and number, and the highest number a recipient has taken is that of a chunk of its peer;
+- in ordered mode the credit adds up: what a recipient still grants plus the data it took equals all
+  it granted, which is the initial credit and its own credit chunks; what a sender may still send plus
+  the data it sent equals all it got, which is the initial credit and the peer's credit chunks up to
+  the highest number taken. In lossy mode every credit is 0;
+- a halted node, and a node that knows its peer was revoked, has no open stream.
+
+Together they make every invariant of `safety` follow. The instances are `tiny_ind` (the size of
+`tiny`, checked in CI) and `small_ind` (the size of `small`) for a long run.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)
 and Java 17 or later for TLC.
 
 ```sh
-python3 models/streams/check.py        # CI run: safety, probes, witnesses, scenarios
+python3 models/streams/check.py                        # CI run: safety, probes, witnesses, scenarios
+python3 models/streams/check.py --inductive tiny_ind   # IndInv in CI
 ```
 
 On a shared machine, [`run-tlc.ps1`](../run-tlc.ps1) checks the TLA+ translation with `-Probes` (every
 probe against `safety`, every witness on `tiny`; both lists are in [`checks.json`](checks.json)) and
-runs the exhaustive check of `tiny`:
+runs the exhaustive check of `tiny`; [`run-inductive.ps1`](../run-inductive.ps1) proves `IndInv` on
+`small_ind`, one step branch at a time with `-Split`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model streams -WorkDir <folder> -Java <path to java> -Probes
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model streams -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model streams -Split -WorkDir <folder> -Java <path to java>
 ```
 
 Every run prints the model hash: the first 12 hex digits of the SHA-256 of `streams.qnt` and

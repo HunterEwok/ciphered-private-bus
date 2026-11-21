@@ -25,5 +25,23 @@
     "witnessResetClosed",
     "witnessOrderClose",
     "witnessCreditClose"
-  ]
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "parallel": 1,
+    "steps": [
+      "stepCall",
+      "stepOpen",
+      "stepReply",
+      "stepSend",
+      "stepOverrun",
+      "stepReceive",
+      "stepReset",
+      "stepHalt",
+      "stepRevoke",
+      "stepReboot",
+      "stepLinkDown"
+    ]
+  }
 }

@@ -1,7 +1,7 @@
 {
   "probes": {
     "PROBE_NO_FINGERPRINT": "admission_via_request",
-    "PROBE_NO_TRANSCRIPT": "device_binding_counterexample",
+    "PROBE_NO_TRANSCRIPT": "device_binding",
     "PROBE_SIG_KEY_ONLY": "admission_via_request",
     "PROBE_NO_CONFIRM": "acceptor_agreement"
   },

@@ -21,7 +21,6 @@ reveal device keys. The header of `pairing.spthy` lists every abstraction.
 | `acceptor_agreement` | R-JOIN-1 | the acceptor confirms only a run the joiner confirmed with the same key |
 | `bus_authenticity` | R-JOIN-2 | the joiner takes bus parameters only from the acceptor that showed the code |
 | `device_binding` | R-JOIN-4 | the acceptor takes an honest device's key only with a signature made in this run, even if the code leaked |
-| `device_binding_counterexample` | R-JOIN-4, R-VER-2 | a trace is a counterexample to `device_binding`; it names the run the device did sign, which guides the search. Run only for `PROBE_NO_TRANSCRIPT`, where its trace must be found |
 | `admission_via_request` | S4, R-JOIN-5..7 | a passport issued through a join request goes only to a device that paired for this bus, with the presence key and name it signed, even with a compromised acceptor and a leaked code |
 | `admission_direct` | R-JOIN-9 | the same when the Root pairs directly, unless the code leaked |
 
@@ -30,9 +29,14 @@ Probes, each a deliberate defect selected with `-D`, each expected to falsify it
 | Probe | Defect | Lemma |
 | --- | --- | --- |
 | `PROBE_NO_FINGERPRINT` | the Root admits without the fingerprint comparison | `admission_via_request` |
-| `PROBE_NO_TRANSCRIPT` | the joiner's signature omits `pairing_hash` | `device_binding_counterexample` (trace found) |
+| `PROBE_NO_TRANSCRIPT` | the joiner's signature omits `pairing_hash` | `device_binding` |
 | `PROBE_SIG_KEY_ONLY` | the joiner's signature covers only the device key | `admission_via_request` |
 | `PROBE_NO_CONFIRM` | the acceptor skips the joiner's confirmation | `acceptor_agreement` |
+
+The attack that `PROBE_NO_TRANSCRIPT` must find relays a signature between two complete CPace runs with
+the adversary in the middle. The probe adds restrictions to one bus, one code, one device, one joiner run
+and one acceptor run, which is all the attack needs; a restriction only removes traces, so the trace found
+is also a trace of the unrestricted model.
 
 [`checks.json`](checks.json) lists the probes and what CI runs: three quick lemmas and every probe.
 
@@ -55,3 +59,4 @@ the logs, `results.txt` and `summary.txt` into a new run folder. `-t HOURS` limi
 
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
+| 2026-11-21 | `52e6b4ae98d7` | Tamarin 1.12.0, `run-tamarin.sh -c`, 4 cores, one prover at a time | the 3 CI lemmas verified, 4 of 4 probes falsified (`PROBE_NO_TRANSCRIPT` in 2.4 min, 35 steps); 10.2 min in total |

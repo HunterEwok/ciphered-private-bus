@@ -1,0 +1,342 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * Pairing and enrollment of a device (requirements R-JOIN-1..9; Appendix B,
+ * Section B.11): CPace between the joiner and the acceptor, the sealed
+ * PairBus and PairDevice bodies, the join request sealed to the root device,
+ * and admission by the Root after the owner compares the key fingerprint.
+ * Verification level V1 (Section 14.1): a symbolic model, primitives are
+ * perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - CPace: the generator is a hash of the code, CI and sid (Sections 8.1,
+ *   8.2 of the draft), and the exchange is Diffie-Hellman over it. The test
+ *   for the all-zero point is not modelled.
+ * - The code is a fresh secret shown on one screen and typed on the other
+ *   (an authentic, confidential channel). A successful online guess, or a
+ *   code seen by someone else, is the rule Leak, which gives the adversary
+ *   the code. Counting attempts (R-JOIN-3) is checked by the enrollment model
+ *   in models/enrollment; here every code serves one run on each side.
+ * - HMAC, HKDF and SHA-256 are the hash function h over tagged tuples, with
+ *   the labels of Appendix B.8 as tags. ChaCha20-Poly1305 is symmetric
+ *   encryption with the associated data inside the plaintext; HPKE to the
+ *   root device's sealing key is asymmetric encryption.
+ * - CPace aborts when the shared point K is the identity (draft 21, 6.2);
+ *   the model refuses K = DH_neutral on both sides.
+ * - Versions in PairInit are not modelled (one version).
+ * - Generation 1 only: the root key is first_root_key. A later generation
+ *   takes the key from a root change record signed by K1 and K2; that record
+ *   is the subject of the root change model.
+ * - The owner comparing the 20-digit fingerprint on the Root with the one on
+ *   the joiner's screen is the premise !Screen(J, key). A device always shows
+ *   its own device key, so the fact is made when the device is created; this
+ *   gives the Root a single source to match. Fingerprint collisions are not
+ *   modelled.
+ * - The acceptor's passport and checkpoint are reduced to a key the Root
+ *   knows (!AccKey); membership itself is the subject of the membership model.
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_NO_FINGERPRINT  the Root admits without the comparison  -> admission_via_request
+ *   PROBE_NO_TRANSCRIPT   the joiner's signature omits pairing_hash -> device_binding
+ *   PROBE_SIG_KEY_ONLY    the joiner's signature covers only the key -> admission_via_request
+ *   PROBE_NO_CONFIRM      the acceptor skips the joiner's confirmation -> acceptor_agreement
+ */
+
+theory CpbPairing
+begin
+
+builtins: diffie-hellman, hashing, signing, symmetric-encryption, asymmetric-encryption
+
+// What the joiner's device key signs in PairDevice (B.11): the label, the bus,
+// pairing_hash, and the hash of fields 1..3 (device key, presence key, name).
+#ifdef PROBE_NO_TRANSCRIPT
+macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, h(<dk, pres, name>)>
+#else
+#ifdef PROBE_SIG_KEY_ONLY
+macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, ph, dk>
+#else
+macros: devsigmsg(bus, ph, dk, pres, name) = <'cpb pair device v1', bus, ph, h(<dk, pres, name>)>
+#endif
+#endif
+
+restriction Eq:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction Neq:
+  "All x y #i. Neq(x, y) @ i ==> not(x = y)"
+
+/* ------------------------------------------------------------------ setup */
+
+// Bus creation (R-JOIN-10): the root key, K1, K2, and the root device's
+// sealing key. The bus identifier is derived from the first root key, K1 and
+// K2 (R-FMT-9). K1 and K2 are not used in this model.
+rule CreateBus:
+    let bus = h(<'cpb bus id v1', pk(~root), pk(~k1), pk(~k2)>) in
+    [ Fr(~root), Fr(~k1), Fr(~k2), Fr(~rs) ]
+  --[ BusCreated(bus) ]->
+    [ !Bus(bus, ~root, pk(~k1), pk(~k2)), !RootSeal(bus, ~rs), !Acc('Root', bus),
+      Out(bus), Out(pk(~root)), Out(pk(~k1)), Out(pk(~k2)), Out(pk(~rs)) ]
+
+// A member with the right to accept join requests.
+rule AddAcceptor:
+    [ !Bus(bus, root, k1, k2), Fr(~la) ]
+  --[ Neq($A, 'Root'), AcceptorAdded(bus, $A) ]->
+    [ !Acc($A, bus), !AccLtk($A, bus, ~la), !AccKey(bus, $A, pk(~la)), Out(pk(~la)) ]
+
+// A compromised acceptor: the adversary holds its signing key.
+rule CompromiseAcceptor:
+    [ !AccLtk(A, bus, la) ]
+  --[ CompromisedAcceptor(bus, A) ]->
+    [ Out(la) ]
+
+// A device that wants to join: its device key and user-presence key.
+rule NewDevice:
+    [ Fr(~ltk), Fr(~pres) ]
+  --[ HonestDev(pk(~ltk)) ]->
+    [ !Dev($J, ~ltk, ~pres), !Screen($J, pk(~ltk)), Out(pk(~ltk)), Out(pk(~pres)) ]
+
+rule RevealDevice:
+    [ !Dev(J, ltk, pres) ]
+  --[ RevealDev(pk(ltk)) ]->
+    [ Out(ltk), Out(pres) ]
+
+/* ------------------------------------------------------------------- code */
+
+// The acceptor shows a code; the owner types it on the joiner.
+rule NewCode:
+    [ !Acc(A, bus), Fr(~pw) ]
+  --[ NewCode(A, ~pw) ]->
+    [ CodeA(A, bus, ~pw), Typed(~pw), !CodeOf(~pw) ]
+
+rule TypeCode:
+    [ !Dev(J, ltk, pres), Typed(~pw) ]
+  --[ CodeTyped(J, ~pw) ]->
+    [ CodeJ(J, ~pw) ]
+
+// A successful online guess, or a code seen by someone else.
+rule Leak:
+    [ !CodeOf(~pw) ]
+  --[ Leak(~pw) ]->
+    [ Out(~pw) ]
+
+/* ------------------------------------------------------------- the exchange */
+
+// PairInit.
+rule Joiner_Init:
+    [ CodeJ(J, ~pw), Fr(~nn) ]
+  -->
+    [ J1(J, ~pw, ~nn), Out(<'PairInit', ~nn>) ]
+
+// PairReply: the acceptor's CPace share.
+rule Acceptor_Reply:
+    let gen = h(<'CPace255', ~pw, 'cpb pair v1', <nn, ~na>>)
+        ya  = gen^~y
+    in
+    [ CodeA(A, bus, ~pw), In(<'PairInit', nn>), Fr(~na), Fr(~y) ]
+  --[ AcceptorStart(A, ~pw) ]->
+    [ A1(A, bus, ~pw, nn, ~na, ~y), Out(<'PairReply', ~na, ya>) ]
+
+// PairConfirm: the joiner's share and its confirmation over the whole run.
+rule Joiner_Confirm:
+    let gen   = h(<'CPace255', ~pw, 'cpb pair v1', <~nn, na>>)
+        yn    = gen^~y
+        k     = ya^~y
+        ph    = h(<'cpb pair hash v1', ~nn, <na, ya>, yn>)
+        isk   = h(<'CPace255 isk', ph, k>)
+        confn = h(<'cpb pair confirm n v1', isk>)
+    in
+    [ J1(J, ~pw, ~nn), In(<'PairReply', na, ya>), Fr(~y) ]
+  --[ Neq(k, DH_neutral), JoinerConfirmSent(J, ~pw, ph, isk) ]->
+    [ J2(J, ~pw, ph, isk), Out(<'PairConfirm', yn, confn>) ]
+
+// PairDone and PairBus: the acceptor checks the joiner's confirmation, answers
+// with its own, and sends the bus parameters.
+#ifdef PROBE_NO_CONFIRM
+rule Acceptor_Done:
+    let ya    = h(<'CPace255', ~pw, 'cpb pair v1', <nn, ~na>>)^~y
+        k     = yn^~y
+        ph    = h(<'cpb pair hash v1', nn, <~na, ya>, yn>)
+        isk   = h(<'CPace255 isk', ph, k>)
+        confa = h(<'cpb pair confirm a v1', isk>)
+        ksa   = h(<'cpb pair seal a v1', isk>)
+    in
+    [ A1(A, bus, ~pw, nn, ~na, ~y), In(<'PairConfirm', yn, confn>), !Bus(bus, root, k1, k2) ]
+  --[ Neq(k, DH_neutral), AcceptorConfirmed(A, ~pw, ph, isk), AcceptorSentBus(A, bus, ph) ]->
+    [ A2(A, bus, ~pw, ph, isk), Out(<'PairDone', confa>),
+      Out(<'PairSealed', senc(<'PairBus', bus, k1, k2, pk(root), ph>, ksa)>) ]
+#else
+rule Acceptor_Done:
+    let ya    = h(<'CPace255', ~pw, 'cpb pair v1', <nn, ~na>>)^~y
+        k     = yn^~y
+        ph    = h(<'cpb pair hash v1', nn, <~na, ya>, yn>)
+        isk   = h(<'CPace255 isk', ph, k>)
+        confn = h(<'cpb pair confirm n v1', isk>)
+        confa = h(<'cpb pair confirm a v1', isk>)
+        ksa   = h(<'cpb pair seal a v1', isk>)
+    in
+    [ A1(A, bus, ~pw, nn, ~na, ~y), In(<'PairConfirm', yn, confn>), !Bus(bus, root, k1, k2) ]
+  --[ Neq(k, DH_neutral), AcceptorConfirmed(A, ~pw, ph, isk), AcceptorSentBus(A, bus, ph) ]->
+    [ A2(A, bus, ~pw, ph, isk), Out(<'PairDone', confa>),
+      Out(<'PairSealed', senc(<'PairBus', bus, k1, k2, pk(root), ph>, ksa)>) ]
+#endif
+
+// The joiner checks the acceptor's confirmation and the bus identifier, then
+// sends PairDevice signed with its device key, and shows its fingerprint.
+rule Joiner_Device:
+    let confa = h(<'cpb pair confirm a v1', isk>)
+        ksa   = h(<'cpb pair seal a v1', isk>)
+        ksn   = h(<'cpb pair seal n v1', isk>)
+        bus   = h(<'cpb bus id v1', root, k1, k2>)
+        dk    = pk(~ltk)
+        pres  = pk(~prs)
+        sig   = sign(devsigmsg(bus, ph, dk, pres, J), ~ltk)
+    in
+    [ J2(J, ~pw, ph, isk), !Dev(J, ~ltk, ~prs), In(<'PairDone', confa>),
+      In(<'PairSealed', senc(<'PairBus', bus, k1, k2, root, ph>, ksa)>) ]
+  --[ JoinerDone(J, ~pw, ph, isk), JoinerGotBus(J, ~pw, bus, ph), JoinerSentDevice(dk, pres, J, bus, ph) ]->
+    [ Out(<'PairSealed', senc(<'PairDevice', dk, pres, J, sig, ph>, ksn)>) ]
+
+/* -------------------------------------------------------- the join request */
+
+// The acceptor checks the joiner's signature over its own bus and its own
+// pairing_hash, and sends the join request sealed to the root device.
+rule Acceptor_Request:
+    let ksn  = h(<'cpb pair seal n v1', isk>)
+        dk   = pk(xd)
+        pres = pk(xp)
+        sig  = sign(devsigmsg(bus, ph, dk, pres, $name), xd)
+        hdr  = <bus, A>
+        body = aenc(<'JoinBody', dk, $name, ph, pres, sig>, pk(rs))
+    in
+    [ A2(A, bus, ~pw, ph, isk), !AccLtk(A, bus, la), !RootSeal(bus, rs),
+      In(<'PairSealed', senc(<'PairDevice', dk, pres, $name, sig, ph>, ksn)>) ]
+  --[ AcceptorGotDevice(A, bus, ph, dk, pres, $name) ]->
+    [ Out(<hdr, body, sign(<'cpb join request v1', hdr, body>, la)>) ]
+
+// Signature checks are pattern matches: the signature must be the signing
+// function applied to the expected message under the key named.
+// The Root opens the join request, checks the acceptor's and the joiner's
+// signatures, and issues the passport after the owner compares the
+// fingerprint with the joiner's screen.
+#ifdef PROBE_NO_FINGERPRINT
+rule Root_Admit:
+    let dk   = pk(xd)
+        pres = pk(xp)
+        sig  = sign(devsigmsg(bus, ph, dk, pres, $name), xd)
+        hdr  = <bus, A>
+        body = aenc(<'JoinBody', dk, $name, ph, pres, sig>, pk(rs))
+    in
+    [ !Bus(bus, root, k1, k2), !RootSeal(bus, rs), !AccKey(bus, A, pk(la)),
+      In(<hdr, body, sign(<'cpb join request v1', hdr, body>, la)>) ]
+  --[ RootIssued(bus, dk, pres, $name), RootIssuedViaRequest(bus, A, dk, pres, $name) ]->
+    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+#else
+rule Root_Admit:
+    let dk   = pk(xd)
+        pres = pk(xp)
+        sig  = sign(devsigmsg(bus, ph, dk, pres, $name), xd)
+        hdr  = <bus, A>
+        body = aenc(<'JoinBody', dk, $name, ph, pres, sig>, pk(rs))
+    in
+    [ !Bus(bus, root, k1, k2), !RootSeal(bus, rs), !AccKey(bus, A, pk(la)),
+      !Screen(J, dk),
+      In(<hdr, body, sign(<'cpb join request v1', hdr, body>, la)>) ]
+  --[ RootIssued(bus, dk, pres, $name), RootIssuedViaRequest(bus, A, dk, pres, $name) ]->
+    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+#endif
+
+// The Root as the acceptor (R-JOIN-9): no join request; comparing the
+// fingerprint is optional (B.11, rule 3), so the model does not require it.
+rule Root_AdmitDirect:
+    let ksn  = h(<'cpb pair seal n v1', isk>)
+        dk   = pk(xd)
+        pres = pk(xp)
+        sig  = sign(devsigmsg(bus, ph, dk, pres, $name), xd)
+    in
+    [ A2('Root', bus, ~pw, ph, isk), !Bus(bus, root, k1, k2),
+      In(<'PairSealed', senc(<'PairDevice', dk, pres, $name, sig, ph>, ksn)>) ]
+  --[ RootIssued(bus, dk, pres, $name), RootIssuedDirect(bus, ~pw, dk, pres, $name) ]->
+    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+// Sanity: an honest device is admitted through an honest acceptor, and
+// directly by the Root, with no leaked code and no compromise.
+lemma executable_via_request:
+  exists-trace
+  "Ex bus A dk pres name #i.
+     RootIssuedViaRequest(bus, A, dk, pres, name) @ i
+     & (not Ex pw #k. Leak(pw) @ k)
+     & (not Ex b a #k. CompromisedAcceptor(b, a) @ k)
+     & (not Ex d #k. RevealDev(d) @ k)"
+
+lemma executable_direct:
+  exists-trace
+  "Ex bus pw dk pres name #i.
+     RootIssuedDirect(bus, pw, dk, pres, name) @ i
+     & (not Ex p #k. Leak(p) @ k)
+     & (not Ex d #k. RevealDev(d) @ k)"
+
+// The pairing keys are secret unless the code leaked (S4, R-JOIN-1).
+lemma acceptor_key_secrecy:
+  "All A pw ph isk #i #j.
+     AcceptorConfirmed(A, pw, ph, isk) @ i & K(isk) @ j
+     ==> Ex #k. Leak(pw) @ k"
+
+lemma joiner_key_secrecy:
+  "All J pw ph isk #i #j.
+     JoinerDone(J, pw, ph, isk) @ i & K(isk) @ j
+     ==> Ex #k. Leak(pw) @ k"
+
+// Mutual agreement on the run and the key, unless the code leaked.
+lemma joiner_agreement:
+  "All J pw ph isk #i.
+     JoinerDone(J, pw, ph, isk) @ i
+     ==> (Ex A #j. AcceptorConfirmed(A, pw, ph, isk) @ j & j < i)
+       | (Ex #k. Leak(pw) @ k)"
+
+lemma acceptor_agreement:
+  "All A pw ph isk #i.
+     AcceptorConfirmed(A, pw, ph, isk) @ i
+     ==> (Ex J #j. JoinerConfirmSent(J, pw, ph, isk) @ j & j < i)
+       | (Ex #k. Leak(pw) @ k)"
+
+// The joiner takes the bus parameters only from the acceptor that showed the
+// code (R-JOIN-2), unless the code leaked.
+lemma bus_authenticity:
+  "All J pw bus ph #i.
+     JoinerGotBus(J, pw, bus, ph) @ i
+     ==> (Ex A #j. AcceptorSentBus(A, bus, ph) @ j & j < i)
+       | (Ex #k. Leak(pw) @ k)"
+
+// R-JOIN-4: the acceptor takes an honest device's key only with a signature
+// made in this very run, even if the code leaked: a payload signed in another
+// session and relayed by a man in the middle is refused.
+lemma device_binding:
+  "All A bus ph dk pres name #i #h.
+     AcceptorGotDevice(A, bus, ph, dk, pres, name) @ i & HonestDev(dk) @ h
+     ==> (Ex #j. JoinerSentDevice(dk, pres, name, bus, ph) @ j & j < i)
+       | (Ex #k. RevealDev(dk) @ k)"
+
+// S4, R-JOIN-5..7: a passport issued through a join request goes only to the
+// key of a device that ran the pairing for this bus, and carries exactly the
+// presence key and name that device signed, even with a compromised
+// acceptor and a leaked code.
+lemma admission_via_request:
+  "All bus A dk pres name #i.
+     RootIssuedViaRequest(bus, A, dk, pres, name) @ i
+     ==> (Ex ph #j. JoinerSentDevice(dk, pres, name, bus, ph) @ j & j < i)
+       | (Ex #k. RevealDev(dk) @ k)"
+
+// R-JOIN-9: when the Root pairs directly, the same holds unless the code
+// leaked (the owner may skip the comparison here).
+lemma admission_direct:
+  "All bus pw dk pres name #i.
+     RootIssuedDirect(bus, pw, dk, pres, name) @ i
+     ==> (Ex ph #j. JoinerSentDevice(dk, pres, name, bus, ph) @ j & j < i)
+       | (Ex #k. RevealDev(dk) @ k)
+       | (Ex #k. Leak(pw) @ k)"
+
+end

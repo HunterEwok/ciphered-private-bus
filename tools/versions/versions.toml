@@ -39,3 +39,17 @@ uses = [
   { file = "tools/cddl/README.md", text = "gem install cddl -v {version}" },
   { file = "docs/spec/appendix-c-cddl.md", text = "gem install cddl -v {version}" },
 ]
+
+[tamarin]
+version = "1.12.0"
+latest = "github:tamarin-prover/tamarin-prover"
+uses = [
+  { file = "proofs/run-tamarin.sh", text = 'TAMARIN_VERSION="{version}"' },
+]
+
+[maude]
+version = "3.5.1"
+latest = "github:maude-lang/Maude"
+uses = [
+  { file = "proofs/run-tamarin.sh", text = 'MAUDE_VERSION="{version}"' },
+]

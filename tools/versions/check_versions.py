@@ -63,7 +63,8 @@ def fetch(url):
 def latest(source):
     kind, _, ident = source.partition(":")
     if kind == "github":
-        return json.loads(fetch(f"https://api.github.com/repos/{ident}/releases/latest"))["tag_name"].lstrip("v")
+        # Tags such as v1.2.3, 1.2.3, or Maude3.5.1: drop the prefix before the digits.
+        return re.sub(r"^\D+", "", json.loads(fetch(f"https://api.github.com/repos/{ident}/releases/latest"))["tag_name"])
     if kind == "rubygems":
         return json.loads(fetch(f"https://rubygems.org/api/v1/versions/{ident}/latest.json"))["version"]
     if kind == "rust-stable":

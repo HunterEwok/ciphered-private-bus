@@ -1,0 +1,12 @@
+{
+  "probes": {
+    "PROBE_NO_FINGERPRINT": "admission_via_request",
+    "PROBE_NO_TRANSCRIPT": "device_binding",
+    "PROBE_SIG_KEY_ONLY": "admission_via_request",
+    "PROBE_NO_CONFIRM": "acceptor_agreement"
+  },
+  "ci": {
+    "lemmas": ["executable_direct", "device_binding", "admission_via_request"],
+    "probes": ["PROBE_NO_FINGERPRINT", "PROBE_NO_CONFIRM"]
+  }
+}

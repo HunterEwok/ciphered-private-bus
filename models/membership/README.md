@@ -166,8 +166,6 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-| 2026-11-20 | `00a4a3ce1fcb` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 12 probes against `safety`, 6 witnesses on `tiny_tlc`, breadth-first until the first violation | 18 of 18 violated as expected, depth 6 to 12, 10 to 30 s each |
-| 2026-11-20 | `00a4a3ce1fcb`, invariant `dccc4421dd8c` | Apalache 0.62.4, `check.py inductive --main tiny_ind` | `tiny_ind`: all reachable states | all three obligations hold: 16 s, 343 s, 34 s |
 | 2026-11-21 | `40b27a980d5a` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 12 probes against `safety`, 6 witnesses on `tiny_tlc`, breadth-first until the first violation | 18 of 18 violated as expected, 1.1 to 1.7 min each |
 | 2026-11-21 | `40b27a980d5a`, invariant `b8f86fa0a371` (commit 56d4c14) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (3 checks at a time, 16 GB heap each) | `large_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.7 min, the 17 step branches in 15.1 to 38.2 min (`RecvPp` the longest), `IndInv` implies `safety` in 13.0 min; 128 min in total. Safety holds in every reachable state of `large_ind` |
 

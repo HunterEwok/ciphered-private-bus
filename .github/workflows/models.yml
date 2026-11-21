@@ -35,6 +35,10 @@ jobs:
         run: |
           npm ci --ignore-scripts
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
       - name: Type check
         working-directory: models/membership
         run: quint typecheck instances.qnt
@@ -72,6 +76,10 @@ jobs:
         run: |
           npm ci --ignore-scripts
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
       - name: Type check
         working-directory: models/channels
         run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
@@ -109,6 +117,10 @@ jobs:
         run: |
           npm ci --ignore-scripts
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
       - name: Type check
         working-directory: models/calls
         run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
@@ -149,6 +161,10 @@ jobs:
         run: |
           npm ci --ignore-scripts
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
       - name: Type check
         working-directory: models/enrollment
         run: quint typecheck instances.qnt && quint typecheck scenarios.qnt

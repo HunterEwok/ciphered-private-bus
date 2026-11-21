@@ -68,4 +68,5 @@ proofs/run-tamarin.sh -m calls -w <folder> -p          # every lemma and every p
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
 | 2026-11-21 | `86453a416a0d` (before the review fixes) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 4 of 4 probes falsified; 5.1 min in total |
-| 2026-11-21 | `ec3d137e0c08` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 12 of 12 lemmas verified, 5 of 5 probes falsified; 12.1 min in total |
+| 2026-11-21 | `ec3d137e0c08` (before an action was renamed) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 12 of 12 lemmas verified, 5 of 5 probes falsified; 12.1 min in total |
+| 2026-11-21 | `02b96d1b2583` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 12 of 12 lemmas verified, 5 of 5 probes falsified; 11.9 min in total |

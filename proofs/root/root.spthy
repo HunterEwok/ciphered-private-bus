@@ -80,7 +80,7 @@ restriction LaterGeneration:
 rule NewBus:
     let bus = h(<'cpb bus v1', pk(~rk), pk(~k1), pk(~k2)>) in
     [ Fr(~rk), Fr(~k1), Fr(~k2) ]
-  --[ NewBus(bus), FirstRoot(bus, pk(~rk)), Recovery(bus, pk(~k1), pk(~k2)) ]->
+  --[ NewBus(bus), FirstRoot(bus, pk(~rk)), RecoveryKeys(bus, pk(~k1), pk(~k2)) ]->
     [ !Recovery(bus, ~k1, ~k2), !RootLtk(bus, '1', ~rk), !Bus(bus),
       Out(<pk(~rk), pk(~k1), pk(~k2)>) ]
 
@@ -272,7 +272,7 @@ lemma executable_permanent_halt:
 lemma join_authentic:
   "All D bus rk p1 p2 #j.
      JoinRoot(D, bus, rk, p1, p2) @ j
-     ==> (Ex #b. FirstRoot(bus, rk) @ b) & (Ex #b. Recovery(bus, p1, p2) @ b)"
+     ==> (Ex #b. FirstRoot(bus, rk) @ b) & (Ex #b. RecoveryKeys(bus, p1, p2) @ b)"
 
 // S9, R-MEM-11: a node takes a root key for a generation only from the
 // recovery key of its bus, unless both halves of the recovery key were known

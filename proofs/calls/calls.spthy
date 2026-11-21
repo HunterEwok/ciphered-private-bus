@@ -195,7 +195,7 @@ rule CallAuto:
     [ !Ltk(bus, C, ltk), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
       In(<'nonce', bus, C, T, n>),
       In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
-  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss) ]->
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), CallContext(bus, C, T, h(body), epk, ~ss) ]->
     [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
       Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), ltk)>) ]
 
@@ -212,7 +212,7 @@ rule CallConfirm:
     [ !PresLtk(bus, C, prs), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
       In(<'nonce', bus, C, T, n>),
       In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
-  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss), PresenceSigned(bus, C) ]->
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), CallContext(bus, C, T, h(body), epk, ~ss), PresenceSigned(bus, C) ]->
     [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
       Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), prs)>) ]
 
@@ -229,7 +229,7 @@ rule CallRoot:
     [ !RootLtk(bus, C, root), !DevKey(bus, T, pk(xt)), Fr(~ss), Fr(~args),
       In(<'nonce', bus, C, T, n>),
       In(<claim, sign(<'cpb seal claim v1', bus, T, epk>, xt)>) ]
-  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), Context(bus, C, T, h(body), epk, ~ss), RootSigned(bus, C) ]->
+  --[ CallSent(bus, C, T, n, cmd, ~ss), CallTo(bus, C, T, epk, ~args), CallContext(bus, C, T, h(body), epk, ~ss), RootSigned(bus, C) ]->
     [ Commander(bus, C, T, h(body), ~ss, epk), !Context(bus, C, h(body), ~ss),
       Out(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), root)>) ]
 
@@ -441,7 +441,7 @@ lemma at_most_once:
 // not open a recorded call.
 lemma context_secrecy [reuse]:
   "All bus C T cid epk ss #i #j.
-     Context(bus, C, T, cid, epk, ss) @ i & K(ss) @ j
+     CallContext(bus, C, T, cid, epk, ss) @ i & K(ss) @ j
      ==> (Ex #r. RevealContext(bus, C, cid) @ r)
        | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
             & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))

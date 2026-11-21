@@ -64,4 +64,5 @@ proofs/run-tamarin.sh -m root -w <folder> -p          # every lemma and every pr
 
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
-| 2026-11-21 | `3b6cda595681` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 6 of 6 probes falsified; 2.7 min in total |
+| 2026-11-21 | `3b6cda595681` (before an action was renamed) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 6 of 6 probes falsified; 2.7 min in total |
+| 2026-11-21 | `2357431cadbf` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 6 of 6 probes falsified; 2.8 min in total |

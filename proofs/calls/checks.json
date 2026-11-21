@@ -3,7 +3,8 @@
     "PROBE_KEEP_NONCE": "at_most_once",
     "PROBE_NONCE_UNSIGNED": "call_integrity_auto",
     "PROBE_CONFIRM_DEVICE_KEY": "call_integrity_confirm",
-    "PROBE_STATIC_REPLY_KEY": "reply_binding"
+    "PROBE_STATIC_REPLY_KEY": "reply_binding",
+    "PROBE_NO_DIRECTION": "stream_binding"
   },
   "ci": {
     "lemmas": [
@@ -15,6 +16,8 @@
       "at_most_once",
       "context_secrecy",
       "command_secrecy",
+      "reply_secrecy",
+      "stream_secrecy",
       "reply_binding",
       "stream_binding"
     ],
@@ -22,7 +25,8 @@
       "PROBE_KEEP_NONCE",
       "PROBE_NONCE_UNSIGNED",
       "PROBE_CONFIRM_DEVICE_KEY",
-      "PROBE_STATIC_REPLY_KEY"
+      "PROBE_STATIC_REPLY_KEY",
+      "PROBE_NO_DIRECTION"
     ]
   }
 }

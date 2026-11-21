@@ -3,7 +3,8 @@
     "PROBE_UNSIGNED_CLAIM": "channel_key_secrecy",
     "PROBE_NO_ERASE": "channel_key_secrecy",
     "PROBE_NO_GRANT_SIG": "grant_authenticity",
-    "PROBE_PUB_SIG_HEADER": "source_authenticity"
+    "PROBE_PUB_SIG_HEADER": "source_authenticity",
+    "PROBE_REQUEST_UNSIGNED": "request_authenticity"
   },
   "ci": {
     "lemmas": [
@@ -12,13 +13,16 @@
       "content_secrecy",
       "grant_authenticity",
       "source_authenticity",
-      "content_agreement"
+      "content_agreement",
+      "request_authenticity",
+      "answer_binding"
     ],
     "probes": [
       "PROBE_UNSIGNED_CLAIM",
       "PROBE_NO_ERASE",
       "PROBE_NO_GRANT_SIG",
-      "PROBE_PUB_SIG_HEADER"
+      "PROBE_PUB_SIG_HEADER",
+      "PROBE_REQUEST_UNSIGNED"
     ]
   }
 }

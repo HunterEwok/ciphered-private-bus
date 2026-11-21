@@ -15,7 +15,8 @@
  * - Membership and rights are reduced to public registries: !DevKey and
  *   !PresKey hold each device's device key and user-presence key, !RootKey
  *   the root key of the bus and its root device, and !Permit(bus, T, C)
- *   says that C may command T. Which actions a passport allows, revocation
+ *   says that C may command T. The root device needs no permit: it is
+ *   named in the checkpoint (R-CALL-7). Which actions a passport allows, revocation
  *   and slot erasure on removal (R-CALL-7) are in models/calls.
  * - An action has a class: 'auto' actions are signed by the commander's
  *   device key, 'confirm' actions by its user-presence key or by the root
@@ -30,7 +31,13 @@
  *   encryption to the target's sealing key, together with the info label,
  *   the command and the associated data (the hash of the body fields 1..8);
  *   the exporter is the hash h(<label, ss>). The sealing key epoch is the
- *   sealing key itself.
+ *   sealing key itself. In HPKE the command is encrypted under a key from
+ *   the same context, so a revealed context discloses it; here the command
+ *   is inside the asymmetric encryption, which RevealContext does not open,
+ *   and command_secrecy names the revealed context as a way to learn the
+ *   arguments all the same.
+ * - The target's rules match the KEM secret, the arguments and the chunk
+ *   data untyped: the adversary may send any term.
  * - ChaCha20-Poly1305 is symmetric encryption with the associated data
  *   inside the plaintext. One stream chunk is modelled per direction; the
  *   chunk number and credit fields are in the header and nothing else.
@@ -45,6 +52,7 @@
  *   PROBE_NONCE_UNSIGNED      neither the signature nor the associated data covers the nonce -> call_integrity_auto
  *   PROBE_CONFIRM_DEVICE_KEY  a confirm action accepts the device key   -> call_integrity_confirm
  *   PROBE_STATIC_REPLY_KEY    the reply key comes from the target's sealing key, not the call -> reply_binding
+ *   PROBE_NO_DIRECTION        both directions share one stream key and one chunk header -> stream_binding
  */
 
 theory CpbCalls
@@ -62,6 +70,17 @@ macros: callsigmsg(bus, sh, C, T, n, epk, enc) = <'cpb call v1', bus, sh, C, T, 
 #else
 macros: callsigmsg(bus, sh, C, T, n, epk, enc) = <'cpb call v1', bus, sh, C, T, n, epk, enc>,
         callad(bus, sh, C, T, n, epk) = h(<bus, sh, C, T, n, epk>)
+#endif
+
+// The stream keys and chunk headers of the two directions (R-STR-1,
+// R-STR-2), or, in the probe, one key and one header for both.
+#ifdef PROBE_NO_DIRECTION
+macros: t2ckey(ss) = h(<'cpb stream v1', ss>), c2tkey(ss) = h(<'cpb stream v1', ss>),
+        t2chdr(T, C, cid) = <'chunk', T, C, cid, '1'>, c2thdr(T, C, cid) = <'chunk', T, C, cid, '1'>
+#else
+macros: t2ckey(ss) = h(<'cpb stream t2c v1', ss>), c2tkey(ss) = h(<'cpb stream c2t v1', ss>),
+        t2chdr(T, C, cid) = <'chunk', T, C, cid, '1', 'from target'>,
+        c2thdr(T, C, cid) = <'chunk', T, C, cid, '1', 'from commander'>
 #endif
 
 // The reply key: exported from the HPKE context of the call (R-CALL-9).
@@ -138,6 +157,13 @@ rule EraseSeal:
 // The nonce message is unsigned.
 rule IssueNonce:
     [ !Permit(bus, T, C), Fr(~n) ]
+  --[ NonceIssued(bus, T, C, ~n) ]->
+    [ Slot(bus, T, C, ~n), Out(<'nonce', bus, C, T, ~n>) ]
+
+// The root device named in the checkpoint gets a slot without a permit
+// (R-CALL-7).
+rule IssueNonceRoot:
+    [ !RootKey(bus, C, kr), !DevKey(bus, T, kt), Fr(~n) ]
   --[ NonceIssued(bus, T, C, ~n) ]->
     [ Slot(bus, T, C, ~n), Out(<'nonce', bus, C, T, ~n>) ]
 
@@ -224,64 +250,68 @@ rule ExecuteAuto:
     let sh    = h(pk(xc))
         epk   = pk(sk)
         ad    = callad(bus, sh, C, T, n, epk)
-        cmd   = <'auto', action, ~args>
-        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        cmd   = <'auto', action, args>
+        enc   = aenc(<'cpb call seal v1', ss, cmd, ad>, epk)
         body  = <'call', bus, sh, C, T, n, epk, enc>
         cid   = h(body)
         rhdr  = <'reply', bus, T, C, cid>
-        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
-        chdr  = <'chunk', T, C, cid, '1', 'from target'>
-        chunk = senc(<~data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(ss, epk))
+        chdr  = t2chdr(T, C, cid)
+        chunk = senc(<~data, h(chdr)>, t2ckey(ss))
     in
     [ !KeptSlot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk), !DevKey(bus, C, pk(xc)),
       Fr(~res), Fr(~next), Fr(~data),
       In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
-  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, ~data),
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, 'from target', ~data),
+      TargetSecret(bus, T, C, cid, sk, ~res), TargetSecret(bus, T, C, cid, sk, ~next),
+      TargetSecret(bus, T, C, cid, sk, ~data),
       UseSeal(bus, T, sk) ]->
-    [ Target(bus, T, C, cid, ~ss),
+    [ Target(bus, T, C, cid, ss),
       Out(<rhdr, reply>), Out(<chdr, chunk>) ]
 #else
 rule ExecuteAuto:
     let sh    = h(pk(xc))
         epk   = pk(sk)
         ad    = callad(bus, sh, C, T, n, epk)
-        cmd   = <'auto', action, ~args>
-        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        cmd   = <'auto', action, args>
+        enc   = aenc(<'cpb call seal v1', ss, cmd, ad>, epk)
         body  = <'call', bus, sh, C, T, n, epk, enc>
         cid   = h(body)
         rhdr  = <'reply', bus, T, C, cid>
-        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
-        chdr  = <'chunk', T, C, cid, '1', 'from target'>
-        chunk = senc(<~data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(ss, epk))
+        chdr  = t2chdr(T, C, cid)
+        chunk = senc(<~data, h(chdr)>, t2ckey(ss))
     in
     [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk), !DevKey(bus, C, pk(xc)),
       Fr(~res), Fr(~next), Fr(~data),
       In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
-  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, ~data),
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), ChunkSent(bus, T, C, cid, 'from target', ~data),
+      TargetSecret(bus, T, C, cid, sk, ~res), TargetSecret(bus, T, C, cid, sk, ~next),
+      TargetSecret(bus, T, C, cid, sk, ~data),
       UseSeal(bus, T, sk) ]->
-    [ Target(bus, T, C, cid, ~ss),
+    [ Target(bus, T, C, cid, ss),
       Out(<rhdr, reply>), Out(<chdr, chunk>) ]
 #endif
 
 // A 'confirm' action signed by the commander's user-presence key. The probe
-// adds a rule that also accepts the device key; its KEM secret and arguments
-// are untyped, so that the search finds the adversary's own call quickly.
+// adds a rule that also accepts the device key.
 
 rule ExecuteConfirm:
     let sh    = h(pk(xp))
         epk   = pk(sk)
         ad    = callad(bus, sh, C, T, n, epk)
-        cmd   = <'confirm', action, ~args>
-        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        cmd   = <'confirm', action, args>
+        enc   = aenc(<'cpb call seal v1', ss, cmd, ad>, epk)
         body  = <'call', bus, sh, C, T, n, epk, enc>
         cid   = h(body)
         rhdr  = <'reply', bus, T, C, cid>
-        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(ss, epk))
     in
     [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
       !PresKey(bus, C, pk(xp)), Fr(~res), Fr(~next),
       In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xp)>) ]
-  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk),
+      TargetSecret(bus, T, C, cid, sk, ~res), TargetSecret(bus, T, C, cid, sk, ~next) ]->
     [ Out(<rhdr, reply>) ]
 
 #ifdef PROBE_CONFIRM_DEVICE_KEY
@@ -299,7 +329,8 @@ rule ExecuteConfirmDeviceKey:
     [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
       !DevKey(bus, C, pk(xc)), Fr(~res), Fr(~next),
       In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xc)>) ]
-  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk),
+      TargetSecret(bus, T, C, cid, sk, ~res), TargetSecret(bus, T, C, cid, sk, ~next) ]->
     [ Out(<rhdr, reply>) ]
 #endif
 
@@ -308,25 +339,26 @@ rule ExecuteRoot:
     let sh    = h(pk(xr))
         epk   = pk(sk)
         ad    = callad(bus, sh, C, T, n, epk)
-        cmd   = <'confirm', action, ~args>
-        enc   = aenc(<'cpb call seal v1', ~ss, cmd, ad>, epk)
+        cmd   = <'confirm', action, args>
+        enc   = aenc(<'cpb call seal v1', ss, cmd, ad>, epk)
         body  = <'call', bus, sh, C, T, n, epk, enc>
         cid   = h(body)
         rhdr  = <'reply', bus, T, C, cid>
-        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(~ss, epk))
+        reply = senc(<'0', ~res, ~next, h(rhdr)>, replykey(ss, epk))
     in
-    [ Slot(bus, T, C, n), !Permit(bus, T, C), !SealKey(bus, T, sk),
+    [ Slot(bus, T, C, n), !SealKey(bus, T, sk),
       !RootKey(bus, C, pk(xr)), Fr(~res), Fr(~next),
       In(<body, sign(callsigmsg(bus, sh, C, T, n, epk, enc), xr)>) ]
-  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk) ]->
+  --[ Executed(bus, T, C, n, cmd), ReplySent(bus, T, C, cid, ~res), UseSeal(bus, T, sk),
+      TargetSecret(bus, T, C, cid, sk, ~res), TargetSecret(bus, T, C, cid, sk, ~next) ]->
     [ Out(<rhdr, reply>) ]
 
 // The target accepts a chunk from the commander under the other key.
 rule TargetChunk:
-    let chdr  = <'chunk', T, C, cid, '1', 'from commander'>
-        chunk = senc(<data, h(chdr)>, h(<'cpb stream c2t v1', ~ss>))
+    let chdr  = c2thdr(T, C, cid)
+        chunk = senc(<data, h(chdr)>, c2tkey(ss))
     in
-    [ Target(bus, T, C, cid, ~ss), In(<chdr, chunk>) ]
+    [ Target(bus, T, C, cid, ss), In(<chdr, chunk>) ]
   --[ ChunkAccepted(bus, T, C, cid, 'from commander', data) ]->
     [ ]
 
@@ -340,16 +372,17 @@ rule CommanderReply:
     in
     [ Commander(bus, C, T, cid, ~ss, epk), In(<rhdr, reply>) ]
   --[ ReplyAccepted(bus, C, T, cid, res) ]->
-    [ CommanderStream(bus, C, T, cid, ~ss) ]
+    [ CommanderStream(bus, C, T, cid, ~ss, epk) ]
 
 rule CommanderChunk:
-    let chdr  = <'chunk', T, C, cid, '1', 'from target'>
-        chunk = senc(<data, h(chdr)>, h(<'cpb stream t2c v1', ~ss>))
-        mhdr  = <'chunk', T, C, cid, '1', 'from commander'>
-        mine  = senc(<~mydata, h(mhdr)>, h(<'cpb stream c2t v1', ~ss>))
+    let chdr  = t2chdr(T, C, cid)
+        chunk = senc(<data, h(chdr)>, t2ckey(~ss))
+        mhdr  = c2thdr(T, C, cid)
+        mine  = senc(<~mydata, h(mhdr)>, c2tkey(~ss))
     in
-    [ CommanderStream(bus, C, T, cid, ~ss), Fr(~mydata), In(<chdr, chunk>) ]
-  --[ ChunkAccepted(bus, C, T, cid, 'from target', data), ChunkSent(bus, C, T, cid, ~mydata) ]->
+    [ CommanderStream(bus, C, T, cid, ~ss, epk), Fr(~mydata), In(<chdr, chunk>) ]
+  --[ ChunkAccepted(bus, C, T, cid, 'from target', data), ChunkSent(bus, C, T, cid, 'from commander', ~mydata),
+      CommanderSecret(bus, C, T, cid, epk, ~mydata) ]->
     [ Out(<mhdr, mine>) ]
 
 /* ------------------------------------------------------------------ lemmas */
@@ -402,24 +435,54 @@ lemma at_most_once:
      ==> #i = #j"
 
 // Helper: the KEM secret of a call is learned only from the commander's
-// context, with the target's sealing private key, or by someone who can
-// sign claims for the target.
+// context, with the target's sealing private key while the target held it,
+// or by someone who could sign claims for the target before the call. A
+// device key revealed later (for example to a quantum adversary, L2) does
+// not open a recorded call.
 lemma context_secrecy [reuse]:
   "All bus C T cid epk ss #i #j.
      Context(bus, C, T, cid, epk, ss) @ i & K(ss) @ j
      ==> (Ex #r. RevealContext(bus, C, cid) @ r)
-       | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r)
-       | (Ex #r. RevealDev(bus, T) @ r)"
+       | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
+            & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))
+       | (Ex #r. RevealDev(bus, T) @ r & r < i)"
 
-// S1, S13, R-CALL-3: the arguments of a call are learned only with the
-// target's sealing private key while the target still held it, or by
-// someone who can sign claims for the target.
+// S1, S13, R-CALL-3: the arguments of a call are learned only from the
+// commander's context of the call, with the target's sealing private key
+// while the target still held it, or by someone who could sign claims for
+// the target before the call.
 lemma command_secrecy:
   "All bus C T epk args #i #j.
      CallTo(bus, C, T, epk, args) @ i & K(args) @ j
-     ==> (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
+     ==> (Ex cid #r. RevealContext(bus, C, cid) @ r)
+       | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
             & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))
-       | (Ex #r. RevealDev(bus, T) @ r)"
+       | (Ex #r. RevealDev(bus, T) @ r & r < i)"
+
+// S1, S13, R-CALL-9, R-STR-1: the reply (result and next nonce) and the
+// target's stream data are learned only from the commander's context of
+// the call, with the target's sealing private key while the target still
+// held it, or by someone who could sign the call as the commander before
+// the target executed it.
+lemma reply_secrecy:
+  "All bus T C cid sk x #i #j.
+     TargetSecret(bus, T, C, cid, sk, x) @ i & K(x) @ j
+     ==> (Ex #r. RevealContext(bus, C, cid) @ r)
+       | (Ex #r. RevealSeal(bus, T, sk) @ r
+            & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))
+       | (Ex #r. RevealDev(bus, C) @ r & r < i)
+       | (Ex #r. RevealPres(bus, C) @ r & r < i)
+       | (Ex #r. RevealRoot(bus) @ r & r < i)"
+
+// S1, S13, R-STR-1: the commander's stream data are learned only in the
+// ways of command_secrecy.
+lemma stream_secrecy:
+  "All bus C T cid epk x #i #j.
+     CommanderSecret(bus, C, T, cid, epk, x) @ i & K(x) @ j
+     ==> (Ex #r. RevealContext(bus, C, cid) @ r)
+       | (Ex sk #r. epk = pk(sk) & RevealSeal(bus, T, sk) @ r
+            & (All #e. ErasedSeal(bus, T, sk) @ e ==> r < e))
+       | (Ex #r. RevealDev(bus, T) @ r & r < i)"
 
 // S11, R-CALL-9: a reply accepted by the commander for a call comes from the
 // target of exactly that call, unless the call's context or the target's
@@ -433,12 +496,12 @@ lemma reply_binding:
        | (Ex #r. RevealDev(bus, T) @ r)"
 
 // S11, R-STR-1, R-STR-2: a chunk accepted on a stream comes from the other
-// party of that call, unless the call's context, a sealing private key of
+// party of that call, in the direction the receiver expects, unless the call's context, a sealing private key of
 // either party, or the target's device key is known.
 lemma stream_binding:
   "All bus A B cid dir data #i.
      ChunkAccepted(bus, A, B, cid, dir, data) @ i
-     ==> (Ex #s. ChunkSent(bus, B, A, cid, data) @ s & s < i)
+     ==> (Ex #s. ChunkSent(bus, B, A, cid, dir, data) @ s & s < i)
        | (Ex #r. RevealContext(bus, A, cid) @ r)
        | (Ex #r. RevealContext(bus, B, cid) @ r)
        | (Ex sk #r. RevealSeal(bus, A, sk) @ r)

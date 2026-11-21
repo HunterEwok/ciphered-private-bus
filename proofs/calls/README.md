@@ -25,9 +25,11 @@ revocation, mismatch answers, resets and stream credit are left to the state mod
 | `call_integrity_confirm` | S10, R-CALL-4 | a `confirm` action is executed only as called, unless the commander's user-presence key or the root key is known; the device key alone is not enough |
 | `at_most_once` | S10, R-CALL-5 | one nonce executes at most one action |
 | `context_secrecy` | helper | the KEM secret of a call is learned only from the commander's context, with the target's sealing key, or by someone who can sign the target's sealing key claims; reused by the lemmas below |
-| `command_secrecy` | S1, S13, R-CALL-3 | the arguments of a call are learned only with the target's sealing key while the target still held it, or by someone who can sign its claims |
+| `command_secrecy` | S1, S13, R-CALL-3 | the arguments of a call are learned only from the commander's context, with the target's sealing key while the target still held it, or by someone who could sign its claims before the call |
+| `reply_secrecy` | S1, S13, R-CALL-9, R-STR-1 | the reply (result and next nonce) and the target's stream data are learned only from the commander's context, with the target's sealing key while it held it, or by someone who could sign the call as the commander before it was executed |
+| `stream_secrecy` | S1, S13, R-STR-1 | the commander's stream data are learned only in the ways of `command_secrecy` |
 | `reply_binding` | S11, R-CALL-9 | a reply the commander accepts comes from the target of exactly that call |
-| `stream_binding` | S11, R-STR-1, R-STR-2 | a chunk accepted on a stream comes from the other party of that call |
+| `stream_binding` | S11, R-STR-1, R-STR-2 | a chunk accepted on a stream comes from the other party of that call, in the direction the receiver expects |
 
 Probes, each a deliberate defect selected with `-D`, each expected to falsify its lemma (R-VER-2):
 
@@ -37,9 +39,16 @@ Probes, each a deliberate defect selected with `-D`, each expected to falsify it
 | `PROBE_NONCE_UNSIGNED` | neither the signature nor the associated data covers the nonce | `call_integrity_auto` |
 | `PROBE_CONFIRM_DEVICE_KEY` | a `confirm` action is also accepted with the device key | `call_integrity_confirm` |
 | `PROBE_STATIC_REPLY_KEY` | the reply key comes from the target's sealing key, not from the call | `reply_binding` |
+| `PROBE_NO_DIRECTION` | both directions share one stream key and one chunk header | `stream_binding` |
 
 `PROBE_NONCE_UNSIGNED` removes the nonce from the associated data as well: the signature covers the
-sealed command, whose associated data alone would still bind the nonce.
+sealed command, whose associated data alone would still bind the nonce. For the same reason
+`PROBE_NO_DIRECTION` removes the direction from both the key label and the chunk header: either alone
+separates the directions.
+
+A device key revealed after the call does not appear in the secrecy lemmas: it lets the adversary sign
+claims and calls from then on, but does not open a recorded call. This is the case of a quantum adversary
+that breaks ES256 later; the X-Wing KEM itself is perfect in this model.
 
 [`checks.json`](checks.json) lists the probes and what CI runs: every lemma and every probe.
 
@@ -58,4 +67,5 @@ proofs/run-tamarin.sh -m calls -w <folder> -p          # every lemma and every p
 
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
-| 2026-11-21 | `86453a416a0d` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 4 of 4 probes falsified; 5.1 min in total |
+| 2026-11-21 | `86453a416a0d` (before the review fixes) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 10 of 10 lemmas verified, 4 of 4 probes falsified; 5.1 min in total |
+| 2026-11-21 | `ec3d137e0c08` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 12 of 12 lemmas verified, 5 of 5 probes falsified; 12.1 min in total |

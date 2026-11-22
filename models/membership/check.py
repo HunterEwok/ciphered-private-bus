@@ -13,7 +13,9 @@ Modes:
   tlc       Exhaustive state exploration of `safety` with TLC.
   inductive Proof of `safety` for all reachable states with Apalache, from the
             inductive invariant in inductive.qnt: init implies IndInv, IndInv
-            and one step imply IndInv, and IndInv implies safety.
+            and one step imply IndInv, and IndInv implies safety; also the
+            facts listed under "inductive.implied" in checks.json, and their
+            probes, which must fail.
 
 Exit status 0 means every expectation was met. Each run prints the model hash that
 the results table in README.md records.
@@ -21,6 +23,7 @@ the results table in README.md records.
 
 import argparse
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -163,17 +166,22 @@ def bounded(backend, main, invariant, temporal, expect, steps, timeout):
 
 def inductive(main, timeout):
     """The three obligations of the inductive invariant (R-VER-3)."""
+    spec = json.loads((HERE / "checks.json").read_text())["inductive"]
     checks = [
-        ("init implies IndInv", "modelInit", "IndInv", 0),
-        ("IndInv and step imply IndInv", "indInit", "IndInv", 1),
-        ("IndInv implies safety", "indInit", "modelSafety", 0),
+        (main, "init implies IndInv", "modelInit", "IndInv", 0, "holds"),
+        (main, "IndInv and step imply IndInv", "indInit", "IndInv", 1, "holds"),
+        (main, "IndInv implies safety", "indInit", "modelSafety", 0, "holds"),
     ]
+    # Further facts that IndInv implies, and their probes, which must fail.
+    checks += [(main, f"IndInv implies {n}", "indInit", n, 0, "holds") for n in spec.get("implied", [])]
+    checks += [(p["instance"], f"IndInv implies {p['invariant']}", "indInit", p["invariant"], 0, "violated")
+               for p in spec.get("impliedProbes", [])]
     failures = 0
-    for name, init, inv, steps in checks:
+    for inst, name, init, inv, steps, expect in checks:
         _, out, secs = quint(
             [
                 "verify",
-                f"--main={main}",
+                f"--main={inst}",
                 f"--init={init}",
                 "--step=modelStep",
                 f"--invariant={inv}",
@@ -184,9 +192,9 @@ def inductive(main, timeout):
             timeout,
         )
         got = verdict(out)
-        ok = got == "holds"
+        ok = got == expect
         failures += not ok
-        print(f"{'pass' if ok else 'FAIL'}  {main:10} {name:30} {got:9} {secs:7.0f} s")
+        print(f"{'pass' if ok else 'FAIL'}  {inst:24} {name:30} {got:9} {secs:7.0f} s")
         if not ok:
             print(out, file=sys.stderr)
     return failures

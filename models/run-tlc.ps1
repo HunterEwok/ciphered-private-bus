@@ -274,11 +274,11 @@ $ended = Get-Date
 
 # ----------------------------------------------------------------------- summary
 $text = if (Test-Path $log) { Get-Content $log } else { @() }
-$keys = 'No error has been found|Error:|is violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed'
+$keys = 'No error has been found|Error:|is violated|were violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed'
 $result = @($text | Where-Object { $_ -match $keys })
 $stopped = $stoppedForDisk -or $stoppedForTime
 $ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stopped
-$violated = ($text -match 'is violated').Count -gt 0 -and -not $stopped
+$violated = ($text -match 'is violated|Temporal properties were violated').Count -gt 0 -and -not $stopped
 $summary = @(
     "model hash: $hash",
     "commit: $commit",

@@ -18,7 +18,7 @@ acceptance of data and key grants against the read and publish rights. The heade
 | `tiny` | 2 | 2 | 2 | 2 | Simulator in CI |
 | `tiny_tlc` | 2 | 2 | 2 | 2 | TLC and Apalache: `tiny` without the processed-record sets, which only `convergence` reads |
 | `conv_tlc` | 2 | 2 | 1 | 1 | TLC of `safety` including `convergence`, with the processed-record sets; two checkpoints out of order need two numbers and are covered by a scenario and the probe `need_next` |
-| `live_tlc` | 2 | 2 | 1 | 1 | TLC of the liveness property `haltPropagates` |
+| `live_tlc` | 2 | 2 | 1 | 1 | TLC of the liveness property `haltPropagates`; too large to finish, so liveness is proved from `IndInv` instead |
 | `probe_*` | 3 | 2 | 3 | 2 | One deliberate defect each; `safety` must fail (R-VER-2). `rc_no_forever`, `accept_old_data_gen`, `halted_silent` and `need_next` have the size of `tiny_tlc`, so that breadth-first TLC reaches their deep traces before its queue spills to disk; `halted_silent_live` has the size of `live_tlc` |
 
 With three numbers per generation a window of two binds: the Root has to reissue a passport
@@ -90,9 +90,15 @@ Liveness: `haltPropagates` states that while a halted peer of its generation exi
 eventually halts too or leaves that generation, and that once a peer is permanently halted, every
 node eventually is (S8, R-MEM-6, R-MEM-10, R-MEM-13). It assumes weak fairness
 of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
-the proof. The probe `halted_silent` (the size of `tiny_tlc`) removes that answer, and the property must
-then fail. Liveness is checked with TLC on `live_tlc` (one number per generation, which is
-enough for a halt and a permanent halt) and is a long run; `probe_halted_silent_live` is its probe.
+the proof. It is proved from the inductive invariant, for every reachable state of `large_ind`
+(see below): `IndInv` implies `HearingEnabled`, which says that while a node has a halted peer of
+its generation and is not halted, or a permanently halted peer and is not permanently halted,
+`nodeHearsHalted` is enabled for it. Every such step changes the node, since it halts it or makes
+its halt permanent (a halted node can only take a root change proof), so weak fairness makes it
+happen unless the condition ends first, and either way the property holds. The probe
+`halted_silent` removes the answer: `safety` still holds, and `HearingEnabled` fails on
+`probe_halted_silent_ind`. A direct TLC check of the temporal formula did not finish: even
+`live_tlc`, one number per generation and two devices, grew past 20 million states.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
 the violation shows that halts, permanent halts, accepted data, key grants, root changes, sends
@@ -120,9 +126,11 @@ honest checkpoint carries exactly the Root's valid numbers; and the honest check
 again once it was cleared, which makes the honest-history part of `revokedIsRejected` follow
 from validity under the receiver's own checkpoint; a node's passport cache holds at most one
 passport per number, even after a halt; and the honest history holds at most one checkpoint
-per generation and number.
+per generation and number. For liveness, it also states that behind every halt lies a proof
+in the pool: a halt of a generation has a proof of that generation, and a permanent halt a root
+change proof. From these a fourth obligation follows: `IndInv` implies `HearingEnabled`.
 
-The last two lemmas keep the proof small. The arbitrary state of obligation 2 builds a cache
+The cache and history lemmas keep the proof small. The arbitrary state of obligation 2 builds a cache
 from one slot per number (3 instead of any subset of 108 passports) and the history from one
 slot per generation and number (9 instead of any subset of 102 checkpoints), and membership in
 the bounded types is checked field by field rather than by comparison with every element of
@@ -146,9 +154,7 @@ python3 models/membership/check.py tlc --main tiny_tlc  # exhaustive, long run
 python3 models/membership/check.py apalache --main probe_no_halt --expect violated
 python3 models/membership/check.py apalache --invariant witnessHalt --expect violated
 python3 models/membership/check.py tlc --main conv_tlc  # safety with convergence, long run
-python3 models/membership/check.py tlc --main live_tlc --temporal haltPropagates
-python3 models/membership/check.py tlc --main probe_halted_silent_live --temporal haltPropagates --expect violated
-python3 models/membership/check.py inductive                    # IndInv, instance tiny_ind
+python3 models/membership/check.py inductive                    # IndInv and HearingEnabled, instance tiny_ind
 python3 models/membership/check.py inductive --main small_ind
 ```
 

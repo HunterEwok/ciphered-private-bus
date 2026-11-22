@@ -129,3 +129,4 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `stre
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
 | 2026-11-22 | `1c6175f78335` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 13 probes against `safety`, 8 witnesses on `tiny`, breadth-first until the first violation | 21 of 21 violated as expected, 1.0 to 1.5 min each (compilation included), 24 min in total |
+| 2026-11-22 | `1c6175f78335`, invariant `dbb0286ea367` (commit 6b58fcd) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (53 GB heap) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 0.9 min, the 11 step branches in 1.1 to 5.3 min (`Receive` the longest), `IndInv` implies `safety` in 1.8 min; 29 min in total. Safety holds in every reachable state of `small_ind` |

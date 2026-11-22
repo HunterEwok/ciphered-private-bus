@@ -51,6 +51,15 @@
       "stepSend",
       "stepGrant"
     ],
-    "parallel": 3
+    "parallel": 3,
+    "implied": [
+      "HearingEnabled"
+    ],
+    "impliedProbes": [
+      {
+        "instance": "probe_halted_silent_ind",
+        "invariant": "HearingEnabled"
+      }
+    ]
   }
 }

@@ -24,7 +24,7 @@
 #   ... -Model membership -Main large_ind -Split -Parallel 1 -Only RootChangeRights
 #
 # -Only runs a subset of the checks, to repeat those of an earlier run that
-# had no verdict: "init", "safety", or step branches named as in the progress
+# had no verdict: "init", "safety", an implied fact by name, or step branches named as in the progress
 # output (without "step"). Each obligation stands on its own, so the checks of
 # two runs of the same model and invariant hashes together make one result.
 #
@@ -126,13 +126,18 @@ if ($Split) {
     $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1)
 }
 $jobs += , @("IndInv implies safety", "indInit", "modelStep", "modelSafety", 0)
+# Further facts that IndInv implies ("inductive.implied" in checks.json), such
+# as the enabledness lemma behind a liveness property.
+foreach ($n in @($Checks.implied)) {
+    if ($n) { $jobs += , @("IndInv implies $n", "indInit", "modelStep", $n, 0) }
+}
 # With powershell -File a list arrives as one string, "a,b".
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Only.Count -gt 0) {
     $picked = @()
     $known = @()
     foreach ($j in $jobs) {
-        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq "modelSafety") { $key = "safety" } else { $key = $j[2] -replace '^step', '' }
+        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq "modelSafety") { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
         $known += $key
         if ($Only -contains $key) { $picked += , $j }
     }
@@ -298,7 +303,7 @@ $summary = @(
     "apalache: $apalache, $Parallel at a time, heap $heapGb GB each",
     "started: $($startedAll.ToString('u')), ended: $((Get-Date).ToString('u')), elapsed: $((Get-Date) - $startedAll)",
     ""
-) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state" } else { "result: not proved" }))
+) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and so do ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

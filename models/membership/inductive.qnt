@@ -124,11 +124,35 @@ module inductive {
     rootOk(r),
     historyOk(r, h),
     poolOk(p),
+    // behind every halt lies a proof in the pool: a halt of a generation has
+    // a proof of that generation, a permanent halt a root change proof
+    // (haltPropagates rests on these, see HearingEnabled)
+    DEVICES.forall(d => (ns.get(d).halted and not(ns.get(d).forever))
+      implies p.hp.exists(x => x.kind != "rc" and x.gen == ns.get(d).gen)),
+    DEVICES.forall(d => ns.get(d).forever implies p.hp.exists(x => x.kind == "rc")),
     b == Set(),
     s.subseteq(Set("accept", "grant")),
   }
 
   val IndInv = indInvOf(nodes, root, pool, history, broken, seen)
+
+  // Liveness (haltPropagates, S8, R-MEM-10, R-MEM-13). While a node has a
+  // halted peer of its generation and is not halted itself, or has a
+  // permanently halted peer and is not permanently halted itself,
+  // nodeHearsHalted is enabled for it: its guard, written out here, holds.
+  // Every such step changes the node: it halts it, or makes its halt
+  // permanent, since a node that already is halted can only take a root
+  // change proof. Under the weak fairness of nodeHearsHalted that
+  // haltPropagates assumes, the step is therefore taken unless the condition
+  // ends first, and either way the property's "eventually" holds.
+  val HearingEnabled = DEVICES.forall(d => {
+    val n = nodes.get(d)
+    ((haltedPeer(d, n.gen) and not(n.halted)) or (foreverPeer(d) and not(n.forever))) implies and {
+      MUTANT != "halted_silent",
+      pool.hp.exists(h => (h.kind != "rc" and h.gen == n.gen and haltedPeer(d, n.gen))
+                          or (h.kind == "rc" and foreverPeer(d))),
+    }
+  })
 
   // The model's own initial state, step, and safety, under names that the
   // instances below can see (an instance does not pass on what it imports).
@@ -233,4 +257,10 @@ module small_ind {
 // For a long run (R-VER-3): three devices, three generations, three numbers.
 module large_ind {
   import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 3, I_MAX_NO = 3, I_WINDOW = 2, I_MUTANT = "none").*
+}
+
+// Probe (R-VER-2): a halted node does not answer with its proof, so
+// "IndInv implies HearingEnabled" must fail.
+module probe_halted_silent_ind {
+  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_WINDOW = 2, I_MUTANT = "halted_silent").*
 }

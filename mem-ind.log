@@ -1,5 +1,0 @@
-usage: check.py [-h] [--steps STEPS] [--samples SAMPLES] [--main MAIN]
-                [--invariant INVARIANT] [--temporal TEMPORAL]
-                [--expect {holds,violated}] [--timeout TIMEOUT]
-                {simulate,apalache,tlc,inductive}
-check.py: error: argument mode: invalid choice: 'tiny_ind' (choose from 'simulate', 'apalache', 'tlc', 'inductive')

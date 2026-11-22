@@ -261,3 +261,24 @@ jobs:
         run: |
           java -version
           python3 models/streams/check.py --inductive tiny_ind
+
+  relay-inductive:
+    name: relay (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        env:
+          # The step obligation needs more than the default heap.
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/relay/check.py --inductive tiny_ind

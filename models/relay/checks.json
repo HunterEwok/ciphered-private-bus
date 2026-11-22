@@ -33,5 +33,26 @@
     "witnessUnlisted",
     "witnessJoinEvicted",
     "witnessNewGenTicket"
-  ]
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "parallel": 1,
+    "steps": [
+      "stepRecvPub",
+      "stepRecvGrant",
+      "stepRecvReq",
+      "stepRecvCall",
+      "stepConnect",
+      "stepDisconnect",
+      "stepRootRevoke",
+      "stepRootUnlist",
+      "stepRootChange",
+      "stepRootTicket",
+      "stepLearnCp",
+      "stepLearnRootChange",
+      "stepLearnTicket",
+      "stepRecvJoin"
+    ]
+  }
 }

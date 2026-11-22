@@ -84,22 +84,47 @@ an object for lack of a victim, a grant is replaced, a publication is served, a 
 is forwarded, a key request is answered, a revocation purges data, the relay is removed from the
 checkpoint, the join buffer overflows, and a ticket of a new root generation is accepted.
 
+## Inductive invariant
+
+[`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`; Apalache proves the same three
+obligations as for the other models: the initial state satisfies `IndInv`, every step keeps it, and
+`IndInv` implies `safety`. Besides the bounds of every variable, the state parts of `safety` and
+`broken` staying empty, `IndInv` states these lemmas:
+
+- the Root's checkpoints only add revoked devices, and the relay's checkpoint is one of them, the
+  latest it accepted, with its revoked set;
+- a relay no longer listed holds the Root's last checkpoint, which unlisted it, and has no connected
+  device; no revoked device is connected;
+- every stored object is signed, of a kind the relay stores, with its arrival number at most the
+  relay's counter; publications are unique by source, channel and number, and none has a number
+  above the highest seen for its channel.
+
+Because of that uniqueness, `indInit` draws the store from one slot per key (publications by source,
+channel and number; grants and key requests by source, channel and reader), and records are checked
+field by field. The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the
+size of `small`) for a long run. The step monitors (fair share, rule 1, grants kept, latest grant,
+ticket, sends) are covered too: `IndInv` requires `broken` to be empty, so every step from any state
+of `IndInv` must leave it empty.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)
 and Java 17 or later for TLC.
 
 ```sh
-python3 models/relay/check.py        # CI run: safety, probes, witnesses, scenarios
+python3 models/relay/check.py                        # CI run: safety, probes, witnesses, scenarios
+python3 models/relay/check.py --inductive tiny_ind   # IndInv in CI
 ```
 
 On a shared machine, [`run-tlc.ps1`](../run-tlc.ps1) checks the TLA+ translation with `-Probes` (every
 probe against `safety`, every witness on `tiny`; both lists are in [`checks.json`](checks.json)) and
-runs the exhaustive check of `tiny`:
+runs the exhaustive check of `tiny`; [`run-inductive.ps1`](../run-inductive.ps1) proves `IndInv` on
+`small_ind`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model relay -WorkDir <folder> -Java <path to java> -Probes
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model relay -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model relay -Split -Parallel 1 -WorkDir <folder> -Java <path to java>
 ```
 
 Every run prints the model hash: the first 12 hex digits of the SHA-256 of `relay.qnt` and

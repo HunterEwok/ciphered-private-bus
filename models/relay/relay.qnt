@@ -68,6 +68,7 @@ module relay {
     tGen: int,             // pair (gen, no) of the ticket held
     tNo: int,
     store: Set[Obj],       // publications, grants and key requests
+    used: int -> int,      // bytes each source pays for in the store (its usage)
     hi: (int, int) -> int, // highest publication number seen per (source, channel)
     dep: (int, int) -> int,// depth of that publication: it governs retention
     arr: int,              // arrival counter (B.10 rule 5)
@@ -131,11 +132,17 @@ module relay {
   // source, `u`, computed once per round (every payer is a device, so the
   // total is the sum of `u`).
   pure def usageMap(st: Set[Obj], devs: Set[int]): int -> int = devs.mapBy(x => usage(st, x))
+  // Deleting objects releases what their payers paid for them (`gone` is
+  // part of the store they are deleted from).
+  pure def release(u: int -> int, gone: Set[Obj]): int -> int = u.keys().mapBy(d => u.get(d) - usage(gone, d))
   pure def sumOf(u: int -> int, devs: Set[int]): int = devs.fold(0, (a, x) => a + u.get(x))
-  pure def avgExceeded(u: int -> int, s: int, devs: Set[int]): bool = {
-    val n = devs.filter(x => u.get(x) > 0).size()
-    u.get(s) * n > sumOf(u, devs)
-  }
+  // "Above the average" is u(s) * n > sum, with n the number of sources that
+  // occupy anything. Both comparisons here are written as sums over the
+  // sources (u(s) * n - sum is the sum of u(s) - u(x) over those sources), so
+  // that the arithmetic stays linear: a product of two variables is hard for
+  // the SMT solver.
+  pure def avgExceeded(u: int -> int, s: int, devs: Set[int]): bool =
+    devs.fold(0, (a, x) => if (u.get(x) > 0) a + u.get(s) - u.get(x) else a) > 0
   // The source that occupies most among `cands`, the smaller number on a tie;
   // 0 if `cands` is empty.
   pure def most(u: int -> int, cands: Set[int]): int = cands.fold(0, (b, x) =>
@@ -151,16 +158,18 @@ module relay {
     else if (pubsOf(st, busiest).exclude(Set(keep)) != Set()) busiest
     else second
   }
-  def unfairOf(u: int -> int, v: int, s: int): bool = {
-    val n = DEVS.filter(x => u.get(x) > 0).size()
-    v != s and u.get(v) * n <= BUS_BYTES
-  }
+  // The victim is within its fair share: u(v) * n <= BUS_BYTES, as a sum.
+  def unfairOf(u: int -> int, v: int, s: int): bool =
+    v != s and DEVS.fold(0, (a, x) => if (u.get(x) > 0) a + u.get(v) else a) <= BUS_BYTES
   // Each round removes one publication of the victim; for the reason given at
   // rule 1, SOURCE_BYTES rounds always suffice, and a bus still over its limit
   // after them has the object refused.
-  def evictBus(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } = {
+  // It also returns the usage of each source in the resulting store, which
+  // the relay keeps (`used`).
+  def evictBus(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool, used: int -> int } = {
     val r = evictBusRounds(st, keep)
-    { ...r, refused: r.refused or total(r.st) > BUS_BYTES }
+    val u = usageMap(r.st, DEVS)
+    { st: r.st, refused: r.refused or sumOf(u, DEVS) > BUS_BYTES, unfair: r.unfair, used: u }
   }
   def evictBusRounds(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } =
     range(0, SOURCE_BYTES).foldl({ st: st, refused: false, unfair: false }, (acc, i) => {
@@ -180,7 +189,7 @@ module relay {
 
   // Store `o` under the quota rules. Returns the new store, whether `o` was
   // refused, and the step properties violated on the way.
-  def admit(st: Set[Obj], o: Obj): { st: Set[Obj], refused: bool, bad: Set[str], tags: Set[str] } = {
+  def admit(st: Set[Obj], o: Obj): { st: Set[Obj], refused: bool, bad: Set[str], tags: Set[str], used: int -> int } = {
     val s = payer(o)
     val st1 = st.union(Set(o))
     // Rule 2: grants are never evicted for publications; a source whose
@@ -200,6 +209,7 @@ module relay {
     {
       st: if (refused) st else b.st,
       refused: refused,
+      used: b.used,
       bad: (if (not(refused) and b.unfair) Set("fairShare") else Set())
         .union(if (not(refused) and ruleOneLost.exists(x => payer(x) != s)) Set("evictsOnlyOwn") else Set())
         .union(if (not(refused) and lost.exists(x => x.kind == "grant")) Set("grantsKept") else Set()),
@@ -228,7 +238,7 @@ module relay {
 
   action init = all {
     relay' = {
-      served: true, cpNo: 1, cpMax: 1, revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(),
+      served: true, cpNo: 1, cpMax: 1, revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), used: DEVS.mapBy(d => 0),
       hi: tuples(DEVS, CHANS).mapBy(k => 0), dep: tuples(DEVS, CHANS).mapBy(k => 0), arr: 0, joins: List(), online: Set(),
     },
     cps' = Map(1 -> Set()),
@@ -266,13 +276,19 @@ module relay {
     // "retain_all": nothing is deleted for depth.
     val trimmed = r.store.filter(x => MUTANT == "retain_all" or not(x.kind == "pub" and x.src == o.src and x.ch == o.ch
       and chanPubs.filter(y => y.no > x.no).size() + (if ((newest or retain) and o.no > x.no) 1 else 0) >= depth))
-    val a = if (retain) admit(trimmed, o2) else { st: trimmed, refused: false, bad: Set(), tags: Set() }
+    val a = if (retain) admit(trimmed, o2) else { st: trimmed, refused: false, bad: Set(), tags: Set(), used: r.used }
     val stored = if (a.refused) r.store else a.st
+    // The new usage, source by source (an integer per source, not a choice
+    // between whole maps, which is cheaper for the solver).
+    val gone = r.store.exclude(trimmed)
+    val used2 = DEVS.mapBy(d => if (not(retain)) r.used.get(d) - usage(gone, d)
+                                else if (a.refused) r.used.get(d) else a.used.get(d))
     val rs = if (retain and a.refused) Set() else receivers(stored, o)
     all {
       verified(o), r.served, not(refusedFrom), o.kind == "pub", r.arr < MAX_ARR,
       commitWith(
-        { ...r, store: stored, arr: if (retain and not(a.refused)) r.arr + 1 else r.arr,
+        { ...r, store: stored, used: used2,
+          arr: if (retain and not(a.refused)) r.arr + 1 else r.arr,
           hi: if (newest and not(a.refused)) r.hi.put(key, o.no) else r.hi,
           dep: if (newest and not(a.refused)) r.dep.put(key, o.depth) else r.dep },
         a.bad.union(sendProblems(stored, o, rs))
@@ -302,7 +318,9 @@ module relay {
     all {
       verified(o), r.served, not(refusedFor), o.kind == "grant", o.src != o.reader, replaces,
       r.arr < MAX_ARR,
-      commitWith({ ...r, store: st, arr: if (a.refused) r.arr else r.arr + 1 },
+      commitWith({ ...r, store: st, used: DEVS.mapBy(d => if (a.refused) r.used.get(d)
+                     else if (online) a.used.get(d) - usage(a.st.filter(x => answered.contains(x)), d) else a.used.get(d)),
+                   arr: if (a.refused) r.arr else r.arr + 1 },
         a.bad.union(if (not(o.ok)) Set("onlyVerified") else Set())
           .union(if (online and not(a.refused) and r.revoked.contains(o.reader)) Set("nothingForRevoked") else Set())
           .union(if (not(a.refused) and old.exists(x => x.gen >= o.gen)) Set("latestGrant") else Set()),
@@ -322,7 +340,9 @@ module relay {
     val a = admit(r.store.exclude(old), o2)
     all {
       verified(o), r.served, not(refusedFrom), o.kind == "req", o.src != o.reader, r.arr < MAX_ARR,
-      commitWith({ ...r, store: if (a.refused) r.store else a.st, arr: if (a.refused) r.arr else r.arr + 1 },
+      commitWith({ ...r, store: if (a.refused) r.store else a.st,
+                   used: DEVS.mapBy(d => if (a.refused) r.used.get(d) else a.used.get(d)),
+                   arr: if (a.refused) r.arr else r.arr + 1 },
         a.bad.union(if (not(o.ok)) Set("onlyVerified") else Set()), a.tags),
     }
   }
@@ -335,6 +355,7 @@ module relay {
       verified(o), r.served, o.kind == "call", o.src != o.reader, r.arr < MAX_ARR,
       not(r.revoked.contains(o.src)) or MUTANT == "accept_revoked",
       commitWith({ ...r, store: if (MUTANT == "store_call") r.store.union(Set({ ...o, arr: r.arr + 1 })) else r.store,
+                   used: if (MUTANT == "store_call") usageMap(r.store.union(Set({ ...o, arr: r.arr + 1 })), DEVS) else r.used,
                    arr: if (MUTANT == "store_call") r.arr + 1 else r.arr },
         if (r.online.contains(o.reader) and r.revoked.contains(o.reader)) Set("nothingForRevoked") else Set(),
         if (r.online.contains(o.reader)) Set("callForwarded") else Set("callRefused")),
@@ -355,7 +376,8 @@ module relay {
     all {
       r.served, not(r.online.contains(d)),
       not(r.revoked.contains(d)) or MUTANT == "accept_revoked",
-      commitWith({ ...r, online: r.online.union(Set(d)), store: r.store.exclude(answered) },
+      commitWith({ ...r, online: r.online.union(Set(d)), store: r.store.exclude(answered),
+                   used: release(r.used, answered) },
         given.fold(Set(), (acc, p) => acc.union(
           if (p.src != d and not(hasGrant(r.store, p.src, p.ch, d))) Set("servedOnlyGranted") else Set()))
           .union(if (r.revoked.contains(d) and (given != Set() or mine != Set())) Set("nothingForRevoked") else Set()),
@@ -400,12 +422,14 @@ module relay {
     // Mutant "keep_revoked": what is stored for a revoked device stays.
     val purge = r.store.filter(x => MUTANT == "keep_revoked"
       or not(rev.contains(x.src) or (x.kind != "pub" and rev.contains(x.reader))))
+    val cleared = unlisted and MUTANT != "keep_unserved"
+    val used2 = DEVS.mapBy(d => if (cleared) 0 else r.used.get(d) - usage(r.store.exclude(purge), d))
     all {
       cps.keys().contains(n), n > r.cpNo or (MUTANT == "cp_rollback" and n != r.cpNo),
       commitWith(
-        if (unlisted and MUTANT != "keep_unserved") { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), online: Set(), joins: List() }
-        else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge }
-        else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, online: r.online.exclude(rev) },
+        if (cleared) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), used: used2, online: Set(), joins: List() }
+        else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge, used: used2 }
+        else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, used: used2, online: r.online.exclude(rev) },
         Set(),
         (if (purge != r.store) Set("revokedPurged") else Set())
           .union(if (unlisted) Set("unlisted") else Set())),
@@ -493,7 +517,12 @@ module relay {
     not(relay.revoked.contains(o.src)) and (o.kind == "pub" or not(relay.revoked.contains(o.reader))))
     and not(broken.contains("nothingForRevoked"))
   // R-REL-4: no source exceeds its limit, and the bus does not exceed its own.
-  val quotasHold = DEVS.forall(s => usage(relay.store, s) <= SOURCE_BYTES) and total(relay.store) <= BUS_BYTES
+  // Every stored object has exactly one payer, a device, so the bus total is
+  // the sum of the usage of the sources; the relay keeps that usage in `used`.
+  val quotasHold = and {
+    DEVS.forall(s => relay.used.get(s) == usage(relay.store, s) and relay.used.get(s) <= SOURCE_BYTES),
+    sumOf(relay.used, DEVS) <= BUS_BYTES,
+  }
   // S14, B.10: a source within its fair share never loses data because of
   // another source (checked at every eviction).
   val fairShare = not(broken.contains("fairShare"))

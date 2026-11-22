@@ -74,7 +74,8 @@ module inductive {
     r.store.forall(o => o.kind == "pub" implies o.no <= r.hi.get((o.src, o.ch))),
     // state parts of safety
     r.store.forall(o => not(r.revoked.contains(o.src)) and (o.kind == "pub" or not(r.revoked.contains(o.reader)))),
-    DEVS.forall(d => usage(r.store, d) <= SOURCE_BYTES), total(r.store) <= BUS_BYTES,
+    r.used.keys() == DEVS, DEVS.forall(d => r.used.get(d) == usage(r.store, d) and r.used.get(d) <= SOURCE_BYTES),
+    sumOf(r.used, DEVS) <= BUS_BYTES,
     r.store.forall(a => r.store.forall(x =>
       (a.kind == x.kind and a.kind != "pub" and a.src == x.src and a.ch == x.ch and a.reader == x.reader) implies a == x)),
     KEYS.forall(k => r.hi.get(k) > 0 implies
@@ -144,6 +145,7 @@ module inductive {
     nondet ev = 0.to(MAX_EVENTS).oneOf()
     nondet nj = 0.to(MAX_EVENTS).oneOf()
     nondet sn = TAGS.powerset().oneOf()
+    nondet used = setOfMaps(DEVS, 0.to(SOURCE_BYTES)).oneOf()
     val pubs = PSLOTS.filter(t => pIn.get(t)).map(t =>
       { kind: "pub", src: t._1, ch: t._2, reader: 0, no: t._3, gen: 0, depth: pDepth.get(t), size: pSize.get(t),
         ok: true, arr: pArr.get(t) })
@@ -155,7 +157,7 @@ module inductive {
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
     val r = {
       served: served, cpNo: cpNo, cpMax: cpNo, revoked: revAll.get(cpNo), rootGen: rootGen, tGen: tGen, tNo: tNo,
-      store: pubs.union(grants).union(reqs), hi: hi, dep: dep, arr: arr,
+      store: pubs.union(grants).union(reqs), used: used, hi: hi, dep: dep, arr: arr,
       joins: range(0, JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,
     }

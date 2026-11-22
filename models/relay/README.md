@@ -112,6 +112,17 @@ the per-source limit is refused, so `SOURCE_BYTES` rounds always suffice; a stor
 after them has the object refused. Each round computes the usage of every source once. This keeps
 the steps that store objects small enough for Apalache at the size of `small`.
 
+The relay keeps the usage of each source in `used`, as a real relay keeps a byte counter per source:
+storing objects sets it from the store after eviction, deleting objects subtracts what their payers
+paid for them, and every update is written source by source. Every stored object has exactly one
+payer, a device, so the bus total is the sum of `used`, and `quotasHold` states the per-source limit
+on `used` together with `used` matching the store for each source, and the bus limit on the sum of
+`used`. The solver cannot handle a single sum over every object the store may hold at the size of
+`small` (the time grows exponentially with the number of possible objects: 18 objects take seconds,
+36 more than four minutes, `small` has 54), while sums over the objects of one source and over the
+three counters stay small. The quota rules compare usages without multiplying two variables (a
+source above the average is a positive sum of differences), which keeps the arithmetic linear.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)

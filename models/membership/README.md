@@ -118,7 +118,15 @@ older generation; the Root's valid and revoked numbers are below its next number
 map covers exactly those numbers, and its next checkpoint fits the window; the Root's latest
 honest checkpoint carries exactly the Root's valid numbers; and the honest checkpoints of one generation never set a bit
 again once it was cleared, which makes the honest-history part of `revokedIsRejected` follow
-from validity under the receiver's own checkpoint.
+from validity under the receiver's own checkpoint; a node's passport cache holds at most one
+passport per number, even after a halt; and the honest history holds at most one checkpoint
+per generation and number.
+
+The last two lemmas keep the proof small. The arbitrary state of obligation 2 builds a cache
+from one slot per number (3 instead of any subset of 108 passports) and the history from one
+slot per generation and number (9 instead of any subset of 102 checkpoints), and membership in
+the bounded types is checked field by field rather than by comparison with every element of
+the type. Without this, a step branch of `large_ind` ran out of a 53 GB heap.
 
 The instances are `tiny_ind` (the size of `tiny_tlc`, checked in CI), `small_ind` (three
 devices, three numbers per generation), and `large_ind` (three devices, three generations,

@@ -42,11 +42,31 @@ module inductive {
 
   pure def below(s: Set[int], c: Checkpoint): Set[int] = s.filter(k => k < c.nextNo)
 
+  // Membership in the bounded types, written as predicates on the fields.
+  // "x in CPS" for a symbolic x makes the solver compare x with every element
+  // of CPS, and a subset of CPS checked that way costs |CPS| squared; these
+  // predicates cost one comparison per field. Each is exactly membership in
+  // the set above with the same name.
+  def isCp(c: Checkpoint): bool = and {
+    GENS.contains(c.gen), 0 <= c.no, c.no <= MAX_NO, 1 <= c.start, c.start <= MAX_NO + 1,
+    1 <= c.nextNo, c.nextNo <= MAX_NO + 1, c.valid.subseteq(NOS),
+    c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= WINDOW,
+    c.valid.forall(k => c.start <= k and k < c.nextNo),
+  }
+  def isPp(p: Passport): bool = and { GENS.contains(p.gen), NOS.contains(p.no), DEVICES.contains(p.dev), RIGHTS.contains(p.rights) }
+  def isRc(r: RootChange): bool = and { GENS.contains(r.gen), Set(0, 1).contains(r.key) }
+  def isHp(h: HaltProof): bool = and { Set("cp", "pp", "rc").contains(h.kind), GENS.contains(h.gen), 0 <= h.no, h.no <= MAX_NO }
+  def isData(m: Data): bool = and { DEVICES.contains(m.src), NOS.contains(m.ppNo), GENS.contains(m.gen), 0 <= m.cpNo, m.cpNo <= MAX_NO }
+
   // ------------------------------------------------------------------- parts
   def nodeOk(n: Node): bool = and {
     // types
-    GENS.contains(n.gen), CPS.contains(n.cp), n.pps.subseteq(PPS), Set(-1, 0, 1).contains(n.rc),
-    n.recvCp == Set(), n.recvPp == Set(), n.recvRc == Set(), n.recvHp.subseteq(HPS),
+    GENS.contains(n.gen), isCp(n.cp), n.pps.forall(p => isPp(p)), Set(-1, 0, 1).contains(n.rc),
+    n.recvCp == Set(), n.recvPp == Set(), n.recvRc == Set(), n.recvHp.forall(h => isHp(h)),
+    // the cache holds at most one passport per number, halted or not: a
+    // conflicting passport halts the node without entering the cache, and a
+    // halted node takes no passport
+    n.pps.forall(p => n.pps.forall(q => p.no == q.no implies p == q)),
     // a permanent halt is a halt
     n.forever implies n.halted,
     // a processed root change proof made the halt permanent; any other
@@ -69,7 +89,9 @@ module inductive {
     r.rights.keys() == NOS.filter(k => k < r.nextNo),
     r.rights.keys().forall(k => RIGHTS.contains(r.rights.get(k))),
     // the window of the Root's next checkpoint fits (R-MEM-14)
-    r.nextNo - windowStart(r.valid, r.nextNo) <= WINDOW,
+    // (the same as r.nextNo - windowStart(r.valid, r.nextNo) <= WINDOW,
+    // without the fold)
+    r.valid.forall(k => r.nextNo - k <= WINDOW),
     // rootHonorsRevocation
     r.valid.intersect(r.revoked) == Set(),
   }
@@ -78,7 +100,10 @@ module inductive {
   // this is what makes "revoked at or before the receiver's checkpoint"
   // equivalent to "not valid under it".
   def historyOk(r: Root, h: Set[Checkpoint]): bool = and {
-    h.subseteq(CPS),
+    h.forall(c => isCp(c) and c.no >= 1),
+    // one honest checkpoint per generation and number: the Root's counter
+    // only grows within a generation, and equivocations are not history
+    h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no == c2.no) implies c1 == c2)),
     h.forall(c => c.gen <= r.gen and (c.gen == r.gen implies and {
       c.no <= r.cpNo, c.nextNo <= r.nextNo, below(r.valid, c).subseteq(c.valid),
       // windowKeepsValid
@@ -89,7 +114,8 @@ module inductive {
   }
 
   def poolOk(p: Pool): bool = and {
-    p.cp.subseteq(CPS), p.pp.subseteq(PPS), p.rc.subseteq(RCS), p.hp.subseteq(HPS), p.data.subseteq(DATAS),
+    p.cp.forall(c => isCp(c)), p.pp.forall(x => isPp(x)), p.rc.forall(x => isRc(x)), p.hp.forall(x => isHp(x)),
+    p.data.forall(x => isData(x)),
   }
 
   def indInvOf(ns: str -> Node, r: Root, p: Pool, h: Set[Checkpoint], b: Set[str], s: Set[str]): bool = and {
@@ -133,10 +159,26 @@ module inductive {
   action stepGrant = { nondet d = DEVICES.oneOf() all { nodes.get(d).pps != Set(), nodeGrant(d) } }
 
   // ------------------------------------------- an arbitrary state of IndInv
+  // A node's cache and the history are built from slots rather than picked
+  // from the powersets of PPS and CPS: a cache has one passport per number
+  // of the node's generation, the history one checkpoint per generation and
+  // number (both are part of IndInv). Every state of IndInv is still among
+  // the states built here, and the solver's sets have 3 and 9 elements
+  // instead of 108 and 102.
+  val SLOTS = tuples(GENS, NOS)
   action indInit = {
     nondet gens = setOfMaps(DEVICES, GENS).oneOf()
-    nondet cps = setOfMaps(DEVICES, CPS).oneOf()
-    nondet ppss = setOfMaps(DEVICES, PPS.powerset()).oneOf()
+    nondet cpNo = setOfMaps(DEVICES, 0.to(MAX_NO)).oneOf()
+    nondet cpStart = setOfMaps(DEVICES, 1.to(MAX_NO + 1)).oneOf()
+    nondet cpValid = setOfMaps(DEVICES, NOS.powerset()).oneOf()
+    nondet cpNext = setOfMaps(DEVICES, 1.to(MAX_NO + 1)).oneOf()
+    nondet ppIn = setOfMaps(DEVICES, setOfMaps(NOS, Set(false, true))).oneOf()
+    nondet ppDev = setOfMaps(DEVICES, setOfMaps(NOS, DEVICES)).oneOf()
+    nondet ppRights = setOfMaps(DEVICES, setOfMaps(NOS, RIGHTS)).oneOf()
+    nondet hIn = setOfMaps(SLOTS, Set(false, true)).oneOf()
+    nondet hStart = setOfMaps(SLOTS, 1.to(MAX_NO + 1)).oneOf()
+    nondet hValid = setOfMaps(SLOTS, NOS.powerset()).oneOf()
+    nondet hNext = setOfMaps(SLOTS, 1.to(MAX_NO + 1)).oneOf()
     nondet rcs = setOfMaps(DEVICES, Set(-1, 0, 1)).oneOf()
     nondet halts = setOfMaps(DEVICES, Set(false, true)).oneOf()
     nondet forevers = setOfMaps(DEVICES, Set(false, true)).oneOf()
@@ -152,10 +194,15 @@ module inductive {
     nondet prc = RCS.powerset().oneOf()
     nondet php = HPS.powerset().oneOf()
     nondet pdata = DATAS.powerset().oneOf()
-    nondet hist = CPS.powerset().oneOf()
+    val hist = SLOTS.filter(s => hIn.get(s))
+      .map(s => { gen: s._1, no: s._2, start: hStart.get(s), valid: hValid.get(s), nextNo: hNext.get(s) })
     nondet sn = Set("accept", "grant").powerset().oneOf()
     val ns = DEVICES.mapBy(d => {
-      gen: gens.get(d), cp: cps.get(d), pps: ppss.get(d), rc: rcs.get(d), halted: halts.get(d),
+      gen: gens.get(d),
+      cp: { gen: gens.get(d), no: cpNo.get(d), start: cpStart.get(d), valid: cpValid.get(d), nextNo: cpNext.get(d) },
+      pps: NOS.filter(k => ppIn.get(d).get(k))
+        .map(k => { gen: gens.get(d), no: k, dev: ppDev.get(d).get(k), rights: ppRights.get(d).get(k) }),
+      rc: rcs.get(d), halted: halts.get(d),
       forever: forevers.get(d), recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
     })
     val r = { gen: rg, cpNo: rcp, nextNo: rnx, valid: rv,

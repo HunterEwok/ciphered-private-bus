@@ -94,7 +94,10 @@ states these lemmas:
   the highest number taken. In lossy mode every credit is 0;
 - a halted node, and a node that knows its peer was revoked, has no open stream.
 
-Together they make every invariant of `safety` follow. The instances are `tiny_ind` (the size of
+Together they make every invariant of `safety` follow. Because calls and replies are unique by call
+number and chunks by direction, call and number, `indInit` draws each of them from one slot per key,
+and record types are checked field by field: drawing from all subsets of every possible record, and
+testing membership in that set, grows quadratically with its size. The instances are `tiny_ind` (the size of
 `tiny`, checked in CI) and `small_ind` (the size of `small`) for a long run.
 
 ## Running

@@ -30,14 +30,25 @@ module inductive {
   val TAGS = Set("tooMany", "staleDropped", "orderClose", "creditAdded", "orderedData", "creditClose",
                  "lossyGap", "resetClosed", "overrun")
 
-  val CALLS: Set[Call] = tuples(KS, MODES, CREDITS).map(t => { k: t._1, mode: t._2, credit: t._3 })
-    .filter(c => c.mode == "lossy" implies c.credit == 0)
-  val REPLIES: Set[Reply] = tuples(KS, 0.to(MAX_STREAMS), CREDITS, Set(false, true))
-    .map(t => { k: t._1, sid: t._2, credit: t._3, ok: t._4 })
-    .filter(r => if (r.ok) r.sid >= 1 else (r.sid == 0 and r.credit == 0))
-  val CHUNKS: Set[Chunk] = tuples(DIRS, IDS, KS, NOS, KINDS, CREDITS)
-    .map(t => { dir: t._1, sid: t._2, k: t._3, no: t._4, kind: t._5, credit: t._6 })
-    .filter(c => if (c.kind == "credit") c.credit >= 1 else c.credit == 0)
+  // Field checks. They replace c.in(CALLS) and the like: membership of a
+  // record in a big set costs Apalache the size of that set per element.
+  pure def isCall(c: Call): bool = and {
+    1 <= c.k, c.k <= MAX_CALLS, MODES.contains(c.mode), 0 <= c.credit, c.credit <= MAX_CREDIT,
+    c.mode == "lossy" implies c.credit == 0,
+  }
+  pure def isReply(r: Reply): bool = and {
+    1 <= r.k, r.k <= MAX_CALLS, 0 <= r.sid, r.sid <= MAX_STREAMS, 0 <= r.credit, r.credit <= MAX_CREDIT,
+    if (r.ok) r.sid >= 1 else (r.sid == 0 and r.credit == 0),
+  }
+  pure def isChunk(c: Chunk): bool = and {
+    DIRS.contains(c.dir), 1 <= c.sid, c.sid <= MAX_STREAMS, 1 <= c.k, c.k <= MAX_CALLS,
+    1 <= c.no, c.no <= MAX_NO, KINDS.contains(c.kind), 0 <= c.credit, c.credit <= MAX_CREDIT,
+    if (c.kind == "credit") c.credit >= 1 else c.credit == 0,
+  }
+
+  val PSLOTS = tuples(DIRS, KS, NOS)
+  pure def callOf(mo: int -> str, cr: int -> int, k: int): Call =
+    { k: k, mode: mo.get(k), credit: if (mo.get(k) == "lossy") 0 else cr.get(k) }
 
   pure def csum(s: Set[Chunk]): int = s.fold(0, (a, c) => a + c.credit)
   pure def dirOf(p: str): str = if (p == "C") "c2t" else "t2c"
@@ -106,7 +117,7 @@ module inductive {
                nk: int, ev: int, b: Set[str], s: Set[str]): bool = and {
     ns.keys() == PARTIES,
     1 <= nk, nk <= MAX_CALLS + 1, 0 <= ev, ev <= MAX_EVENTS,
-    cs.subseteq(CALLS), rs.subseteq(REPLIES), pl.subseteq(CHUNKS), d.subseteq(KS),
+    cs.forall(c => isCall(c)), rs.forall(r => isReply(r)), pl.forall(c => isChunk(c)), d.subseteq(KS),
     pe.keys().subseteq(KS),
     pe.keys().forall(k => cs.contains(pe.get(k)) and pe.get(k).k == k),
     d.forall(k => k < nk),
@@ -153,12 +164,26 @@ module inductive {
     nondet frecvd = setOfMaps(PARTIES, setOfMaps(IDS, 0.to(MAX_NO))).oneOf()
     nondet halts = setOfMaps(PARTIES, Set(false, true)).oneOf()
     nondet revs = setOfMaps(PARTIES, Set(false, true)).oneOf()
+    // Calls and replies are unique per call number and chunks per (direction,
+    // call, number) (callsOk, repliesOk, poolOk), so each is drawn from one
+    // slot per key instead of from all subsets of every possible record.
     nondet pk = KS.powerset().oneOf()
-    nondet pcall = setOfMaps(KS, CALLS).oneOf()
     nondet d = KS.powerset().oneOf()
-    nondet cs = CALLS.powerset().oneOf()
-    nondet rs = REPLIES.powerset().oneOf()
-    nondet pl = CHUNKS.powerset().oneOf()
+    nondet cIn = setOfMaps(KS, Set(false, true)).oneOf()
+    nondet cMode = setOfMaps(KS, MODES).oneOf()
+    nondet cCr = setOfMaps(KS, CREDITS).oneOf()
+    nondet rIn = setOfMaps(KS, Set(false, true)).oneOf()
+    nondet rSid = setOfMaps(KS, 0.to(MAX_STREAMS)).oneOf()
+    nondet rCr = setOfMaps(KS, CREDITS).oneOf()
+    nondet rOk = setOfMaps(KS, Set(false, true)).oneOf()
+    nondet pIn = setOfMaps(PSLOTS, Set(false, true)).oneOf()
+    nondet pSid = setOfMaps(PSLOTS, IDS).oneOf()
+    nondet pKind = setOfMaps(PSLOTS, KINDS).oneOf()
+    nondet pCr = setOfMaps(PSLOTS, CREDITS).oneOf()
+    val cs = KS.filter(k => cIn.get(k)).map(k => callOf(cMode, cCr, k))
+    val rs = KS.filter(k => rIn.get(k)).map(k => { k: k, sid: rSid.get(k), credit: rCr.get(k), ok: rOk.get(k) })
+    val pl = PSLOTS.filter(t => pIn.get(t))
+      .map(t => { dir: t._1, sid: pSid.get(t), k: t._2, no: t._3, kind: pKind.get(t), credit: pCr.get(t) })
     nondet nk = 1.to(MAX_CALLS + 1).oneOf()
     nondet ev = 0.to(MAX_EVENTS).oneOf()
     nondet sn = TAGS.powerset().oneOf()
@@ -170,7 +195,7 @@ module inductive {
       }),
       halted: halts.get(p), peerRevoked: revs.get(p),
     })
-    val pe = pk.mapBy(k => pcall.get(k))
+    val pe = pk.mapBy(k => callOf(cMode, cCr, k))
     all {
       indInvOf(ns, pe, d, cs, rs, pl, nk, ev, Set(), sn),
       nodes' = ns, pending' = pe, done' = d, calls' = cs, replies' = rs, pool' = pl,

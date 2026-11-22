@@ -106,6 +106,12 @@ size of `small`) for a long run. The step monitors (fair share, rule 1, grants k
 ticket, sends) are covered too: `IndInv` requires `broken` to be empty, so every step from any state
 of `IndInv` must leave it empty.
 
+Rules 1 and 4 evict in rounds, each removing the oldest candidates. The store is within both limits
+before a new object arrives, every publication has a size of at least 1, and an object larger than
+the per-source limit is refused, so `SOURCE_BYTES` rounds always suffice; a store still over a limit
+after them has the object refused. Each round computes the usage of every source once. This keeps
+the steps that store objects small enough for Apalache at the size of `small`.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)

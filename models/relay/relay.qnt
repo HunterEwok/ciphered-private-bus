@@ -102,16 +102,24 @@ module relay {
   // `keep` is the object being stored, which is not a candidate. A key request
   // is paid by its reader and belongs to no channel of the payer, so it passes
   // c = 0 and every publication of the payer is ordered by arrival only.
+  // Each round removes the oldest candidates. The store is within the limits
+  // before the new object arrives, every publication has a size of at least
+  // 1, and an object larger than SOURCE_BYTES is refused (rule 3), so
+  // SOURCE_BYTES rounds always suffice; a source still over its limit after
+  // them has the object refused (`ownOver` in `admit`).
+  // The order of rule 1: the same channel first, then the others, each by arrival.
+  pure def ruleOneKey(o: Obj, s: int, c: int): int =
+    if (MUTANT == "evict_other" or (o.ch == c and o.src == s)) o.arr else o.arr + MAX_ARR
   def evictOwn(st: Set[Obj], s: int, c: int, keep: Obj): Set[Obj] =
-    range(1, 2 * MAX_ARR + 2).foldl(st, (acc, key) =>
+    range(0, SOURCE_BYTES).foldl(st, (acc, i) =>
       if (usage(acc, s) <= SOURCE_BYTES) acc
       else {
         // Mutant "evict_other": rule 1 takes the oldest publication of any
         // source; mutant "evict_grant": grants are evicted like publications.
         val cand = acc.filter(o => (o.kind == "pub" or (o.kind == "grant" and MUTANT == "evict_grant")) and o != keep
-          and (o.src == s or MUTANT == "evict_other")
-          and (if (MUTANT == "evict_other" or (o.ch == c and o.src == s)) o.arr else o.arr + MAX_ARR) == key)
-        acc.exclude(cand)
+          and (o.src == s or MUTANT == "evict_other"))
+        val first = cand.fold(2 * MAX_ARR + 1, (m, o) => if (ruleOneKey(o, s, c) < m) ruleOneKey(o, s, c) else m)
+        acc.exclude(cand.filter(o => ruleOneKey(o, s, c) == first))
       })
 
   // Rule 4: the bus over its limit. The victim is the source that occupies
@@ -119,42 +127,56 @@ module relay {
   // source by volume that has publications and occupies more than the
   // average. With no victim the new object is refused. Returns the store and
   // whether the object was refused; the fair share check is `unfair`.
-  pure def avgExceeded(st: Set[Obj], s: int, devs: Set[int]): bool = {
-    val n = devs.filter(x => usage(st, x) > 0).size()
-    usage(st, s) * n > total(st)
+  // Every quantity below depends on the store only through the usage of each
+  // source, `u`, computed once per round (every payer is a device, so the
+  // total is the sum of `u`).
+  pure def usageMap(st: Set[Obj], devs: Set[int]): int -> int = devs.mapBy(x => usage(st, x))
+  pure def sumOf(u: int -> int, devs: Set[int]): int = devs.fold(0, (a, x) => a + u.get(x))
+  pure def avgExceeded(u: int -> int, s: int, devs: Set[int]): bool = {
+    val n = devs.filter(x => u.get(x) > 0).size()
+    u.get(s) * n > sumOf(u, devs)
   }
   // The source that occupies most among `cands`, the smaller number on a tie;
   // 0 if `cands` is empty.
-  pure def most(st: Set[Obj], cands: Set[int]): int = cands.fold(0, (b, x) =>
-    if (b == 0 or usage(st, x) > usage(st, b) or (usage(st, x) == usage(st, b) and x < b)) x else b)
-  def victim(st: Set[Obj], keep: Obj): int = {
-    val busiest = most(st, DEVS)
+  pure def most(u: int -> int, cands: Set[int]): int = cands.fold(0, (b, x) =>
+    if (b == 0 or u.get(x) > u.get(b) or (u.get(x) == u.get(b) and x < b)) x else b)
+  def victim(st: Set[Obj], u: int -> int, keep: Obj): int = {
+    val busiest = most(u, DEVS)
     // Mutant "unfair": the victim is the source of the oldest publication.
     val oldest = st.filter(o => o.kind == "pub" and o != keep)
       .fold({ s: 0, a: MAX_ARR + 1 }, (m, o) => if (o.arr < m.a) { s: o.src, a: o.arr } else m).s
-    val withPubs = DEVS.filter(x => pubsOf(st, x).exclude(Set(keep)) != Set() and avgExceeded(st, x, DEVS))
-    val second = most(st, withPubs)
+    val withPubs = DEVS.filter(x => pubsOf(st, x).exclude(Set(keep)) != Set() and avgExceeded(u, x, DEVS))
+    val second = most(u, withPubs)
     if (MUTANT == "unfair") oldest
     else if (pubsOf(st, busiest).exclude(Set(keep)) != Set()) busiest
     else second
   }
-  def unfairOf(st: Set[Obj], v: int, s: int): bool = {
-    val n = DEVS.filter(x => usage(st, x) > 0).size()
-    v != s and usage(st, v) * n <= BUS_BYTES
+  def unfairOf(u: int -> int, v: int, s: int): bool = {
+    val n = DEVS.filter(x => u.get(x) > 0).size()
+    v != s and u.get(v) * n <= BUS_BYTES
   }
-  def evictBus(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } =
-    range(0, MAX_ARR + 1).foldl({ st: st, refused: false, unfair: false }, (acc, i) =>
-      if (acc.refused or total(acc.st) <= BUS_BYTES) acc
+  // Each round removes one publication of the victim; for the reason given at
+  // rule 1, SOURCE_BYTES rounds always suffice, and a bus still over its limit
+  // after them has the object refused.
+  def evictBus(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } = {
+    val r = evictBusRounds(st, keep)
+    { ...r, refused: r.refused or total(r.st) > BUS_BYTES }
+  }
+  def evictBusRounds(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } =
+    range(0, SOURCE_BYTES).foldl({ st: st, refused: false, unfair: false }, (acc, i) => {
+      val u = usageMap(acc.st, DEVS)
+      if (acc.refused or sumOf(u, DEVS) <= BUS_BYTES) acc
       else {
-        val v = victim(acc.st, keep)
+        val v = victim(acc.st, u, keep)
         if (v == 0) { ...acc, refused: true }
         else {
           val old = pubsOf(acc.st, v).exclude(Set(keep))
             .fold({ a: MAX_ARR + 1 }, (m, o) => if (o.arr < m.a) { a: o.arr } else m).a
           { st: acc.st.filter(o => not(o.kind == "pub" and o.src == v and o.arr == old)),
-            refused: false, unfair: acc.unfair or unfairOf(acc.st, v, payer(keep)) }
+            refused: false, unfair: acc.unfair or unfairOf(u, v, payer(keep)) }
         }
-      })
+      }
+    })
 
   // Store `o` under the quota rules. Returns the new store, whether `o` was
   // refused, and the step properties violated on the way.

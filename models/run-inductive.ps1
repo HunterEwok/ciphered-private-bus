@@ -303,7 +303,7 @@ $summary = @(
     "apalache: $apalache, $Parallel at a time, heap $heapGb GB each",
     "started: $($startedAll.ToString('u')), ended: $((Get-Date).ToString('u')), elapsed: $((Get-Date) - $startedAll)",
     ""
-) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and so do ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
+) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

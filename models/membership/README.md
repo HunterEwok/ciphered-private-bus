@@ -201,8 +201,7 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-| 2026-11-21 | `3200651e9a9c` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server | every probe against `safety` and every witness on `tiny_tlc`, breadth-first until the first violation | 23 of 24 violated as expected, 43.7 min in total; `rc_no_forever` gave no verdict at its size then, see the next row |
-| 2026-11-22 | `70c2b729bc7a` | TLC 1.7.4, `run-tlc.ps1 -Main probe_rc_no_forever`, maintainer's server (54 workers) | `probe_rc_no_forever` at its new size (2 devices, `MAX_GEN` 2, `MAX_NO` 2) | violated as expected in 18 s, 562,947 distinct states, depth 8. Only that probe's instance changed between the two hashes |
+| 2026-11-21, 2026-11-22 | `3200651e9a9c`, `70c2b729bc7a` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | every probe against `safety` and every witness on `tiny_tlc`, breadth-first until the first violation | 24 of 24 violated as expected: 23 on `3200651e9a9c` in 43.7 min in total, and `rc_no_forever` on `70c2b729bc7a` in 18 s (562,947 distinct states, depth 8). The two hashes differ only in the instance of that probe |
 | 2026-11-22 | `70c2b729bc7a`, invariant `ac7229345475` (commit de8f3d7) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (53 GB heap) | `large_ind`, all states satisfying `IndInv` | all three obligations hold: init in 2.0 min, the 17 step branches in 5.2 to 16.6 min (`HearsHalted` the longest), `IndInv` implies `safety` in 4.3 min; 157 min in total. Safety holds in every reachable state of `large_ind` |
 
 Earlier runs of a previous revision are not cited (R-VER-5). The exhaustive TLC run of

@@ -218,6 +218,29 @@ jobs:
       - name: Simulate safety, probes, and witnesses; run the scenarios
         run: python3 models/streams/check.py
 
+  relay:
+    name: relay (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/relay
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/relay/check.py
+
   streams-inductive:
     name: streams (inductive invariant)
     runs-on: ubuntu-latest

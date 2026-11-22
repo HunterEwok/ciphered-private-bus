@@ -1,0 +1,37 @@
+{
+  "tlcInstance": "tiny",
+  "witnessInstance": "tiny",
+  "probes": [
+    "no_verify",
+    "store_call",
+    "store_depth0",
+    "serve_ungranted",
+    "keep_revoked",
+    "accept_revoked",
+    "over_quota",
+    "evict_other",
+    "evict_grant",
+    "unfair",
+    "grant_downgrade",
+    "two_requests",
+    "retain_all",
+    "join_unbounded",
+    "join_drop_new",
+    "old_ticket",
+    "keep_unserved",
+    "cp_rollback"
+  ],
+  "witnesses": [
+    "witnessOwnEvicted",
+    "witnessBusEvicted",
+    "witnessNoVictim",
+    "witnessGrantReplaced",
+    "witnessServedPub",
+    "witnessForwarded0",
+    "witnessRequestAnswered",
+    "witnessRevokedPurged",
+    "witnessUnlisted",
+    "witnessJoinEvicted",
+    "witnessNewGenTicket"
+  ]
+}

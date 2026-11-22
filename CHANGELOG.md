@@ -31,6 +31,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   lossy mode, chunks with data, credit and "end" in both directions, the limit on open streams, and
   every event that closes a stream, with a network that replays and reorders chunks and a peer that
   may overrun its credit; thirteen probes, witnesses, fixed scenarios, and a CI job.
+- Quint model of the relay (`models/relay/`): publications with retention depth, key grants, key
+  requests and calls arriving with forged objects among them, quotas per source and per bus with the
+  eviction rules of Appendix B, Section B.10 (fair share), revocation of a device, removal of the relay
+  from the checkpoint, tickets across a root change, and the join request buffer; eighteen probes,
+  witnesses, fixed scenarios, and a CI job.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a

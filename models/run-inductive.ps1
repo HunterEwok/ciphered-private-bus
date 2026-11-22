@@ -30,6 +30,13 @@
 #
 # -Main defaults to "inductive.instance" in checks.json.
 #
+# -Section names another section of checks.json with the same layout, for a
+# second invariant of the model (membership: "convergence"). Such a section
+# may name its file ("file", default inductive.qnt), its safety invariant
+# ("safety", default modelSafety), further checks on other instances
+# ("extra": name, main, init, invariant, each at 0 steps) and the sentence of
+# the summary on success ("result").
+#
 # Exit status: 0 every obligation holds, 1 otherwise.
 
 param(
@@ -43,15 +50,18 @@ param(
     [int]$Port = 8822,
     [int]$IntervalSeconds = 60,
     [int]$TimeoutHours = 0,
-    [string[]]$Only = @()
+    [string[]]$Only = @(),
+    [string]$Section = "inductive"
 )
 
 $ErrorActionPreference = "Stop"
 $ModelsDir = $PSScriptRoot
 $ModelDir = Join-Path $ModelsDir $Model
 if (-not (Test-Path (Join-Path $ModelDir "checks.json"))) { throw "No model $Model (models/$Model/checks.json)" }
-$Checks = (Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json).inductive
-if (-not $Checks) { throw "models/$Model/checks.json has no inductive section" }
+$Checks = (Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json).$Section
+if (-not $Checks) { throw "models/$Model/checks.json has no $Section section" }
+$File = if ($Checks.file) { $Checks.file } else { "inductive.qnt" }
+$SafetyInv = if ($Checks.safety) { $Checks.safety } else { "modelSafety" }
 if (-not $Main) { $Main = $Checks.instance }
 $OnWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
 
@@ -92,7 +102,7 @@ if ($versions -notmatch '(?ms)^\[apalache\].*?^version\s*=\s*"([^"]+)"') { throw
 $apalache = $Matches[1]
 
 $modelHash = Get-ShortHash @("$Model.qnt", "instances.qnt")
-$invHash = Get-ShortHash @("inductive.qnt")
+$invHash = Get-ShortHash @($File)
 $saved = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 $commit = "$(& git -C $ModelDir rev-parse --short HEAD 2>$null)".Trim()
 $ErrorActionPreference = $saved
@@ -110,26 +120,29 @@ if (-not $jar) {
     Say "Downloading Apalache $apalache"
     Push-Location $ModelDir
     $saved = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    try { & $quint verify "--main=$($Checks.smallInstance)" --init=modelInit --step=modelStep --invariant=IndInv --max-steps=0 "--apalache-version=$apalache" inductive.qnt 2>&1 | Out-Null }
+    try { & $quint verify "--main=$($Checks.smallInstance)" --init=modelInit --step=modelStep --invariant=IndInv --max-steps=0 "--apalache-version=$apalache" $File 2>&1 | Out-Null }
     finally { $ErrorActionPreference = $saved; Pop-Location }
     $jar = Find-ApalacheJar
     if (-not $jar) { throw "apalache.jar $apalache not found under $($env:QUINT_HOME)" }
 }
 
-# The checks. Each is (name, init, step, invariant, steps).
-$jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0))
+# The checks. Each is (name, init, step, invariant, steps, instance).
+$jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0, $Main))
 if ($Split) {
     foreach ($s in $Checks.steps) {
-        $jobs += , @(("IndInv and {0} imply IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1)
+        $jobs += , @(("IndInv and {0} imply IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1, $Main)
     }
 } else {
-    $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1)
+    $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1, $Main)
 }
-$jobs += , @("IndInv implies safety", "indInit", "modelStep", "modelSafety", 0)
+$jobs += , @("IndInv implies safety", "indInit", "modelStep", $SafetyInv, 0, $Main)
 # Further facts that IndInv implies ("inductive.implied" in checks.json), such
 # as the enabledness lemma behind a liveness property.
 foreach ($n in @($Checks.implied)) {
-    if ($n) { $jobs += , @("IndInv implies $n", "indInit", "modelStep", $n, 0) }
+    if ($n) { $jobs += , @("IndInv implies $n", "indInit", "modelStep", $n, 0, $Main) }
+}
+foreach ($x in @($Checks.extra)) {
+    if ($x) { $jobs += , @($x.name, $x.init, "modelStep", $x.invariant, 0, $x.main) }
 }
 # With powershell -File a list arrives as one string, "a,b".
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -137,7 +150,7 @@ if ($Only.Count -gt 0) {
     $picked = @()
     $known = @()
     foreach ($j in $jobs) {
-        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq "modelSafety") { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
+        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq $SafetyInv) { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
         $known += $key
         if ($Only -contains $key) { $picked += , $j }
     }
@@ -205,8 +218,8 @@ function Start-Check([int]$Index, [int]$Slot) {
 
 function Start-Quint($C) {
     $j = $jobs[$C.Index]
-    $qargs = @("verify", "--main=$Main", "--init=$($j[1])", "--step=$($j[2])", "--invariant=$($j[3])",
-               "--max-steps=$($j[4])", "--server-endpoint=localhost:$($C.Port)", "inductive.qnt")
+    $qargs = @("verify", "--main=$($j[5])", "--init=$($j[1])", "--step=$($j[2])", "--invariant=$($j[3])",
+               "--max-steps=$($j[4])", "--server-endpoint=localhost:$($C.Port)", $File)
     $exe = if ($OnWindows) { "cmd.exe" } else { $quint }
     $argList = if ($OnWindows) { @("/c", "`"$quint`"") + $qargs } else { $qargs }
     $C.Quint = Start-Process -FilePath $exe -ArgumentList $argList -WorkingDirectory $ModelDir -PassThru -NoNewWindow `
@@ -303,7 +316,7 @@ $summary = @(
     "apalache: $apalache, $Parallel at a time, heap $heapGb GB each",
     "started: $($startedAll.ToString('u')), ended: $((Get-Date).ToString('u')), elapsed: $((Get-Date) - $startedAll)",
     ""
-) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
+) + $rows + @("", $(if ($failures -eq 0 -and $Checks.result) { "result: $($Checks.result)" } elseif ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

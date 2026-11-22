@@ -16,6 +16,12 @@ Modes:
             and one step imply IndInv, and IndInv implies safety; also the
             facts listed under "inductive.implied" in checks.json, and their
             probes, which must fail.
+  convergence
+            Proof of `convergence` (S7) from conv_inductive.qnt, on the small
+            instances named under "convergence" in checks.json: the per-node
+            invariant on one device, safety without convergence, two nodes
+            with the same processed records converge, and the probe that must
+            fail.
 
 Exit status 0 means every expectation was met. Each run prints the model hash that
 the results table in README.md records.
@@ -200,9 +206,36 @@ def inductive(main, timeout):
     return failures
 
 
+def convergence(timeout):
+    """The convergence proof on the small instances (checked in CI)."""
+    spec = json.loads((HERE / "checks.json").read_text())["convergence"]
+    one, pair, probe = spec["smallInstance"], spec["smallPair"], spec["probe"]
+    checks = [
+        (one, "init implies IndInv", "modelInit", "IndInv", 0, "holds"),
+        (one, "IndInv and step imply IndInv", "indInit", "IndInv", 1, "holds"),
+        (one, "IndInv implies safety", "indInit", spec["safety"], 0, "holds"),
+        (pair, "pair implies convergence", "pairInit", "modelConvergence", 0, "holds"),
+        (probe, "IndInv and step imply IndInv", "indInit", "IndInv", 1, "violated"),
+    ]
+    failures = 0
+    for inst, name, init, inv, steps, expect in checks:
+        _, out, secs = quint(
+            ["verify", f"--main={inst}", f"--init={init}", "--step=modelStep", f"--invariant={inv}",
+             f"--max-steps={steps}", f"--apalache-version={APALACHE}", spec["file"]],
+            timeout,
+        )
+        got = verdict(out)
+        ok = got == expect
+        failures += not ok
+        print(f"{'pass' if ok else 'FAIL'}  {inst:24} {name:30} {got:9} {secs:7.0f} s")
+        if not ok:
+            print(out, file=sys.stderr)
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["simulate", "apalache", "tlc", "inductive"])
+    ap.add_argument("mode", choices=["simulate", "apalache", "tlc", "inductive", "convergence"])
     ap.add_argument("--steps", type=int, default=None, help="trace length (simulate: 40, apalache: 5)")
     ap.add_argument("--samples", type=int, default=100000, help="traces per simulator run")
     ap.add_argument("--main", default=None,
@@ -219,8 +252,13 @@ def main():
     if a.mode == "inductive":
         # The invariant lives outside the model, so it gets a hash of its own.
         print(f"inductive invariant {hashlib.sha256((HERE / 'inductive.qnt').read_bytes()).hexdigest()[:12]}")
+    if a.mode == "convergence":
+        f = json.loads((HERE / "checks.json").read_text())["convergence"]["file"]
+        print(f"inductive invariant {hashlib.sha256((HERE / f).read_bytes()).hexdigest()[:12]}")
     if a.mode == "simulate":
         failures = simulate(a.steps or 40, a.samples, a.timeout or 1800)
+    elif a.mode == "convergence":
+        failures = convergence(a.timeout)
     elif a.mode == "inductive":
         failures = inductive(a.main or "tiny_ind", a.timeout)
     else:

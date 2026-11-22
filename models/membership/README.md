@@ -142,8 +142,50 @@ the type. Without this, a step branch of `large_ind` ran out of a 53 GB heap.
 
 The instances are `tiny_ind` (the size of `tiny_tlc`, checked in CI), `small_ind` (three
 devices, three numbers per generation), and `large_ind` (three devices, three generations,
-three numbers) for a long run. `convergence` is not covered: it reads the processed-record sets.
-It is checked by the simulator, by the scenarios, and exhaustively by TLC on `conv_tlc`.
+three numbers) for a long run. In this proof the model runs without the processed-record sets,
+so `convergence` holds trivially; it has a proof of its own.
+
+### Convergence
+
+`convergence` compares two nodes, and a lemma that relates the record sets of different nodes
+makes the solver's work quadratic. [`conv_inductive.qnt`](conv_inductive.qnt) runs the model with
+the processed-record sets and proves instead that every field `convergence` compares is a
+function of the node's own sets (`nodeConv`):
+
+- `gen` is the latest generation among the processed root change records, or 1 if there is
+  none (root change records are of generation 2 or later), and `rc` is the key of that record;
+- `forever` holds exactly when a root change proof was processed, or two root change records
+  of one generation with different keys;
+- unless halted, `cp` is the processed checkpoint of the current generation with the highest
+  number, the only one with that number, or genesis if there is none;
+- the sets never hold a checkpoint or proof of a later generation than the node's: records of
+  another generation are dropped unprocessed.
+
+The fourth fact covers the one exception in `convergence`: a node that processed a proof of its
+own generation is halted (`proofIsObeyed`). Four obligations:
+
+1. the initial state satisfies `IndInv` (`nodeConv` included);
+2. every step from any state that satisfies `IndInv` leads to one that does;
+3. every state that satisfies `IndInv` satisfies `safety` without `convergence`;
+4. two nodes that satisfy the per-node part of `IndInv` and have the same processed records
+   satisfy `convergence`. The two nodes are built from one drawing of the sets, so the check
+   compares no sets.
+
+Obligations 1 to 3 run on one device. `IndInv` speaks of one node at a time, a node's actions
+read only that node and the pool, and the other actions change no node (`nodeHearsHalted` has
+the effect of `nodeRecvHp` with a proof from the pool), so every step of a model with more
+devices preserves the invariant of each node exactly when the one-device steps do. With one
+device, `nodeAcceptData`, `nodeGrant` and `nodeHearsHalted` are never enabled and are not
+checked; the first two change no node. With two devices in one state the arbitrary state of
+obligation 2 ran out of memory even at the smallest size. Obligation 4 runs on two devices.
+
+The instances are `conv_tiny_ind` and `conv_tiny_pair` (two generations, two numbers, checked in
+CI) and `conv_large_ind` and `conv_large_pair` (three generations and three numbers, as in
+`large_ind`) for a long run. Three generations are needed: generation 1 has no root change
+record, so moving from generation 2 to 3, or skipping from 1 to 3, needs three. The probe
+`conv_probe_need_next_ind` (a node takes only the checkpoint right after its own) must break
+obligation 2. A TLC run of `conv_tlc` is no substitute: it allows one number per generation, so
+two checkpoints of one generation never arrive out of order.
 
 ## Running
 
@@ -160,6 +202,7 @@ python3 models/membership/check.py apalache --invariant witnessHalt --expect vio
 python3 models/membership/check.py tlc --main conv_tlc  # safety with convergence, long run
 python3 models/membership/check.py inductive                    # IndInv and HearingEnabled, instance tiny_ind
 python3 models/membership/check.py inductive --main small_ind
+python3 models/membership/check.py convergence                  # convergence proof, small instances (CI)
 ```
 
 `--main` and `--invariant` select any instance and invariant, so probes and witnesses can be
@@ -192,6 +235,13 @@ invariant the same way, without Python, at below-normal priority, with progress 
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model membership -WorkDir <folder> -Java <path to java> -Main large_ind
+```
+
+The convergence proof uses the section `convergence` of `checks.json` (file, instances, the
+steps enabled with one device, and obligation 4 on `conv_large_pair`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model membership -Section convergence -WorkDir <folder> -Java <path to java> -Split -Parallel 1
 ```
 
 `-Only` repeats single checks of an earlier run that had no verdict, for example `-Split -Parallel 1

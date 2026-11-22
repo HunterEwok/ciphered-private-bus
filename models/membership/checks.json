@@ -61,5 +61,39 @@
         "invariant": "HearingEnabled"
       }
     ]
+  },
+  "convergence": {
+    "file": "conv_inductive.qnt",
+    "instance": "conv_large_ind",
+    "smallInstance": "conv_tiny_ind",
+    "smallPair": "conv_tiny_pair",
+    "probe": "conv_probe_need_next_ind",
+    "safety": "modelSafetyRest",
+    "parallel": 1,
+    "steps": [
+      "stepRootAdmit",
+      "stepRootChangeRights",
+      "stepRootRevoke",
+      "stepRootEquivocateCp",
+      "stepRootEquivocatePp",
+      "stepRecoveryChange",
+      "stepRecoveryEquivocate",
+      "stepAdversaryProof",
+      "stepRecvCp",
+      "stepRecvPp",
+      "stepRecvRc",
+      "stepRecvHp",
+      "stepReboot",
+      "stepSend"
+    ],
+    "extra": [
+      {
+        "name": "pair implies convergence",
+        "main": "conv_large_pair",
+        "init": "pairInit",
+        "invariant": "modelConvergence"
+      }
+    ],
+    "result": "convergence holds in every reachable state (per-node invariant on one device, pair implies convergence)"
   }
 }

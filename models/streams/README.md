@@ -125,3 +125,4 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `stre
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-22 | `1c6175f78335` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 13 probes against `safety`, 8 witnesses on `tiny`, breadth-first until the first violation | 21 of 21 violated as expected, 1.0 to 1.5 min each (compilation included), 24 min in total |

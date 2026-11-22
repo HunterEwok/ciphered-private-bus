@@ -109,3 +109,4 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `rela
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-22 | `0c043f9c4430` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 18 probes against `safety`, 11 witnesses on `tiny`, breadth-first until the first violation | 29 of 29 violated as expected, 1.2 to 1.5 min each (compilation included), 39 min in total |

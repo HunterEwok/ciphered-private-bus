@@ -48,7 +48,9 @@ module inductive {
   def indInvOf(r: Relay, c: int -> Set[int], rt: { gen: int, tNo: int, cpNo: int, listed: bool }, ev: int, nj: int,
                b: Set[str], s: Set[str]): bool = and {
     // bounds
-    0 <= ev, ev <= MAX_EVENTS, 0 <= nj, nj <= ev,
+    0 <= ev, ev <= MAX_EVENTS, 0 <= nj,
+    // every new checkpoint, root change and join request is one event
+    (rt.cpNo - 1) + (rt.gen - 1) + nj <= ev,
     1 <= rt.gen, rt.gen <= 2, 0 <= rt.tNo, rt.tNo <= 2, CPNOS.contains(rt.cpNo),
     c.keys() == CPNOS.filter(k => k <= rt.cpNo), c.keys().forall(k => c.get(k).subseteq(DEVS)),
     // the Root's checkpoints only add revoked devices
@@ -62,7 +64,7 @@ module inductive {
     // the relay's checkpoint is one the Root issued, the latest it accepted
     1 <= r.cpNo, r.cpNo <= rt.cpNo, r.cpMax == r.cpNo, r.revoked == c.get(r.cpNo),
     // a relay no longer listed holds the Root's last checkpoint, which unlisted it
-    not(r.served) implies (r.cpNo == rt.cpNo and not(rt.listed) and r.online == Set()),
+    not(r.served) implies (r.cpNo == rt.cpNo and not(rt.listed) and r.online == Set() and r.joins == List()),
     // nothing revoked is connected
     r.online.forall(d => not(r.revoked.contains(d))),
     // the store

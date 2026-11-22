@@ -47,7 +47,7 @@ send or an eviction may do, are checked by a monitor when the step is taken, as 
 | `retentionHolds` | R-REL-3, R-CH-10, R-CH-11 | a channel keeps at most as many publications as the depth of its newest |
 | `joinsBounded` | R-JOIN-8 | the join buffer is bounded and keeps the newest request |
 | `ticketOfCurrentRoot` | B.10 rules 2, 3 | a ticket is accepted only with a greater pair and of the latest root generation |
-| `unlistedEmpty` | B.10 rule 4 | a relay no longer in the checkpoint stores nothing |
+| `unlistedEmpty` | B.10 rule 4 | a relay no longer in the checkpoint stores nothing and buffers no join requests |
 | `checkpointForward` | R-REL-7 | the relay's checkpoint never moves back |
 
 Probes, each expected to violate `safety`:
@@ -94,7 +94,7 @@ obligations as for the other models: the initial state satisfies `IndInv`, every
 - the Root's checkpoints only add revoked devices, and the relay's checkpoint is one of them, the
   latest it accepted, with its revoked set;
 - a relay no longer listed holds the Root's last checkpoint, which unlisted it, and has no connected
-  device; no revoked device is connected;
+  device and no join requests; no revoked device is connected;
 - every stored object is signed, of a kind the relay stores, with its arrival number at most the
   relay's counter; publications are unique by source, channel and number, and none has a number
   above the highest seen for its channel.

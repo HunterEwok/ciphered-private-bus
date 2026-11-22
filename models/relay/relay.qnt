@@ -99,7 +99,9 @@ module relay {
 
   // Rule 1: a source over its limit loses its own publications, the oldest of
   // the same channel first, then the oldest by arrival in its other channels.
-  // `keep` is the object being stored, which is not a candidate.
+  // `keep` is the object being stored, which is not a candidate. A key request
+  // is paid by its reader and belongs to no channel of the payer, so it passes
+  // c = 0 and every publication of the payer is ordered by arrival only.
   def evictOwn(st: Set[Obj], s: int, c: int, keep: Obj): Set[Obj] =
     range(1, 2 * MAX_ARR + 2).foldl(st, (acc, key) =>
       if (usage(acc, s) <= SOURCE_BYTES) acc
@@ -165,7 +167,7 @@ module relay {
     val grantsOver = o.kind == "grant" and grantsOf(st1, s).size() > SOURCE_BYTES and MUTANT != "evict_grant"
     val st2 = st1
     // Rule 1. Mutant "over_quota": the per-source limit is not enforced.
-    val st3 = if (MUTANT == "over_quota") st2 else evictOwn(st2, s, o.ch, o)
+    val st3 = if (MUTANT == "over_quota") st2 else evictOwn(st2, s, if (o.kind == "req") 0 else o.ch, o)
     val ownOver = usage(st3, s) > SOURCE_BYTES and MUTANT != "over_quota"
     val ruleOneLost = st2.filter(x => not(st3.contains(x)))
     val b = evictBus(st3, o)
@@ -379,7 +381,7 @@ module relay {
     all {
       cps.keys().contains(n), n > r.cpNo or (MUTANT == "cp_rollback" and n != r.cpNo),
       commitWith(
-        if (unlisted and MUTANT != "keep_unserved") { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), online: Set() }
+        if (unlisted and MUTANT != "keep_unserved") { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), online: Set(), joins: List() }
         else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge }
         else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, online: r.online.exclude(rev) },
         Set(),
@@ -396,12 +398,13 @@ module relay {
 
   // A ticket (B.10 rules 2 and 3): accepted only with a greater pair and of
   // the generation of the latest root change record. Mutant "old_ticket": a
-  // ticket of the old generation is accepted after a root change.
+  // ticket of the old generation is accepted after a root change. A relay
+  // that is no longer listed takes no tickets.
   action learnTicket(g: int, n: int): bool = {
     val r = relay
     val greater = g > r.tGen or (g == r.tGen and n > r.tNo)
     all {
-      g <= root.gen, (g < root.gen or n <= root.tNo), n >= 1,
+      r.served, g <= root.gen, (g < root.gen or n <= root.tNo), n >= 1,
       greater, g == r.rootGen or MUTANT == "old_ticket",
       commitWith({ ...r, tGen: g, tNo: n },
         if (g != r.rootGen) Set("ticketOfCurrentRoot") else Set(),
@@ -494,7 +497,7 @@ module relay {
   // knows when accepted.
   val ticketOfCurrentRoot = not(broken.contains("ticketOfCurrentRoot"))
   // B.10 rule 4: a relay no longer listed stores nothing.
-  val unlistedEmpty = not(relay.served) implies relay.store == Set()
+  val unlistedEmpty = not(relay.served) implies (relay.store == Set() and relay.joins == List())
   // R-REL-7: the relay's checkpoint only moves forward: its revoked set
   // contains that of the newest checkpoint it ever accepted.
   val checkpointForward = cps.get(relay.cpMax).subseteq(relay.revoked)

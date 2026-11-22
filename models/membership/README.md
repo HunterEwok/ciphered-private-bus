@@ -93,9 +93,13 @@ of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventua
 the proof. It is proved from the inductive invariant, for every reachable state of `large_ind`
 (see below): `IndInv` implies `HearingEnabled`, which says that while a node has a halted peer of
 its generation and is not halted, or a permanently halted peer and is not permanently halted,
-`nodeHearsHalted` is enabled for it. Every such step changes the node, since it halts it or makes
-its halt permanent (a halted node can only take a root change proof), so weak fairness makes it
-happen unless the condition ends first, and either way the property holds. The probe
+`nodeHearsHalted` is enabled for it. Weak fairness gives a step of that action that changes the
+state. Such a step either reaches the goal (the node halts, or its halt becomes permanent) or only
+adds a proof to the node's finite set of received proofs: an already halted node may take another
+proof of its generation, which is a stutter when the proof is known and a new element otherwise.
+The second kind can happen only finitely often, and the action stays enabled while the condition
+holds, so a step of the first kind follows unless the condition ends first; either way the
+property holds. The probe
 `halted_silent` removes the answer: `safety` still holds, and `HearingEnabled` fails on
 `probe_halted_silent_ind`. A direct TLC check of the temporal formula did not finish: even
 `live_tlc`, one number per generation and two devices, grew past 20 million states.

@@ -35,7 +35,9 @@
 # may name its file ("file", default inductive.qnt), its safety invariant
 # ("safety", default modelSafety), further checks on other instances
 # ("extra": name, main, init, invariant, each at 0 steps) and the sentence of
-# the summary on success ("result").
+# the summary on success ("result"). A section may instead list all its
+# checks under "jobs" (name, init, step, invariant, steps, optional main);
+# -Only then takes check names.
 #
 # Exit status: 0 every obligation holds, 1 otherwise.
 
@@ -127,6 +129,14 @@ if (-not $jar) {
 }
 
 # The checks. Each is (name, init, step, invariant, steps, instance).
+if ($Checks.jobs) {
+    # A section that lists its checks itself ("jobs": name, init, step,
+    # invariant, steps, and optionally main), such as the proof of a TLC view.
+    $jobs = @()
+    foreach ($j in @($Checks.jobs)) {
+        $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }))
+    }
+} else {
 $jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0, $Main))
 if ($Split) {
     foreach ($s in $Checks.steps) {
@@ -144,13 +154,14 @@ foreach ($n in @($Checks.implied)) {
 foreach ($x in @($Checks.extra)) {
     if ($x) { $jobs += , @($x.name, $x.init, "modelStep", $x.invariant, 0, $x.main) }
 }
+}
 # With powershell -File a list arrives as one string, "a,b".
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Only.Count -gt 0) {
     $picked = @()
     $known = @()
     foreach ($j in $jobs) {
-        if ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq $SafetyInv) { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
+        if ($Checks.jobs) { $key = $j[0] } elseif ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq $SafetyInv) { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
         $known += $key
         if ($Only -contains $key) { $picked += , $j }
     }

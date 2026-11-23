@@ -30,6 +30,12 @@
 # expected and actual outcomes. A run that reaches its time limit has no
 # verdict and counts as a failure.
 #
+# -View runs the instance and state view named under "view" in checks.json
+# (file, instance, operator) with the TLC option VIEW: TLC keeps one state per
+# value of the view. Use it only with a view whose exactness for safety is
+# proven (calls: view.qnt, section "bisim" of run-inductive.ps1). The summary
+# records the hash of the view's file next to the model hash.
+#
 # Exit status: 0 no error found (with -Probes: every outcome as expected),
 # 2 invariant violated, 3 no verdict (time limit, disk limit, or an error).
 
@@ -46,7 +52,8 @@ param(
     [string]$Recover = "",
     [int]$CheckpointMinutes = 60,
     [int]$TimeoutMinutes = 0,
-    [switch]$Probes
+    [switch]$Probes,
+    [switch]$View
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +65,12 @@ $ModelsDir = $PSScriptRoot
 $ModelDir = Join-Path $ModelsDir $Model
 if (-not (Test-Path (Join-Path $ModelDir "checks.json"))) { throw "No model $Model (models/$Model/checks.json)" }
 $Checks = Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json
+$SourceFile = "instances.qnt"
+if ($View) {
+    if (-not $Checks.view) { throw "models/$Model/checks.json has no view" }
+    $SourceFile = $Checks.view.file
+    if (-not $Main) { $Main = $Checks.view.instance }
+}
 if (-not $Main) { $Main = $Checks.tlcInstance }
 $OnWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
 
@@ -168,7 +181,7 @@ Say ("Model {0}, commit {1}, instance {2}, run folder {3}" -f $hash, $commit, $M
 Say "Compiling to TLA+"
 $compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$Invariant")
 if ($Temporal) { $compileArgs += "--temporal=$Temporal" }
-$compileArgs += "instances.qnt"
+$compileArgs += $SourceFile
 Push-Location $ModelDir
 try { $lines = @(Invoke-Native $quint $compileArgs) } finally { Pop-Location }
 $start = -1; $end = -1
@@ -206,6 +219,15 @@ if (-not (Test-Path $tools)) {
 
 $cfg = @("INIT q_init", "NEXT q_step", "INVARIANT q_inv")
 if ($Temporal) { $cfg += "PROPERTY q_temporalProps" }
+$viewLine = @()
+if ($View) {
+    $cfg += "VIEW $($Checks.view.operator)"
+    $vsha = [System.Security.Cryptography.SHA256]::Create()
+    $vhash = (-join ($vsha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $ModelDir $SourceFile))) |
+        ForEach-Object { $_.ToString("x2") })).Substring(0, 12)
+    $viewLine = @("view: $SourceFile $vhash, operator $($Checks.view.operator)")
+    Say "View $SourceFile $vhash, operator $($Checks.view.operator)"
+}
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "$Main.cfg"), $cfg)
 
 # Resource limits.
@@ -296,6 +318,7 @@ $summary = @(
     "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif ($stoppedForTime) { 'stopped at the time limit, not a result' } elseif ($violated) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",
     ""
 ) + $result
+if ($viewLine.Count -gt 0) { $summary = $summary[0..2] + $viewLine + $summary[3..($summary.Count - 1)] }
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

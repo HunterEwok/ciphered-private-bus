@@ -65,6 +65,18 @@ acceptor; and every passport was confirmed.
 The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the size of `small`)
 for a long run.
 
+## State view for TLC
+
+Exhaustive TLC of `tiny` does not finish on its own: the adversary and the
+compromised acceptor can file any subset of the requests signed by the
+adversary's key. `view.qnt` defines a TLC `VIEW` that drops those requests
+(the Root admits a request only for the joiner in front of it, so they never
+enable or change a step) and the witness tags, and module `bisim` proves with
+Apalache that states with equal views are interchangeable for `safety`, so TLC
+with the view finds a violation exactly when TLC without it would. Run with
+`run-tlc.ps1 -Model enrollment -View` and
+`run-inductive.ps1 -Model enrollment -Section bisim`.
+
 ## Running
 
 ```sh
@@ -84,6 +96,8 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model enrollm
 | --- | --- | --- | --- | --- |
 | 2026-11-21 | `a8c801d73b0f` (commit 56d4c14) | TLC 1.7.4, `run-all.ps1 -Stages probes`, maintainer's server (49 workers) | 6 probes against `safety`, 5 witnesses on `tiny_root`, breadth-first until the first violation | 11 of 11 violated as expected, 1.0 to 17.4 min each (`probe_sig_key_only` the longest, 52 million distinct states at depth 8) |
 | 2026-11-23 | `a8c801d73b0f`, invariant `9a33443ad926` (commit 112a58e) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (12 GB heap; `stepBadRequest` with 25 GB, rerun alone with `-Only BadRequest` after it ran out of memory at 12 GB) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.0 min, the 7 step branches in 10.4 to 15.3 min, `IndInv` implies `safety` in 5.8 min; 90 min in total. Safety holds in every reachable state of `small` |
+| 2026-11-23 | `a8c801d73b0f`, view `1b404602279a` (commit 279b046) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 8`, maintainer's server (6 GB heap) | `tiny_bisim`, all pairs of states satisfying `Struct` | all 18 checks pass: init and the 7 step branches preserve `Struct` (0.6 to 1.1 min), equal views agree on `safety` (1.1 min), each of the 7 branches is answered with an equal view (3.6 to 4.1 min), both witnesses violated as expected; 5.4 min in total. TLC with the view is exact for `safety` |
+| 2026-11-23 | `a8c801d73b0f`, view `1b404602279a` (commit 279b046) | TLC 1.7.4, `run-tlc.ps1 -View`, maintainer's server (54 workers) | `tiny`, exhaustive, `VIEW safetyView` | no error: 2,688 distinct states (3,265,222 generated), depth 10, 13 s |
 
 After the proof, the only change to `inductive.qnt` was a three-line comment above `stepBadIssue`,
 so the file now hashes to `9a33443ad926`; `IndInv` and every step branch of the proof are unchanged.

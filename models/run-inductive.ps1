@@ -50,7 +50,7 @@ param(
     [switch]$Split,
     [int]$Parallel = 0,
     [double]$Share = 0.85,
-    [int]$Port = 8822,
+    [int]$Port = 0,
     [int]$IntervalSeconds = 60,
     [int]$TimeoutHours = 0,
     [string[]]$Only = @(),
@@ -205,7 +205,11 @@ function Test-Port([int]$P) {
 
 # Every check gets a port of its own, counting up from -Port and skipping
 # ports in use, so that a server still shutting down (or left over from an
-# earlier run) never stops the run.
+# earlier run) never stops the run. Without -Port each run starts from its
+# own block of 50 ports chosen by its process id: two runs side by side
+# would otherwise both find a port free while the other's server is still
+# starting, and one server would fail to bind.
+if ($Port -le 0) { $Port = 20000 + ($PID % 800) * 50 }
 $script:NextPort = $Port
 function Get-FreePort {
     for ($k = 0; $k -lt 1000; $k++) {

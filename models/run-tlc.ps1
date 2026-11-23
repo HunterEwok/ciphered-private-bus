@@ -19,6 +19,8 @@
 # its last checkpoint, pass -Recover with the checkpoint folder (states\<date>).
 # A run that ends with a verdict deletes its checkpoint and temporary files;
 # the log and the summary stay.
+# TLC writes a checkpoint every -CheckpointMinutes (default 60); 0 writes none,
+# which saves disk space and time, but a stopped run then starts over.
 #
 # -Probes checks the translation to TLA+ instead: it runs TLC on every probe
 # instance (each must violate `safety`) and on every witness (each must be
@@ -40,6 +42,7 @@ param(
     [int]$MinFreeDiskPercent = 15,
     [int]$IntervalSeconds = 60,
     [string]$Recover = "",
+    [int]$CheckpointMinutes = 60,
     [int]$TimeoutMinutes = 0,
     [switch]$Probes
 )
@@ -214,7 +217,7 @@ Say ("Limits: {0} of {1} cores, heap {2} GB, direct memory {3} GB of {4} GB RAM,
 
 $tlcArgs = @("-XX:+UseParallelGC", "-Xmx${heapGb}g", "-XX:MaxDirectMemorySize=${directGb}g",
              "-Djava.io.tmpdir=`"$(Join-Path $RunDir 'tmp')`"", "-cp", "`"$tools`"", "tlc2.TLC",
-             "-workers", "$workers", "-deadlock", "-checkpoint", "60", "-metadir", "states")
+             "-workers", "$workers", "-deadlock", "-checkpoint", "$CheckpointMinutes", "-metadir", "states")
 if ($Recover) { $tlcArgs += @("-recover", "`"$Recover`"") }
 $tlcArgs += "$Main.tla"
 

@@ -204,6 +204,22 @@
         "step": "matchRotate",
         "invariant": "matched",
         "steps": 2
+      },
+      {
+        "name": "witness: a pair with equal views",
+        "init": "initPair",
+        "step": "stepRotate",
+        "invariant": "witnessPair",
+        "steps": 0,
+        "expect": "violated"
+      },
+      {
+        "name": "witness: B answers a step",
+        "init": "initPair",
+        "step": "matchRotate",
+        "invariant": "witnessAnswered",
+        "steps": 2,
+        "expect": "violated"
       }
     ],
     "result": "states with equal views are interchangeable for safety: TLC with the view is exact"

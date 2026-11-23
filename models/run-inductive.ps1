@@ -36,8 +36,9 @@
 # ("safety", default modelSafety), further checks on other instances
 # ("extra": name, main, init, invariant, each at 0 steps) and the sentence of
 # the summary on success ("result"). A section may instead list all its
-# checks under "jobs" (name, init, step, invariant, steps, optional main);
-# -Only then takes check names.
+# checks under "jobs" (name, init, step, invariant, steps, optional main,
+# optional "expect": "violated" for a non-vacuity witness, which passes when
+# Apalache finds a violation); -Only then takes check names.
 #
 # Exit status: 0 every obligation holds, 1 otherwise.
 
@@ -134,7 +135,8 @@ if ($Checks.jobs) {
     # invariant, steps, and optionally main), such as the proof of a TLC view.
     $jobs = @()
     foreach ($j in @($Checks.jobs)) {
-        $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }))
+        $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }),
+                     $(if ($j.expect) { $j.expect } else { "holds" }))
     }
 } else {
 $jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0, $Main))
@@ -289,6 +291,12 @@ try {
                 }
             } elseif ($c.Quint.HasExited) {
                 $results[$c.Index] = Get-Verdict $c $false; $done = $true
+                # A witness is expected to be violated: that is its pass.
+                if ($jobs[$c.Index].Count -gt 6 -and $jobs[$c.Index][6] -eq "violated") {
+                    $results[$c.Index] = if ($results[$c.Index] -like "VIOLATED*") { "violated as expected" }
+                                         elseif ($results[$c.Index] -eq "holds") { "HOLDS, a violation was expected" }
+                                         else { $results[$c.Index] }
+                }
             } elseif ($TimeoutHours -gt 0 -and ((Get-Date) - $c.Started).TotalHours -ge $TimeoutHours) {
                 Stop-Tree $c.Quint
                 $results[$c.Index] = Get-Verdict $c $true; $done = $true
@@ -315,8 +323,9 @@ try {
 $rows = @(); $failures = 0
 for ($i = 0; $i -lt $jobs.Count; $i++) {
     $verdict, $mins = $results[$i] -split '\|'
-    if ($verdict -ne "holds") { $failures++ }
-    $rows += ("{0,-4}  {1,-44} {2}  {3,8} min" -f $(if ($verdict -eq "holds") { "pass" } else { "FAIL" }), $jobs[$i][0], $verdict, $mins)
+    $pass = $verdict -eq "holds" -or $verdict -eq "violated as expected"
+    if (-not $pass) { $failures++ }
+    $rows += ("{0,-4}  {1,-44} {2}  {3,8} min" -f $(if ($pass) { "pass" } else { "FAIL" }), $jobs[$i][0], $verdict, $mins)
 }
 $summary = @(
     "model: $Model",

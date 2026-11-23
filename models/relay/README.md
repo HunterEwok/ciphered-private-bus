@@ -125,6 +125,18 @@ multiplying two variables (a source above the average is a positive sum of diffe
 keeps the arithmetic linear. Mutant `evict_other` gets `MAX_ARR` rounds of rule 1, since removing
 publications of other sources does not lower the usage of the payer.
 
+## State view for TLC
+
+Exhaustive TLC of `tiny` does not finish on its own: the relay records up to
+fourteen witness tags in any combination, and the numbers of buffered join
+requests multiply the states further. `view.qnt` defines a TLC `VIEW` that
+drops the witness tags and keeps only the length of the join buffer (`safety`
+reads only the length, and a new request is always the newest), and module
+`bisim` proves with Apalache that states with equal views are
+interchangeable for `safety`, so TLC with the view finds a violation exactly
+when TLC without it would. Run with `run-tlc.ps1 -Model relay -View` and
+`run-inductive.ps1 -Model relay -Section bisim`.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)
@@ -155,3 +167,5 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `rela
 | --- | --- | --- | --- | --- |
 | 2026-11-23 | `f8f283d5cf95` (commit de117de) | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (25 workers) | 18 probes against `safety`, 11 witnesses on `tiny`, breadth-first until the first violation | 29 of 29 violated as expected, depth 2 to 10, 1.2 to 1.6 min each (compilation included), 39 min in total |
 | 2026-11-23 | `f8f283d5cf95`, inductive invariant `1e5cef2ee517` (commit de117de) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server, two runs combined (`-Only` for the second) | `small_ind`: init implies `IndInv`, `IndInv` and each of the 14 branches of the step imply `IndInv`, `IndInv` implies `safety` | 16 of 16 hold: `safety` holds in every reachable state of `small`; RecvGrant 198 min, RecvPub 176 min, RecvReq 60 min, LearnCp 10 min, every other check 2 to 4 min |
+| 2026-11-23 | `f8f283d5cf95`, view `f9fe1c1f5c12` (commit 279b046) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 8`, maintainer's server (6 GB heap) | `tiny_bisim`, all pairs of states satisfying `Struct` | all 32 checks pass: init and the 14 step branches preserve `Struct` (1.0 to 1.5 min), equal views agree on `safety` (1.3 min), each of the 14 branches is answered with an equal view (1.8 to 2.5 min), both witnesses violated as expected; 7.0 min in total. TLC with the view is exact for `safety` |
+| 2026-11-24 | `f8f283d5cf95`, view `f9fe1c1f5c12` (commit 279b046) | TLC 1.7.4, `run-tlc.ps1 -View`, maintainer's server (54 workers) | `tiny`, exhaustive, `VIEW safetyView` | no error: 24,097,506 distinct states (263,984,749 generated), depth 17, 1 h 01 min |

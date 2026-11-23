@@ -153,4 +153,4 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `rela
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-| 2026-11-22 | `b3ea98c7c600` (commit 67fe14f) | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (54 workers) | 18 probes against `safety`, 11 witnesses on `tiny`, breadth-first until the first violation | 29 of 29 violated as expected, 0.6 to 1.0 min each (compilation included), 22 min in total |
+| 2026-11-23 | `f8f283d5cf95`, inductive invariant `1e5cef2ee517` (commit de117de) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server, two runs combined (`-Only` for the second) | `small_ind`: init implies `IndInv`, `IndInv` and each of the 14 branches of the step imply `IndInv`, `IndInv` implies `safety` | 16 of 16 hold: `safety` holds in every reachable state of `small`; RecvGrant 198 min, RecvPub 176 min, RecvReq 60 min, LearnCp 10 min, every other check 2 to 4 min |

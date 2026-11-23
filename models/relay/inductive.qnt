@@ -74,8 +74,11 @@ module inductive {
     r.store.forall(o => o.kind == "pub" implies o.no <= r.hi.get((o.src, o.ch))),
     // state parts of safety
     r.store.forall(o => not(r.revoked.contains(o.src)) and (o.kind == "pub" or not(r.revoked.contains(o.reader)))),
-    r.used.keys() == DEVS, DEVS.forall(d => r.used.get(d) == usage(r.store, d) and r.used.get(d) <= SOURCE_BYTES),
-    sumOf(r.used, DEVS) <= BUS_BYTES,
+    r.bytes.pub.keys() == PSLOTS, r.bytes.grant.keys() == GSLOTS, r.bytes.req.keys() == GSLOTS,
+    PSLOTS.forall(k => r.bytes.pub.get(k) == 0 or SIZES.contains(r.bytes.pub.get(k))),
+    GSLOTS.forall(k => 0 <= r.bytes.grant.get(k) and r.bytes.grant.get(k) <= 1
+      and 0 <= r.bytes.req.get(k) and r.bytes.req.get(k) <= 1),
+    bytesMatch(r), DEVS.forall(d => bytesOf(r.bytes, d) <= SOURCE_BYTES), sumOf(usageOf(r.bytes), DEVS) <= BUS_BYTES,
     r.store.forall(a => r.store.forall(x =>
       (a.kind == x.kind and a.kind != "pub" and a.src == x.src and a.ch == x.ch and a.reader == x.reader) implies a == x)),
     KEYS.forall(k => r.hi.get(k) > 0 implies
@@ -108,23 +111,20 @@ module inductive {
   action stepRecvJoin = recvJoin
 
   // ------------------------------------------- an arbitrary state of IndInv
-  // Publications are unique by (source, channel, number), grants and key
-  // requests by (source, channel, reader), so the store is drawn from one
-  // slot per key instead of from all subsets of every possible object.
-  val PSLOTS = tuples(DEVS, CHANS, NOS)
-  val GSLOTS = tuples(DEVS, CHANS, DEVS)
+  // The store is drawn from the key slots (PSLOTS, GSLOTS in relay.qnt), one
+  // object per occupied slot, instead of from all subsets of every possible
+  // object; the slot bytes drawn are the relay's accounting.
   val ARRS = 1.to(MAX_ARR)
 
   action indInit = {
-    nondet pIn = setOfMaps(PSLOTS, Set(false, true)).oneOf()
+    nondet pBytes = setOfMaps(PSLOTS, Set(0).union(SIZES)).oneOf()
     nondet pDepth = setOfMaps(PSLOTS, 1.to(MAX_DEPTH)).oneOf()
-    nondet pSize = setOfMaps(PSLOTS, SIZES).oneOf()
     nondet pArr = setOfMaps(PSLOTS, ARRS).oneOf()
-    nondet gIn = setOfMaps(GSLOTS, Set(false, true)).oneOf()
+    nondet gBytes = setOfMaps(GSLOTS, 0.to(1)).oneOf()
     nondet gGen = setOfMaps(GSLOTS, 1.to(2)).oneOf()
     nondet gNo = setOfMaps(GSLOTS, 0.to(1)).oneOf()
     nondet gArr = setOfMaps(GSLOTS, ARRS).oneOf()
-    nondet qIn = setOfMaps(GSLOTS, Set(false, true)).oneOf()
+    nondet qBytes = setOfMaps(GSLOTS, 0.to(1)).oneOf()
     nondet qArr = setOfMaps(GSLOTS, ARRS).oneOf()
     nondet served = Set(false, true).oneOf()
     nondet cpNo = CPNOS.oneOf()
@@ -145,19 +145,18 @@ module inductive {
     nondet ev = 0.to(MAX_EVENTS).oneOf()
     nondet nj = 0.to(MAX_EVENTS).oneOf()
     nondet sn = TAGS.powerset().oneOf()
-    nondet used = setOfMaps(DEVS, 0.to(SOURCE_BYTES)).oneOf()
-    val pubs = PSLOTS.filter(t => pIn.get(t)).map(t =>
-      { kind: "pub", src: t._1, ch: t._2, reader: 0, no: t._3, gen: 0, depth: pDepth.get(t), size: pSize.get(t),
+    val pubs = PSLOTS.filter(t => pBytes.get(t) > 0).map(t =>
+      { kind: "pub", src: t._1, ch: t._2, reader: 0, no: t._3, gen: 0, depth: pDepth.get(t), size: pBytes.get(t),
         ok: true, arr: pArr.get(t) })
-    val grants = GSLOTS.filter(t => gIn.get(t)).map(t =>
+    val grants = GSLOTS.filter(t => gBytes.get(t) == 1).map(t =>
       { kind: "grant", src: t._1, ch: t._2, reader: t._3, no: gNo.get(t), gen: gGen.get(t), depth: 0, size: 0,
         ok: true, arr: gArr.get(t) })
-    val reqs = GSLOTS.filter(t => qIn.get(t)).map(t =>
+    val reqs = GSLOTS.filter(t => qBytes.get(t) == 1).map(t =>
       { kind: "req", src: t._1, ch: t._2, reader: t._3, no: 1, gen: 0, depth: 0, size: 0, ok: true, arr: qArr.get(t) })
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
     val r = {
       served: served, cpNo: cpNo, cpMax: cpNo, revoked: revAll.get(cpNo), rootGen: rootGen, tGen: tGen, tNo: tNo,
-      store: pubs.union(grants).union(reqs), used: used, hi: hi, dep: dep, arr: arr,
+      store: pubs.union(grants).union(reqs), bytes: { pub: pBytes, grant: gBytes, req: qBytes }, hi: hi, dep: dep, arr: arr,
       joins: range(0, JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,
     }

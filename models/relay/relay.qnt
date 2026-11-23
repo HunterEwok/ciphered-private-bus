@@ -51,6 +51,15 @@ module relay {
   val NOS = 1.to(MAX_NO)
   val DEPTHS = 0.to(MAX_DEPTH)
 
+  // Key slots: publications are unique by (source, channel, number), grants
+  // and key requests by (source, channel, reader), and a grant or request
+  // never names its source as reader.
+  val PSLOTS = tuples(DEVS, CHANS, NOS)
+  val GSLOTS = tuples(DEVS, CHANS, DEVS).filter(t => t._1 != t._3)
+  // The bytes the relay holds in each slot, 0 for an empty one. The relay
+  // accounts by slot; each object is in the slot of its key.
+  type Bytes = { pub: (int, int, int) -> int, grant: (int, int, int) -> int, req: (int, int, int) -> int }
+
   // One object as the relay sees it. Fields that a kind does not use are 0.
   // pub:   src, ch, no (publication number), depth, size
   // grant: src, ch, reader, gen (channel key generation), no (nonce of the
@@ -68,7 +77,7 @@ module relay {
     tGen: int,             // pair (gen, no) of the ticket held
     tNo: int,
     store: Set[Obj],       // publications, grants and key requests
-    used: int -> int,      // bytes each source pays for in the store (its usage)
+    bytes: Bytes,          // bytes held per key slot (the relay's accounting)
     hi: (int, int) -> int, // highest publication number seen per (source, channel)
     dep: (int, int) -> int,// depth of that publication: it governs retention
     arr: int,              // arrival counter (B.10 rule 5)
@@ -91,7 +100,37 @@ module relay {
   pure def max2(a: int, b: int): int = if (a > b) a else b
   pure def payer(o: Obj): int = if (o.kind == "req") o.reader else o.src
   pure def sizeOf(o: Obj): int = if (o.kind == "pub") o.size else 1
-  pure def usage(st: Set[Obj], s: int): int = st.filter(o => payer(o) == s).fold(0, (a, o) => a + sizeOf(o))
+  pure def atP(o: Obj, k: (int, int, int)): bool = o.kind == "pub" and o.src == k._1 and o.ch == k._2 and o.no == k._3
+  pure def atG(o: Obj, k: (int, int, int)): bool = o.kind == "grant" and o.src == k._1 and o.ch == k._2 and o.reader == k._3
+  pure def atQ(o: Obj, k: (int, int, int)): bool = o.kind == "req" and o.src == k._1 and o.ch == k._2 and o.reader == k._3
+  val NO_BYTES: Bytes = { pub: PSLOTS.mapBy(k => 0), grant: GSLOTS.mapBy(k => 0), req: GSLOTS.mapBy(k => 0) }
+  // `o` stored; `gone` deleted. Each slot is computed on its own.
+  def withObj(m: Bytes, o: Obj): Bytes = {
+    pub: PSLOTS.mapBy(k => if (atP(o, k)) o.size else m.pub.get(k)),
+    grant: GSLOTS.mapBy(k => if (atG(o, k)) 1 else m.grant.get(k)),
+    req: GSLOTS.mapBy(k => if (atQ(o, k)) 1 else m.req.get(k)),
+  }
+  def without(m: Bytes, gone: Set[Obj]): Bytes = {
+    pub: PSLOTS.mapBy(k => if (gone.exists(x => atP(x, k))) 0 else m.pub.get(k)),
+    grant: GSLOTS.mapBy(k => if (gone.exists(x => atG(x, k))) 0 else m.grant.get(k)),
+    req: GSLOTS.mapBy(k => if (gone.exists(x => atQ(x, k))) 0 else m.req.get(k)),
+  }
+  // Slot by slot: `c` chooses between `x` and `y`.
+  def pick(c: bool, x: Bytes, y: Bytes): Bytes = {
+    pub: PSLOTS.mapBy(k => if (c) x.pub.get(k) else y.pub.get(k)),
+    grant: GSLOTS.mapBy(k => if (c) x.grant.get(k) else y.grant.get(k)),
+    req: GSLOTS.mapBy(k => if (c) x.req.get(k) else y.req.get(k)),
+  }
+  // The usage of device `d`: its publications and grants, and the key
+  // requests it signed. A plain sum over its slots, with no condition on
+  // whether a slot is occupied (an empty slot holds 0): such sums stay
+  // linear for the solver, while a sum over the objects of a set grows
+  // exponentially with the number of objects the set may hold. `d` is always
+  // a constant (a member of DEVS in `usageOf`).
+  def bytesOf(m: Bytes, d: int): int =
+    tuples(CHANS, NOS).fold(0, (a, t) => a + m.pub.get((d, t._1, t._2)))
+    + tuples(CHANS, DEVS).fold(0, (a, t) => if (t._2 == d) a else a + m.grant.get((d, t._1, t._2)) + m.req.get((t._2, t._1, d)))
+  def usageOf(m: Bytes): int -> int = DEVS.mapBy(d => bytesOf(m, d))
   pure def total(st: Set[Obj]): int = st.fold(0, (a, o) => a + sizeOf(o))
   pure def pubsOf(st: Set[Obj], s: int): Set[Obj] = st.filter(o => o.kind == "pub" and o.src == s)
   pure def grantsOf(st: Set[Obj], s: int): Set[Obj] = st.filter(o => o.kind == "grant" and o.src == s)
@@ -111,16 +150,21 @@ module relay {
   // The order of rule 1: the same channel first, then the others, each by arrival.
   pure def ruleOneKey(o: Obj, s: int, c: int): int =
     if (MUTANT == "evict_other" or (o.ch == c and o.src == s)) o.arr else o.arr + MAX_ARR
-  def evictOwn(st: Set[Obj], s: int, c: int, keep: Obj): Set[Obj] =
-    range(0, SOURCE_BYTES).foldl(st, (acc, i) =>
-      if (usage(acc, s) <= SOURCE_BYTES) acc
+  // Mutant "evict_other" may remove publications of other sources first,
+  // which do not lower the usage of `s`, so it gets MAX_ARR rounds.
+  val OWN_ROUNDS = if (MUTANT == "evict_other") MAX_ARR else SOURCE_BYTES
+  def evictOwn(st0: Set[Obj], m0: Bytes, s: int, c: int, keep: Obj): { st: Set[Obj], m: Bytes } =
+    range(0, OWN_ROUNDS).foldl({ st: st0, m: m0 }, (e, i) =>
+      if (usageOf(e.m).get(s) <= SOURCE_BYTES) e
       else {
+        val acc = e.st
         // Mutant "evict_other": rule 1 takes the oldest publication of any
         // source; mutant "evict_grant": grants are evicted like publications.
         val cand = acc.filter(o => (o.kind == "pub" or (o.kind == "grant" and MUTANT == "evict_grant")) and o != keep
           and (o.src == s or MUTANT == "evict_other"))
         val first = cand.fold(2 * MAX_ARR + 1, (m, o) => if (ruleOneKey(o, s, c) < m) ruleOneKey(o, s, c) else m)
-        acc.exclude(cand.filter(o => ruleOneKey(o, s, c) == first))
+        val gone = cand.filter(o => ruleOneKey(o, s, c) == first)
+        { st: acc.exclude(gone), m: without(e.m, gone) }
       })
 
   // Rule 4: the bus over its limit. The victim is the source that occupies
@@ -129,12 +173,8 @@ module relay {
   // average. With no victim the new object is refused. Returns the store and
   // whether the object was refused; the fair share check is `unfair`.
   // Every quantity below depends on the store only through the usage of each
-  // source, `u`, computed once per round (every payer is a device, so the
-  // total is the sum of `u`).
-  pure def usageMap(st: Set[Obj], devs: Set[int]): int -> int = devs.mapBy(x => usage(st, x))
-  // Deleting objects releases what their payers paid for them (`gone` is
-  // part of the store they are deleted from).
-  pure def release(u: int -> int, gone: Set[Obj]): int -> int = u.keys().mapBy(d => u.get(d) - usage(gone, d))
+  // source, `u`, computed once per round from the slots (every payer is a
+  // device, so the total is the sum of `u`).
   pure def sumOf(u: int -> int, devs: Set[int]): int = devs.fold(0, (a, x) => a + u.get(x))
   // "Above the average" is u(s) * n > sum, with n the number of sources that
   // occupy anything. Both comparisons here are written as sums over the
@@ -164,32 +204,32 @@ module relay {
   // Each round removes one publication of the victim; for the reason given at
   // rule 1, SOURCE_BYTES rounds always suffice, and a bus still over its limit
   // after them has the object refused.
-  // It also returns the usage of each source in the resulting store, which
-  // the relay keeps (`used`).
-  def evictBus(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool, used: int -> int } = {
-    val r = evictBusRounds(st, keep)
-    val u = usageMap(r.st, DEVS)
-    { st: r.st, refused: r.refused or sumOf(u, DEVS) > BUS_BYTES, unfair: r.unfair, used: u }
+  // The slots `m` follow the store through every round.
+  def evictBus(st: Set[Obj], m: Bytes, keep: Obj): { st: Set[Obj], m: Bytes, refused: bool, unfair: bool } = {
+    val r = evictBusRounds(st, m, keep)
+    { ...r, refused: r.refused or sumOf(usageOf(r.m), DEVS) > BUS_BYTES }
   }
-  def evictBusRounds(st: Set[Obj], keep: Obj): { st: Set[Obj], refused: bool, unfair: bool } =
-    range(0, SOURCE_BYTES).foldl({ st: st, refused: false, unfair: false }, (acc, i) => {
-      val u = usageMap(acc.st, DEVS)
+  def evictBusRounds(st: Set[Obj], m: Bytes, keep: Obj): { st: Set[Obj], m: Bytes, refused: bool, unfair: bool } =
+    range(0, SOURCE_BYTES).foldl({ st: st, m: m, refused: false, unfair: false }, (acc, i) => {
+      val u = usageOf(acc.m)
       if (acc.refused or sumOf(u, DEVS) <= BUS_BYTES) acc
       else {
         val v = victim(acc.st, u, keep)
         if (v == 0) { ...acc, refused: true }
         else {
           val old = pubsOf(acc.st, v).exclude(Set(keep))
-            .fold({ a: MAX_ARR + 1 }, (m, o) => if (o.arr < m.a) { a: o.arr } else m).a
-          { st: acc.st.filter(o => not(o.kind == "pub" and o.src == v and o.arr == old)),
-            refused: false, unfair: acc.unfair or unfairOf(u, v, payer(keep)) }
+            .fold({ a: MAX_ARR + 1 }, (mm, o) => if (o.arr < mm.a) { a: o.arr } else mm).a
+          val gone = acc.st.filter(o => o.kind == "pub" and o.src == v and o.arr == old)
+          { st: acc.st.exclude(gone), m: without(acc.m, gone), refused: false,
+            unfair: acc.unfair or unfairOf(u, v, payer(keep)) }
         }
       }
     })
 
-  // Store `o` under the quota rules. Returns the new store, whether `o` was
-  // refused, and the step properties violated on the way.
-  def admit(st: Set[Obj], o: Obj): { st: Set[Obj], refused: bool, bad: Set[str], tags: Set[str], used: int -> int } = {
+  // Store `o` under the quota rules, from the store `st` with the slots `m`.
+  // Returns whether `o` was refused, the store and slots if it is accepted,
+  // and the step properties violated on the way.
+  def admit(st: Set[Obj], m: Bytes, o: Obj): { st: Set[Obj], bytes: Bytes, refused: bool, bad: Set[str], tags: Set[str] } = {
     val s = payer(o)
     val st1 = st.union(Set(o))
     // Rule 2: grants are never evicted for publications; a source whose
@@ -198,18 +238,20 @@ module relay {
     val grantsOver = o.kind == "grant" and grantsOf(st1, s).size() > SOURCE_BYTES and MUTANT != "evict_grant"
     val st2 = st1
     // Rule 1. Mutant "over_quota": the per-source limit is not enforced.
-    val st3 = if (MUTANT == "over_quota") st2 else evictOwn(st2, s, if (o.kind == "req") 0 else o.ch, o)
-    val ownOver = usage(st3, s) > SOURCE_BYTES and MUTANT != "over_quota"
+    val m1 = withObj(m, o)
+    val e1 = if (MUTANT == "over_quota") { st: st2, m: m1 } else evictOwn(st2, m1, s, if (o.kind == "req") 0 else o.ch, o)
+    val st3 = e1.st
+    val ownOver = usageOf(e1.m).get(s) > SOURCE_BYTES and MUTANT != "over_quota"
     val ruleOneLost = st2.filter(x => not(st3.contains(x)))
-    val b = evictBus(st3, o)
+    val b = evictBus(st3, e1.m, o)
     // Rule 3: an object larger than the limit by itself is refused.
     val tooBig = sizeOf(o) > SOURCE_BYTES and MUTANT != "over_quota"
     val refused = tooBig or grantsOver or ownOver or b.refused
     val lost = st.filter(x => not(b.st.contains(x)))
     {
-      st: if (refused) st else b.st,
+      st: b.st,
+      bytes: b.m,
       refused: refused,
-      used: b.used,
       bad: (if (not(refused) and b.unfair) Set("fairShare") else Set())
         .union(if (not(refused) and ruleOneLost.exists(x => payer(x) != s)) Set("evictsOnlyOwn") else Set())
         .union(if (not(refused) and lost.exists(x => x.kind == "grant")) Set("grantsKept") else Set()),
@@ -238,7 +280,7 @@ module relay {
 
   action init = all {
     relay' = {
-      served: true, cpNo: 1, cpMax: 1, revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), used: DEVS.mapBy(d => 0),
+      served: true, cpNo: 1, cpMax: 1, revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), bytes: NO_BYTES,
       hi: tuples(DEVS, CHANS).mapBy(k => 0), dep: tuples(DEVS, CHANS).mapBy(k => 0), arr: 0, joins: List(), online: Set(),
     },
     cps' = Map(1 -> Set()),
@@ -276,18 +318,17 @@ module relay {
     // "retain_all": nothing is deleted for depth.
     val trimmed = r.store.filter(x => MUTANT == "retain_all" or not(x.kind == "pub" and x.src == o.src and x.ch == o.ch
       and chanPubs.filter(y => y.no > x.no).size() + (if ((newest or retain) and o.no > x.no) 1 else 0) >= depth))
-    val a = if (retain) admit(trimmed, o2) else { st: trimmed, refused: false, bad: Set(), tags: Set(), used: r.used }
-    val stored = if (a.refused) r.store else a.st
-    // The new usage, source by source (an integer per source, not a choice
-    // between whole maps, which is cheaper for the solver).
-    val gone = r.store.exclude(trimmed)
-    val used2 = DEVS.mapBy(d => if (not(retain)) r.used.get(d) - usage(gone, d)
-                                else if (a.refused) r.used.get(d) else a.used.get(d))
+    val trimmedBytes = without(r.bytes, r.store.exclude(trimmed))
+    // `admit` matters only when the publication is retained.
+    val a0 = admit(trimmed, trimmedBytes, o2)
+    val a = { ...a0, refused: retain and a0.refused, bad: if (retain) a0.bad else Set(), tags: if (retain) a0.tags else Set() }
+    val stored = if (not(retain)) trimmed else if (a.refused) r.store else a.st
+    val bytes2 = pick(not(retain), trimmedBytes, pick(a.refused, r.bytes, a.bytes))
     val rs = if (retain and a.refused) Set() else receivers(stored, o)
     all {
       verified(o), r.served, not(refusedFrom), o.kind == "pub", r.arr < MAX_ARR,
       commitWith(
-        { ...r, store: stored, used: used2,
+        { ...r, store: stored, bytes: bytes2,
           arr: if (retain and not(a.refused)) r.arr + 1 else r.arr,
           hi: if (newest and not(a.refused)) r.hi.put(key, o.no) else r.hi,
           dep: if (newest and not(a.refused)) r.dep.put(key, o.depth) else r.dep },
@@ -309,7 +350,7 @@ module relay {
     val replaces = old.forall(x => o.gen > x.gen) or MUTANT == "grant_downgrade"
     val refusedFor = (r.revoked.contains(o.src) or r.revoked.contains(o.reader)) and MUTANT != "accept_revoked"
     val o2 = { ...o, arr: r.arr + 1 }
-    val a = admit(r.store.exclude(old), o2)
+    val a = admit(r.store.exclude(old), without(r.bytes, old), o2)
     val online = r.online.contains(o.reader)
     val answered = r.store.filter(x => x.kind == "req" and x.reader == o.reader and x.src == o.src
       and x.ch == o.ch and x.no == o.no and o.no > 0)
@@ -318,8 +359,7 @@ module relay {
     all {
       verified(o), r.served, not(refusedFor), o.kind == "grant", o.src != o.reader, replaces,
       r.arr < MAX_ARR,
-      commitWith({ ...r, store: st, used: DEVS.mapBy(d => if (a.refused) r.used.get(d)
-                     else if (online) a.used.get(d) - usage(a.st.filter(x => answered.contains(x)), d) else a.used.get(d)),
+      commitWith({ ...r, store: st, bytes: pick(a.refused, r.bytes, pick(online, without(a.bytes, answered), a.bytes)),
                    arr: if (a.refused) r.arr else r.arr + 1 },
         a.bad.union(if (not(o.ok)) Set("onlyVerified") else Set())
           .union(if (online and not(a.refused) and r.revoked.contains(o.reader)) Set("nothingForRevoked") else Set())
@@ -337,11 +377,11 @@ module relay {
               else r.store.filter(x => x.kind == "req" and x.reader == o.reader and x.src == o.src and x.ch == o.ch)
     val refusedFrom = (r.revoked.contains(o.reader) or r.revoked.contains(o.src)) and MUTANT != "accept_revoked"
     val o2 = { ...o, arr: r.arr + 1 }
-    val a = admit(r.store.exclude(old), o2)
+    val a = admit(r.store.exclude(old), without(r.bytes, old), o2)
     all {
       verified(o), r.served, not(refusedFrom), o.kind == "req", o.src != o.reader, r.arr < MAX_ARR,
       commitWith({ ...r, store: if (a.refused) r.store else a.st,
-                   used: DEVS.mapBy(d => if (a.refused) r.used.get(d) else a.used.get(d)),
+                   bytes: pick(a.refused, r.bytes, a.bytes),
                    arr: if (a.refused) r.arr else r.arr + 1 },
         a.bad.union(if (not(o.ok)) Set("onlyVerified") else Set()), a.tags),
     }
@@ -355,7 +395,6 @@ module relay {
       verified(o), r.served, o.kind == "call", o.src != o.reader, r.arr < MAX_ARR,
       not(r.revoked.contains(o.src)) or MUTANT == "accept_revoked",
       commitWith({ ...r, store: if (MUTANT == "store_call") r.store.union(Set({ ...o, arr: r.arr + 1 })) else r.store,
-                   used: if (MUTANT == "store_call") usageMap(r.store.union(Set({ ...o, arr: r.arr + 1 })), DEVS) else r.used,
                    arr: if (MUTANT == "store_call") r.arr + 1 else r.arr },
         if (r.online.contains(o.reader) and r.revoked.contains(o.reader)) Set("nothingForRevoked") else Set(),
         if (r.online.contains(o.reader)) Set("callForwarded") else Set("callRefused")),
@@ -377,7 +416,7 @@ module relay {
       r.served, not(r.online.contains(d)),
       not(r.revoked.contains(d)) or MUTANT == "accept_revoked",
       commitWith({ ...r, online: r.online.union(Set(d)), store: r.store.exclude(answered),
-                   used: release(r.used, answered) },
+                   bytes: without(r.bytes, answered) },
         given.fold(Set(), (acc, p) => acc.union(
           if (p.src != d and not(hasGrant(r.store, p.src, p.ch, d))) Set("servedOnlyGranted") else Set()))
           .union(if (r.revoked.contains(d) and (given != Set() or mine != Set())) Set("nothingForRevoked") else Set()),
@@ -423,13 +462,13 @@ module relay {
     val purge = r.store.filter(x => MUTANT == "keep_revoked"
       or not(rev.contains(x.src) or (x.kind != "pub" and rev.contains(x.reader))))
     val cleared = unlisted and MUTANT != "keep_unserved"
-    val used2 = DEVS.mapBy(d => if (cleared) 0 else r.used.get(d) - usage(r.store.exclude(purge), d))
+    val bytes2 = pick(cleared, NO_BYTES, without(r.bytes, r.store.exclude(purge)))
     all {
       cps.keys().contains(n), n > r.cpNo or (MUTANT == "cp_rollback" and n != r.cpNo),
       commitWith(
-        if (cleared) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), used: used2, online: Set(), joins: List() }
-        else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge, used: used2 }
-        else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, used: used2, online: r.online.exclude(rev) },
+        if (cleared) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), bytes: bytes2, online: Set(), joins: List() }
+        else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge, bytes: bytes2 }
+        else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, bytes: bytes2, online: r.online.exclude(rev) },
         Set(),
         (if (purge != r.store) Set("revokedPurged") else Set())
           .union(if (unlisted) Set("unlisted") else Set())),
@@ -517,11 +556,21 @@ module relay {
     not(relay.revoked.contains(o.src)) and (o.kind == "pub" or not(relay.revoked.contains(o.reader))))
     and not(broken.contains("nothingForRevoked"))
   // R-REL-4: no source exceeds its limit, and the bus does not exceed its own.
-  // Every stored object has exactly one payer, a device, so the bus total is
-  // the sum of the usage of the sources; the relay keeps that usage in `used`.
+  // The slots hold exactly the stored objects (each object is in the slot of
+  // its key, with its size), and the usage they give is within the limits:
+  // per source, and for the bus as the sum over the sources (every object
+  // has exactly one payer, a device).
+  def bytesMatch(r: Relay): bool = and {
+    r.store.forall(o => o.kind == "pub" or ((o.kind == "grant" or o.kind == "req") and o.src != o.reader)),
+    PSLOTS.forall(k => (r.bytes.pub.get(k) > 0) == r.store.exists(o => atP(o, k))),
+    PSLOTS.forall(k => r.store.forall(o => atP(o, k) implies r.bytes.pub.get(k) == o.size)),
+    GSLOTS.forall(k => (r.bytes.grant.get(k) == 1) == r.store.exists(o => atG(o, k))),
+    GSLOTS.forall(k => (r.bytes.req.get(k) == 1) == r.store.exists(o => atQ(o, k))),
+  }
   val quotasHold = and {
-    DEVS.forall(s => relay.used.get(s) == usage(relay.store, s) and relay.used.get(s) <= SOURCE_BYTES),
-    sumOf(relay.used, DEVS) <= BUS_BYTES,
+    bytesMatch(relay),
+    DEVS.forall(d => bytesOf(relay.bytes, d) <= SOURCE_BYTES),
+    sumOf(usageOf(relay.bytes), DEVS) <= BUS_BYTES,
   }
   // S14, B.10: a source within its fair share never loses data because of
   // another source (checked at every eviction).

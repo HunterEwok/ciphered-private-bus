@@ -112,16 +112,18 @@ the per-source limit is refused, so `SOURCE_BYTES` rounds always suffice; a stor
 after them has the object refused. Each round computes the usage of every source once. This keeps
 the steps that store objects small enough for Apalache at the size of `small`.
 
-The relay keeps the usage of each source in `used`, as a real relay keeps a byte counter per source:
-storing objects sets it from the store after eviction, deleting objects subtracts what their payers
-paid for them, and every update is written source by source. Every stored object has exactly one
-payer, a device, so the bus total is the sum of `used`, and `quotasHold` states the per-source limit
-on `used` together with `used` matching the store for each source, and the bus limit on the sum of
-`used`. The solver cannot handle a single sum over every object the store may hold at the size of
-`small` (the time grows exponentially with the number of possible objects: 18 objects take seconds,
-36 more than four minutes, `small` has 54), while sums over the objects of one source and over the
-three counters stay small. The quota rules compare usages without multiplying two variables (a
-source above the average is a positive sum of differences), which keeps the arithmetic linear.
+The relay accounts by key slot: `bytes` holds, for each publication slot (source, channel, number)
+and each grant and key request slot (source, channel, reader, never the source itself), the bytes
+of the object in it, 0 for an empty slot. Storing an object writes its slot, deleting one clears it,
+and every update is written slot by slot. The usage of a source is the plain sum of its slots, and
+`quotasHold` states that the slots hold exactly the stored objects, the per-source limit, and the
+bus limit on the sum of the usages (every object has exactly one payer, a device). A sum whose terms
+depend on whether an object is present makes the solver enumerate the possible sets of objects:
+over the 54 objects the store may hold at the size of `small` it does not finish, while the same
+bound over slot bytes held in the state takes seconds. The quota rules compare usages without
+multiplying two variables (a source above the average is a positive sum of differences), which
+keeps the arithmetic linear. Mutant `evict_other` gets `MAX_ARR` rounds of rule 1, since removing
+publications of other sources does not lower the usage of the payer.
 
 ## Running
 

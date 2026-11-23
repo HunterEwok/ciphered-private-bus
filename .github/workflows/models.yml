@@ -258,7 +258,7 @@ jobs:
         run: models/fetch-evaluator.sh
       - name: Type check
         working-directory: models/relay
-        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt && quint typecheck view.qnt
       - name: Simulate safety, probes, and witnesses; run the scenarios
         run: python3 models/relay/check.py
 

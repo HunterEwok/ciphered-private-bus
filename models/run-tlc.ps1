@@ -17,6 +17,8 @@
 # Ctrl+C stops only the progress output; TLC keeps running. To stop TLC, use
 # Stop-Process with the PID the script prints. To continue a stopped run from
 # its last checkpoint, pass -Recover with the checkpoint folder (states\<date>).
+# A run that ends with a verdict deletes its checkpoint and temporary files;
+# the log and the summary stay.
 #
 # -Probes checks the translation to TLA+ instead: it runs TLC on every probe
 # instance (each must violate `safety`) and on every witness (each must be
@@ -292,4 +294,12 @@ $summary = @(
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }
+# A run with a verdict needs no checkpoint: free the disk. A run without one
+# keeps its checkpoint under states, so it can continue with -Recover.
+if ($ok -or $violated) {
+    foreach ($d in @("states", "tmp")) {
+        $path = Join-Path $RunDir $d
+        if (Test-Path $path) { Remove-Item -Recurse -Force -Path $path -ErrorAction SilentlyContinue }
+    }
+}
 if ($ok) { exit 0 } elseif ($violated) { exit 2 } else { exit 3 }

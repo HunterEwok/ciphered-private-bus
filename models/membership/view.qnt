@@ -2,199 +2,429 @@
 // Copyright (C) 2026 HunterEwok
 //
 // A state view of the membership model for exhaustive TLC runs (TLC option
-// VIEW) of the instance tiny_tlc. TLC stores and expands one state per value
-// of `viewOf`; module `bisim` below proves with Apalache that states with
-// equal views are interchangeable for `safety`, so the reduced search finds a
-// violation exactly when the full one does. Valid only for MUTANT = "none"
-// and TRACK_RECV = false.
+// VIEW). TLC stores and expands one state per value of `viewOf`; `bisim`
+// proves with Apalache that states with equal views are interchangeable for
+// `safety`, so the reduced search finds a violation exactly when the full one
+// does. Valid only for MUTANT = "none", TRACK_RECV = false, |DEVICES| = 2.
 //
-// The view drops only what can never influence `safety`:
-// - the witness tags `seen`: no guard and no invariant of `safety` reads them;
-// - the Root's ghost map `rights`: it is written when a passport is issued and
-//   read by nothing (the rights a node uses are those of the passport);
-// - the processed halt proofs of a node, `recvHp`, beyond two facts: whether
-//   one is a root change proof, and whether one of another kind is of the
-//   node's current generation. proofIsObeyed reads exactly these, and they
-//   stay exact across later steps: a node only records proofs of its own
-//   generation or root change proofs, and its generation never decreases;
-// - data messages that no node can accept any more, and among data messages
-//   that differ only in the sender's checkpoint number all but the lowest
-//   number. A node accepts a message only of its own generation, which never
-//   decreases, so a message of a generation below that of every possible
-//   receiver is dead; and the checkpoint number only enters the guard
-//   "not ahead of the receiver", which the lowest number passes whenever a
-//   higher one does, while the acceptance itself does not depend on it.
-// Every other variable is kept as it is.
+// The view drops what can no longer influence `safety`:
+// - the witness tags `seen` and `root.rights`, which are write-only;
+// - `root.revoked` beyond the boolean `rootHonorsRevocation`
+//   (`root.valid.intersect(root.revoked) == Set()`);
+// - `pool.data` completely: under MUTANT = "none" and `Struct` (honest
+//   history monotonicity), `nodeAcceptData` never adds to `broken` and changes
+//   only `seen`, so `nodeSend` and `nodeAcceptData` stutter on the view;
+// - `history` beyond the two booleans `windowBounded` and `windowKeepsValid`
+//   (no action guard reads `history`, and `nodeGrant` never adds to `broken`
+//   under `Struct`);
+// - passport `dev` and `rights` fields in both `pool.pp` and per-node `pps`:
+//   `pool.pp` collapses to the count (`0`, `1`, or `2`) per needed `(gen, no)`
+//   slot (dropping non-equivocated slots of old generations `< root.gen`) and
+//   each node's `pps` collapses to its set of `(gen, no)` pairs that can still
+//   conflict (`gen == root.gen` or already equivocated);
+// - `pool.hp` beyond `(hpRc, hpGens)` (whether an `"rc"` proof exists and
+//   which live generations have a non-`"rc"` proof): under MUTANT = "none",
+//   `h.no` and `"cp"` vs `"pp"` are never distinguished;
+// - per-node `recvHp` beyond `(hasRcHp, proofObeyedOk)` (and `recvCp`,
+//   `recvPp`, `recvRc` are empty when `TRACK_RECV = false`);
+// - all fields of a permanently halted node (`forever`), and `(cp, pps)` of a
+//   temporarily halted node (`halted and not(forever)`), once `currentGeneration`
+//   holds for that node;
+// - `(cp, pps)` of any live node in a generation `g` that either already has a
+//   non-`"rc"` proof in `pool.hp` (`hpGens.contains(g)`) or is an old
+//   conflict-free generation (`g < root.gen` with no `cp`/`pp` conflict in `g`,
+//   so no halt in `g` is possible anymore);
+// - in any old generation `g < root.gen` with a conflict (`oldConflict`:
+//   `not(hpGens.contains(g))`, `hasConflict`, some unhalted node in `g`),
+//   checkpoints in `pool.cp` and live nodes' `n.cp` are projected to
+//   `(no, valid intersected with equivNos(g))` (`oldCpProjs` and `tag = "live_old"`), plus
+//   `oldCpConfl` recording which `(g, no)` slots have >= 2 checkpoints: no new
+//   records can be issued in `g`, `start`/`nextNo` and non-equivocated bits
+//   are never read, and a conflict halt at `cp.no >= 1` is enabled iff
+//   `(g, cp.no)` is in `oldCpConfl`;
+// - `n.rc` (`0` vs `1`) collapses to `0` once `pool.rc` contains both keys
+//   `{0, 1}` for `n.gen` (`rcBoth`), since either key conflicts with the other;
+// - `pool.cp` and `pool.pp` for any generation `g` where `hpGens.contains(g)`,
+//   or `g` is old and conflict-free, or neither `root` nor any unhalted node
+//   is in `g` (keeping only `poolPp` presence `0|1` when `root.gen == g` for
+//   `rootChangeRights`, `2` on equivocated slots of `oldConflict`, and
+//   `canProveGens` if a proof can still be assembled);
+// - device identity among the two symmetric devices (`nodes` collapsed to the
+//   unordered set `nodeSet: Set[NodeView]`);
+// - every field except `broken` once all nodes are permanently halted (with
+//   `rootRevOk`, `windowBoundedOk`, `windowKeepsValidOk`).
 module viewdefs {
-  type MCheckpoint = { gen: int, no: int, start: int, valid: Set[int], nextNo: int }
-  type MPassport = { gen: int, no: int, dev: str, rights: int }
-  type MRootChange = { gen: int, key: int }
-  type MHaltProof = { kind: str, gen: int, no: int }
-  type MData = { src: str, ppNo: int, gen: int, cpNo: int, ch0: bool }
-  type MNode = {
-    gen: int, cp: MCheckpoint, pps: Set[MPassport], rc: int, halted: bool, forever: bool,
-    recvCp: Set[MCheckpoint], recvPp: Set[MPassport], recvRc: Set[MRootChange], recvHp: Set[MHaltProof],
+  const V_DEVICES: Set[str]
+  const V_MAX_GEN: int
+  const V_MAX_NO: int
+  const V_WINDOW: int
+
+  type VPassport = { gen: int, no: int, dev: str, rights: int }
+  type VCheckpoint = { gen: int, no: int, start: int, valid: Set[int], nextNo: int }
+  type VRootChange = { gen: int, key: int }
+  type VHaltProof = { kind: str, gen: int, no: int }
+  type VData = { src: str, ppNo: int, gen: int, cpNo: int, ch0: bool }
+  type VNode = {
+    gen: int,
+    cp: VCheckpoint,
+    pps: Set[VPassport],
+    rc: int,
+    halted: bool,
+    forever: bool,
+    recvCp: Set[VCheckpoint],
+    recvPp: Set[VPassport],
+    recvRc: Set[VRootChange],
+    recvHp: Set[VHaltProof],
   }
-  type MRoot = { gen: int, cpNo: int, nextNo: int, valid: Set[int], rights: int -> int, revoked: Set[int] }
-  type MPool = { cp: Set[MCheckpoint], pp: Set[MPassport], rc: Set[MRootChange], hp: Set[MHaltProof], data: Set[MData] }
+  type VRoot = {
+    gen: int,
+    cpNo: int,
+    nextNo: int,
+    valid: Set[int],
+    rights: int -> int,
+    revoked: Set[int],
+  }
+  type VPool = {
+    cp: Set[VCheckpoint],
+    pp: Set[VPassport],
+    rc: Set[VRootChange],
+    hp: Set[VHaltProof],
+    data: Set[VData],
+  }
 
   type NodeView = {
-    gen: int, cp: MCheckpoint, pps: Set[MPassport], rc: int, halted: bool, forever: bool,
-    recvCp: Set[MCheckpoint], recvPp: Set[MPassport], recvRc: Set[MRootChange], rcProof: bool, curProof: bool,
+    tag: str,
+    gen: int,
+    cp: VCheckpoint,
+    pps: Set[(int, int)],
+    rc: int,
+    halted: bool,
+    forever: bool,
+    hasRcHp: bool,
+    proofObeyedOk: bool,
+    curGenOk: bool,
+    cacheOk: bool,
   }
-  type RootView = { gen: int, cpNo: int, nextNo: int, valid: Set[int], revoked: Set[int] }
-  type View = { nodes: str -> NodeView, root: RootView, pool: MPool, history: Set[MCheckpoint], broken: Set[str] }
-
-  pure def nodeView(n: MNode): NodeView = {
-    gen: n.gen, cp: n.cp, pps: n.pps, rc: n.rc, halted: n.halted, forever: n.forever,
-    recvCp: n.recvCp, recvPp: n.recvPp, recvRc: n.recvRc,
-    rcProof: n.recvHp.exists(h => h.kind == "rc"),
-    curProof: n.recvHp.exists(h => h.kind != "rc" and h.gen == n.gen),
+  type RootView = {
+    gen: int,
+    cpNo: int,
+    nextNo: int,
+    valid: Set[int],
+    revOk: bool,
   }
-  pure def sameData(x: MData, m: MData): bool =
-    x.src == m.src and x.ppNo == m.ppNo and x.gen == m.gen and x.ch0 == m.ch0
-  // A message some device other than its sender may still accept: one whose
-  // generation that device has not passed.
-  pure def liveMsg(ns: str -> MNode, m: MData): bool =
-    ns.keys().exists(d => d != m.src and ns.get(d).gen <= m.gen)
-  pure def liveData(ns: str -> MNode, data: Set[MData]): Set[MData] =
-    data.filter(m => liveMsg(ns, m) and data.forall(x => not(sameData(x, m) and x.cpNo < m.cpNo)))
+  type View = {
+    allForever: bool,
+    nodeSet: Set[NodeView],
+    root: RootView,
+    poolCp: Set[VCheckpoint],
+    oldCpProjs: Set[VCheckpoint],
+    oldCpConfl: Set[(int, int)],
+    poolPp: (int, int) -> int,
+    poolRc: Set[VRootChange],
+    hpRc: bool,
+    hpGens: Set[int],
+    canProveGens: Set[int],
+    windowBoundedOk: bool,
+    windowKeepsValidOk: bool,
+    broken: Set[str],
+  }
 
-  pure def viewOf(ns: str -> MNode, r: MRoot, p: MPool, h: Set[MCheckpoint], b: Set[str]): View = {
-    nodes: ns.keys().mapBy(d => nodeView(ns.get(d))),
-    root: { gen: r.gen, cpNo: r.cpNo, nextNo: r.nextNo, valid: r.valid, revoked: r.revoked },
-    pool: { ...p, data: liveData(ns, p.data) },
-    history: h,
-    broken: b,
+  pure val V_GENS = 1.to(V_MAX_GEN)
+  pure val V_NOS = 1.to(V_MAX_NO)
+  pure val V_SLOTS = tuples(V_GENS, V_NOS)
+  pure def vGenesis(g: int): VCheckpoint = { gen: g, no: 0, start: 1, valid: Set(), nextNo: 1 }
+  pure def oldCpProj(c: VCheckpoint, eNos: Set[int]): VCheckpoint =
+    { gen: c.gen, no: c.no, start: 1, valid: c.valid.intersect(eNos), nextNo: 1 }
+  pure def vValidIn(p: VPassport, c: VCheckpoint): bool =
+    p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
+  pure def curGenOk(n: VNode): bool = n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen)
+  pure def cacheOk(n: VNode): bool = n.pps.forall(p => vValidIn(p, n.cp))
+  pure val FOREVER_NODE: NodeView = {
+    tag: "forever",
+    gen: 0,
+    cp: vGenesis(0),
+    pps: Set(),
+    rc: 0,
+    halted: true,
+    forever: true,
+    hasRcHp: true,
+    proofObeyedOk: true,
+    curGenOk: true,
+    cacheOk: true,
+  }
+  pure val ZERO_ROOT: RootView = { gen: 0, cpNo: 0, nextNo: 0, valid: Set(), revOk: true }
+
+  pure def nodeViewOf(n: VNode, rGen: int, hpGens: Set[int], cleanOld: Set[int],
+                      oldConflict: Set[int], equivPp: Set[(int, int)], rcBoth: Set[int]): NodeView = {
+    val hasRcHp = n.recvHp.exists(x => x.kind == "rc")
+    val proofObeyedOk = n.recvHp.exists(x => x.gen == n.gen or x.kind == "rc") implies n.halted
+    val cg = curGenOk(n)
+    val co = cacheOk(n)
+    val effRc = if (n.rc >= 0 and rcBoth.contains(n.gen)) 0 else n.rc
+    if (n.forever and n.halted and cg) FOREVER_NODE
+    else if (n.halted and not(n.forever) and cg) {
+      tag: "halted",
+      gen: n.gen,
+      cp: vGenesis(n.gen),
+      pps: Set(),
+      rc: effRc,
+      halted: true,
+      forever: false,
+      hasRcHp: hasRcHp,
+      proofObeyedOk: true,
+      curGenOk: true,
+      cacheOk: true,
+    } else if (not(n.halted) and not(n.forever) and (hpGens.contains(n.gen) or cleanOld.contains(n.gen)) and cg and co) {
+      tag: if (hpGens.contains(n.gen)) "live_hp" else "live_clean",
+      gen: n.gen,
+      cp: vGenesis(n.gen),
+      pps: Set(),
+      rc: effRc,
+      halted: false,
+      forever: false,
+      hasRcHp: hasRcHp,
+      proofObeyedOk: proofObeyedOk,
+      curGenOk: true,
+      cacheOk: true,
+    } else if (not(n.halted) and not(n.forever) and oldConflict.contains(n.gen) and cg and co) {
+      val eNos = V_NOS.filter(k => equivPp.contains((n.gen, k)))
+      {
+        tag: "live_old",
+        gen: n.gen,
+        cp: oldCpProj(n.cp, eNos),
+        pps: n.pps.filter(x => equivPp.contains((x.gen, x.no))).map(x => (x.gen, x.no)),
+        rc: effRc,
+        halted: false,
+        forever: false,
+        hasRcHp: hasRcHp,
+        proofObeyedOk: proofObeyedOk,
+        curGenOk: true,
+        cacheOk: true,
+      }
+    } else {
+      tag: "live",
+      gen: n.gen,
+      cp: n.cp,
+      pps: n.pps.filter(x => x.gen == rGen or equivPp.contains((x.gen, x.no))).map(x => (x.gen, x.no)),
+      rc: effRc,
+      halted: n.halted,
+      forever: n.forever,
+      hasRcHp: hasRcHp,
+      proofObeyedOk: proofObeyedOk,
+      curGenOk: cg,
+      cacheOk: co,
+    }
+  }
+
+  pure def viewOf(ns: str -> VNode, r: VRoot, p: VPool, h: Set[VCheckpoint], b: Set[str]): View = {
+    val isForever = V_DEVICES.mapBy(d => {
+      val n = ns.get(d)
+      n.forever and n.halted and curGenOk(n)
+    })
+    val rootRevOk = r.valid.intersect(r.revoked) == Set()
+    val windowBoundedOk = h.forall(c => c.nextNo - c.start <= V_WINDOW)
+    val windowKeepsValidOk = h.forall(c =>
+      (c.gen == r.gen and c.no == r.cpNo) implies (c.valid == r.valid and c.nextNo == r.nextNo))
+    val allForever = V_DEVICES.forall(d => isForever.get(d)) and rootRevOk and windowBoundedOk and windowKeepsValidOk
+    if (allForever) {
+      allForever: true,
+      nodeSet: Set(FOREVER_NODE),
+      root: ZERO_ROOT,
+      poolCp: Set(),
+      oldCpProjs: Set(),
+      oldCpConfl: Set(),
+      poolPp: V_SLOTS.mapBy(s => 0),
+      poolRc: Set(),
+      hpRc: true,
+      hpGens: Set(),
+      canProveGens: Set(),
+      windowBoundedOk: true,
+      windowKeepsValidOk: true,
+      broken: b,
+    } else {
+      val liveGens = V_DEVICES.filter(d => not(isForever.get(d))).map(d => ns.get(d).gen).union(Set(r.gen))
+      val minGen = liveGens.fold(V_MAX_GEN, (m, g) => if (g < m) g else m)
+      val hpGens = V_GENS.filter(g => g >= minGen and p.hp.exists(x => x.kind != "rc" and x.gen == g))
+      val cpConflict = V_GENS.mapBy(g =>
+        p.cp.exists(x => x.gen == g and p.cp.exists(y => y.gen == g and y.no == x.no and x != y)))
+      val ppConflict = V_GENS.mapBy(g =>
+        p.pp.exists(x => x.gen == g and p.pp.exists(y => y.gen == g and y.no == x.no and x != y)))
+      val hasConflict = V_GENS.mapBy(g => cpConflict.get(g) or ppConflict.get(g))
+      val cleanOld = V_GENS.filter(g => g < r.gen and not(hpGens.contains(g)) and not(hasConflict.get(g)))
+      val hasUnhalted = V_GENS.mapBy(g => V_DEVICES.exists(d => not(ns.get(d).halted) and ns.get(d).gen == g))
+      val oldConflict = V_GENS.filter(g =>
+        g < r.gen and not(hpGens.contains(g)) and hasConflict.get(g) and hasUnhalted.get(g))
+      val cpNeeded = V_GENS.filter(g =>
+        not(hpGens.contains(g)) and not(cleanOld.contains(g)) and not(oldConflict.contains(g))
+        and (r.gen == g or hasUnhalted.get(g)))
+      val canProveGens = V_GENS.filter(g =>
+        g >= minGen and not(hpGens.contains(g)) and not(cpNeeded.contains(g)) and not(oldConflict.contains(g))
+        and hasConflict.get(g))
+      val equivPp = V_SLOTS.filter(s => p.pp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2)
+      val rcBoth = V_GENS.filter(g => p.rc.contains({ gen: g, key: 0 }) and p.rc.contains({ gen: g, key: 1 }))
+      {
+        allForever: false,
+        nodeSet: V_DEVICES.map(d => nodeViewOf(ns.get(d), r.gen, hpGens, cleanOld, oldConflict, equivPp, rcBoth)),
+        root: {
+          gen: r.gen,
+          cpNo: r.cpNo,
+          nextNo: r.nextNo,
+          valid: r.valid,
+          revOk: rootRevOk,
+        },
+        poolCp: p.cp.filter(c => cpNeeded.contains(c.gen)),
+        oldCpProjs: p.cp.filter(c => oldConflict.contains(c.gen))
+          .map(c => oldCpProj(c, V_NOS.filter(k => equivPp.contains((c.gen, k))))),
+        oldCpConfl: V_SLOTS.filter(s =>
+          oldConflict.contains(s._1) and p.cp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2),
+        poolPp: V_SLOTS.mapBy(s =>
+          if (cpNeeded.contains(s._1)) {
+            val cnt = p.pp.filter(x => x.gen == s._1 and x.no == s._2).size()
+            if (s._1 < r.gen and cnt < 2) 0 else cnt
+          } else if (oldConflict.contains(s._1)) {
+            if (equivPp.contains(s)) 2 else 0
+          } else if (s._1 == r.gen and p.pp.exists(x => x.gen == s._1 and x.no == s._2)) 1
+          else 0),
+        poolRc: p.rc,
+        hpRc: p.hp.exists(x => x.kind == "rc"),
+        hpGens: hpGens,
+        canProveGens: canProveGens,
+        windowBoundedOk: windowBoundedOk,
+        windowKeepsValidOk: windowKeepsValidOk,
+        broken: b,
+      }
+    }
   }
 }
 
-// The TLC instance: the constants of `tiny_tlc` in instances.qnt.
+// The instance `tiny_tlc` of instances.qnt with its view, for TLC. The
+// constants must stay those of `tiny_tlc`.
 module tiny_tlc_view {
   import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, WINDOW = 2, MUTANT = "none",
                     TRACK_RECV = false).* from "./membership"
-  import viewdefs.*
-  val safetyView = viewOf(nodes, root, pool, history, broken)
+  import viewdefs(V_DEVICES = Set("a", "b"), V_MAX_GEN = 2, V_MAX_NO = 2, V_WINDOW = 2).*
+  // Force TLC 1.7.4 to normalize every lazy map (FcnLambdaValue) in the state
+  // before StatePoolWriter spills states to disk when VIEW drops or wraps them.
+  val safetyView = {
+    val v = viewOf(nodes, root, pool, history, broken)
+    if (nodes != Map() and (root.rights == Map() or root.rights != Map())) v else v
+  }
 }
 
 // Proof that the view is exact for `safety` (R-VER-3), checked by Apalache on
 // two copies A and B of the model:
-//   O1. init implies Struct                             (initStruct, 0 steps, invariant structA)
-//   O2. Struct, safety and one step imply Struct         (initSafe, stepX, 1 step, invariant structA)
+//   O1. init implies Struct                               (initStruct, 0 steps, invariant structA)
+//   O2. Struct, safety and one step imply Struct          (initSafe, stepX, 1 step, invariant structA)
 //   O3. two Struct states with equal views agree on safety (initPair, 0 steps, invariant sameSafety)
 //   O4. for two Struct states with equal views, A safe, every step of A is
 //       answered by B with no step or one step, and the views are equal again
 //       (initPair, matchX, 2 steps, invariant matched).
-// Why this suffices: take a shortest behaviour of the model that ends in a
-// state violating `safety`. Every earlier state is safe, so by O1 and O2 it
-// satisfies Struct, and so does the last state (O2 from the one before it).
-// TLC with the view reaches a state of the same view as the initial state
-// (it is the initial state). If TLC holds a state r with the view of the i-th
-// state s, then r is reachable and every state on TLC's path to r is safe
-// (otherwise TLC has already reported a violation), so r satisfies Struct,
-// and by O4 the step from s to the next state is answered from r by a state
-// TLC also generates, with the same view as the next state. By induction TLC
-// generates a state with the view of the last state, which violates `safety`
-// by O3.
-//
-// Struct is the bounded types of the variables as inductive.qnt states them
-// (including the shape of every checkpoint and the window of the Root's next
-// one, which keep issued checkpoints in that shape), one passport per number
-// in a node's cache, one honest checkpoint per generation and number, and
-// processed proofs other than root change proofs of the node's generation or
-// an older one. Two of these facts are also parts of `safety`: the window
-// bound of every issued checkpoint (windowBounded) and one passport per number
-// in a cache (the conflict half of cacheConsistent). O1 and O2 prove them like
-// every other fact of Struct, so no part of `safety` is assumed; the per-number
-// cache fact is what makes the answer to an acceptance deterministic. `broken`
-// is left arbitrary.
-//
-// B's answer: no step when A's step left the views equal; otherwise the step
-// of B that the case analysis below gives. Several actions of the model pick
-// a value inside (a passport number, a checkpoint, a passport, a proof); B
-// takes the same action with A's value fixed, written as the action's body
-// with that value, because another value would make a different state. For
-// data acceptance B takes the message of the same sender, passport number,
-// generation and channel with the lowest checkpoint number, which the view
-// keeps.
+// Struct is a set of facts about the model's counters and structure. It does
+// not assume `broken == Set()`; one of its facts, one passport per number in a
+// node's cache, is also the conflict half of `cacheConsistent`, and O1 and O2
+// prove it like every other fact of Struct.
 module bisim {
   const P_DEVICES: Set[str]
   const P_MAX_GEN: int
   const P_MAX_NO: int
   const P_WINDOW: int
-  import membership(DEVICES = P_DEVICES, MAX_GEN = P_MAX_GEN, MAX_NO = P_MAX_NO, WINDOW = P_WINDOW, MUTANT = "none",
-                    TRACK_RECV = false) as A from "./membership"
-  import membership(DEVICES = P_DEVICES, MAX_GEN = P_MAX_GEN, MAX_NO = P_MAX_NO, WINDOW = P_WINDOW, MUTANT = "none",
-                    TRACK_RECV = false) as B from "./membership"
-  import viewdefs.*
+  import membership(DEVICES = P_DEVICES, MAX_GEN = P_MAX_GEN, MAX_NO = P_MAX_NO, WINDOW = P_WINDOW,
+                    MUTANT = "none", TRACK_RECV = false) as A from "./membership"
+  import membership(DEVICES = P_DEVICES, MAX_GEN = P_MAX_GEN, MAX_NO = P_MAX_NO, WINDOW = P_WINDOW,
+                    MUTANT = "none", TRACK_RECV = false) as B from "./membership"
+  import viewdefs(V_DEVICES = P_DEVICES, V_MAX_GEN = P_MAX_GEN, V_MAX_NO = P_MAX_NO, V_WINDOW = P_WINDOW).*
 
   // ------------------------------------------------------------ bounded types
-  pure val GENS = 1.to(P_MAX_GEN)
-  pure val NOS = 1.to(P_MAX_NO)
   pure val RIGHTS = Set(0, 1, 2, 3)
-  pure val CPS: Set[MCheckpoint] = tuples(GENS, 0.to(P_MAX_NO), 1.to(P_MAX_NO + 1), NOS.powerset(), 1.to(P_MAX_NO + 1))
+  pure val SLOTS = V_SLOTS
+  pure val BROKEN = Set("noRollback", "currentGeneration", "haltIsSticky", "haltedIsInert",
+                        "revokedIsRejected", "grantsNeedRead", "dataNeedsPublish")
+  pure val TAGS = Set("accept", "grant")
+
+  pure val CPS: Set[VCheckpoint] = tuples(V_GENS, 0.to(P_MAX_NO), 1.to(P_MAX_NO + 1), V_NOS.powerset(), 1.to(P_MAX_NO + 1))
     .map(t => { gen: t._1, no: t._2, start: t._3, valid: t._4, nextNo: t._5 })
     .filter(c => and {
-      c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= P_WINDOW,
+      c.nextNo <= c.no + 1, c.start <= c.nextNo,
       c.valid.forall(k => c.start <= k and k < c.nextNo),
     })
-  pure val PPS: Set[MPassport] = tuples(GENS, NOS, P_DEVICES, RIGHTS)
-    .map(t => { gen: t._1, no: t._2, dev: t._3, rights: t._4 })
-  pure val RCS: Set[MRootChange] = tuples(GENS, Set(0, 1)).map(t => { gen: t._1, key: t._2 })
-  pure val HPS: Set[MHaltProof] = tuples(Set("cp", "pp", "rc"), GENS, 0.to(P_MAX_NO))
+  pure val RCS: Set[VRootChange] = tuples(V_GENS, Set(0, 1)).map(t => { gen: t._1, key: t._2 })
+  pure val HPS: Set[VHaltProof] = tuples(Set("cp", "pp", "rc"), V_GENS, 0.to(P_MAX_NO))
     .map(t => { kind: t._1, gen: t._2, no: t._3 })
-  pure val DATAS: Set[MData] = tuples(P_DEVICES, NOS, GENS, 0.to(P_MAX_NO), Set(false, true))
+  pure val DATAS: Set[VData] = tuples(P_DEVICES, V_NOS, V_GENS, 0.to(P_MAX_NO), Set(false, true))
     .map(t => { src: t._1, ppNo: t._2, gen: t._3, cpNo: t._4, ch0: t._5 })
-  pure val BROKEN = Set("noRollback", "currentGeneration", "haltIsSticky", "haltedIsInert", "revokedIsRejected",
-                        "grantsNeedRead", "dataNeedsPublish")
 
-  // Membership in the types above, field by field (as in inductive.qnt).
-  pure def isCp(c: MCheckpoint): bool = and {
-    GENS.contains(c.gen), 0 <= c.no, c.no <= P_MAX_NO, 1 <= c.start, c.start <= P_MAX_NO + 1,
-    1 <= c.nextNo, c.nextNo <= P_MAX_NO + 1, c.valid.subseteq(NOS),
-    c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= P_WINDOW,
+  pure def below(s: Set[int], c: VCheckpoint): Set[int] = s.filter(k => k < c.nextNo)
+  pure def vWindowStart(valid: Set[int], nx: int): int = valid.fold(nx, (m, k) => if (k < m) k else m)
+
+  pure def isCp(c: VCheckpoint): bool = and {
+    V_GENS.contains(c.gen), 0 <= c.no, c.no <= P_MAX_NO, 1 <= c.start, c.start <= P_MAX_NO + 1,
+    1 <= c.nextNo, c.nextNo <= P_MAX_NO + 1, c.valid.subseteq(V_NOS),
+    c.nextNo <= c.no + 1, c.start <= c.nextNo,
     c.valid.forall(k => c.start <= k and k < c.nextNo),
   }
-  pure def isPp(p: MPassport): bool =
-    and { GENS.contains(p.gen), NOS.contains(p.no), P_DEVICES.contains(p.dev), RIGHTS.contains(p.rights) }
-  pure def isRc(r: MRootChange): bool = and { GENS.contains(r.gen), Set(0, 1).contains(r.key) }
-  pure def isHp(h: MHaltProof): bool =
-    and { Set("cp", "pp", "rc").contains(h.kind), GENS.contains(h.gen), 0 <= h.no, h.no <= P_MAX_NO }
-  pure def isData(m: MData): bool =
-    and { P_DEVICES.contains(m.src), NOS.contains(m.ppNo), GENS.contains(m.gen), 0 <= m.cpNo, m.cpNo <= P_MAX_NO }
+  pure def isPp(p: VPassport): bool = and {
+    V_GENS.contains(p.gen), V_NOS.contains(p.no), P_DEVICES.contains(p.dev), RIGHTS.contains(p.rights),
+  }
+  pure def isRc(r: VRootChange): bool = and { V_GENS.contains(r.gen), Set(0, 1).contains(r.key) }
+  pure def isHp(h: VHaltProof): bool = and {
+    Set("cp", "pp", "rc").contains(h.kind), V_GENS.contains(h.gen), 0 <= h.no, h.no <= P_MAX_NO,
+  }
+  pure def isData(m: VData): bool = and {
+    P_DEVICES.contains(m.src), V_NOS.contains(m.ppNo), V_GENS.contains(m.gen), 0 <= m.cpNo, m.cpNo <= P_MAX_NO,
+  }
 
   // ------------------------------------------------------------------ Struct
-  pure def nodeOk(n: MNode): bool = and {
-    GENS.contains(n.gen), isCp(n.cp), n.pps.forall(p => isPp(p)), Set(-1, 0, 1).contains(n.rc),
+  // Counter and structural bounds without `broken == Set()`: omits
+  // `currentGeneration`, `proofIsObeyed`, `rootHonorsRevocation`, `windowBounded`,
+  // `windowKeepsValid`, and the validity half of `cacheConsistent` (it keeps one
+  // passport per number in a cache, the conflict half).
+  pure def structNode(n: VNode): bool = and {
+    V_GENS.contains(n.gen), isCp(n.cp), n.pps.forall(p => isPp(p)), Set(-1, 0, 1).contains(n.rc),
     n.recvCp == Set(), n.recvPp == Set(), n.recvRc == Set(), n.recvHp.forall(h => isHp(h)),
-    // one passport per number in the cache: a conflicting passport halts the
-    // node without entering it (this makes the passport data acceptance
-    // relies on unique)
-    n.pps.forall(p => n.pps.forall(q => p.no == q.no implies p == q)),
-    // processed proofs other than root change proofs are of the node's
-    // generation or an older one (this keeps the two facts the view keeps
-    // exact when the generation grows)
+    n.pps.forall(p => n.pps.forall(q => (p.gen == q.gen and p.no == q.no) implies p == q)),
+    n.forever implies n.halted,
     n.recvHp.forall(h => h.kind == "rc" or h.gen <= n.gen),
   }
-  pure def rootOk(r: MRoot): bool = and {
-    GENS.contains(r.gen), 0 <= r.cpNo, r.cpNo <= P_MAX_NO, 1 <= r.nextNo, r.nextNo <= P_MAX_NO + 1,
+
+  pure def structRoot(r: VRoot): bool = and {
+    V_GENS.contains(r.gen), 0.to(P_MAX_NO).contains(r.cpNo), 1.to(P_MAX_NO + 1).contains(r.nextNo),
     r.nextNo <= r.cpNo + 1,
     r.valid.forall(k => 1 <= k and k < r.nextNo),
     r.revoked.forall(k => 1 <= k and k < r.nextNo),
-    r.rights.keys() == NOS.filter(k => k < r.nextNo),
+    r.rights.keys() == V_NOS.filter(k => k < r.nextNo),
     r.rights.keys().forall(k => RIGHTS.contains(r.rights.get(k))),
-    // the window of the Root's next checkpoint fits (R-MEM-14)
-    r.valid.forall(k => r.nextNo - k <= P_WINDOW),
   }
-  pure def structOf(ns: str -> MNode, r: MRoot, p: MPool, h: Set[MCheckpoint], b: Set[str], s: Set[str]): bool = and {
-    ns.keys() == P_DEVICES,
-    P_DEVICES.forall(d => nodeOk(ns.get(d))),
-    rootOk(r),
+
+  pure def structHistory(r: VRoot, h: Set[VCheckpoint]): bool = and {
     h.forall(c => isCp(c) and c.no >= 1),
     h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no == c2.no) implies c1 == c2)),
-    p.cp.forall(c => isCp(c)), p.pp.forall(x => isPp(x)), p.rc.forall(x => isRc(x)), p.hp.forall(x => isHp(x)),
-    p.data.forall(x => isData(x)),
-    b.subseteq(BROKEN), s.subseteq(Set("accept", "grant")),
+    h.forall(c => c.gen <= r.gen and (c.gen == r.gen implies and {
+      c.no <= r.cpNo, c.nextNo <= r.nextNo, below(r.valid, c).subseteq(c.valid),
+    })),
+    h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no <= c2.no) implies
+      (c1.nextNo <= c2.nextNo and below(c2.valid, c1).subseteq(c1.valid)))),
+  }
+
+  pure def structPool(r: VRoot, p: VPool): bool = and {
+    p.cp.forall(c => isCp(c) and c.no >= 1), p.pp.forall(x => isPp(x)), p.rc.forall(x => isRc(x)),
+    p.hp.forall(x => isHp(x)), p.data.forall(x => isData(x)),
+    p.pp.forall(x => x.gen <= r.gen and (x.gen == r.gen implies x.no < r.nextNo)),
+    p.pp.forall(a => p.pp.forall(b =>
+      (a.gen == b.gen and a.no == b.no) implies (a.dev == b.dev and (a.rights == b.rights or a.rights == 3 - b.rights)))),
+  }
+
+  pure def structOf(ns: str -> VNode, r: VRoot, p: VPool, h: Set[VCheckpoint], b: Set[str], s: Set[str]): bool = and {
+    ns.keys() == P_DEVICES,
+    P_DEVICES.forall(d => and {
+      structNode(ns.get(d)),
+      ns.get(d).pps.subseteq(p.pp),
+      ns.get(d).cp == vGenesis(ns.get(d).cp.gen) or p.cp.contains(ns.get(d).cp),
+    }),
+    structRoot(r),
+    structHistory(r, h),
+    structPool(r, p),
+    b.subseteq(BROKEN),
+    s.subseteq(TAGS),
   }
 
   val structA = structOf(A::nodes, A::root, A::pool, A::history, A::broken, A::seen)
@@ -202,18 +432,31 @@ module bisim {
   val viewA = viewOf(A::nodes, A::root, A::pool, A::history, A::broken)
   val viewB = viewOf(B::nodes, B::root, B::pool, B::history, B::broken)
 
+  pure def curNodeView(ns: str -> VNode, r: VRoot, p: VPool, d: str, hpGens: Set[int]): NodeView = {
+    val cpConflict = V_GENS.mapBy(g =>
+      p.cp.exists(x => x.gen == g and p.cp.exists(y => y.gen == g and y.no == x.no and x != y)))
+    val ppConflict = V_GENS.mapBy(g =>
+      p.pp.exists(x => x.gen == g and p.pp.exists(y => y.gen == g and y.no == x.no and x != y)))
+    val hasConflict = V_GENS.mapBy(g => cpConflict.get(g) or ppConflict.get(g))
+    val cleanOld = V_GENS.filter(g => g < r.gen and not(hpGens.contains(g)) and not(hasConflict.get(g)))
+    val hasUnhalted = V_GENS.mapBy(g => V_DEVICES.exists(e => not(ns.get(e).halted) and ns.get(e).gen == g))
+    val oldConflict = V_GENS.filter(g =>
+      g < r.gen and not(hpGens.contains(g)) and hasConflict.get(g) and hasUnhalted.get(g))
+    val equivPp = V_SLOTS.filter(s => p.pp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2)
+    val rcBoth = V_GENS.filter(g => p.rc.contains({ gen: g, key: 0 }) and p.rc.contains({ gen: g, key: 1 }))
+    nodeViewOf(ns.get(d), r.gen, hpGens, cleanOld, oldConflict, equivPp, rcBoth)
+  }
+
   // ------------------------------------------------------------- bookkeeping
-  pure val NO_CP: MCheckpoint = { gen: 0, no: 0, start: 0, valid: Set(), nextNo: 0 }
-  pure val NO_PP: MPassport = { gen: 0, no: 0, dev: "", rights: 0 }
-  pure val NO_RC: MRootChange = { gen: 0, key: 0 }
-  pure val NO_HP: MHaltProof = { kind: "", gen: 0, no: 0 }
-  pure val NO_DATA: MData = { src: "", ppNo: 0, gen: 0, cpNo: 0, ch0: false }
-  type Move = { kind: str, d: str, r: int, k: int, c: MCheckpoint, p: MPassport, rc: MRootChange, h: MHaltProof,
-                m: MData, ppNo: int, ch0: bool }
-  pure val NO_MOVE: Move = { kind: "", d: "", r: 0, k: 0, c: NO_CP, p: NO_PP, rc: NO_RC, h: NO_HP, m: NO_DATA,
-                             ppNo: 0, ch0: false }
+  pure val NO_CP: VCheckpoint = vGenesis(0)
+  pure val NO_PP: VPassport = { gen: 0, no: 0, dev: "", rights: 0 }
+  pure val NO_RC: VRootChange = { gen: 0, key: 0 }
+  pure val NO_HP: VHaltProof = { kind: "", gen: 0, no: 0 }
+  type Move = { d: str, rights: int, k: int, c: VCheckpoint, p: VPassport, rc: VRootChange, h: VHaltProof,
+                preNv: NodeView }
+  pure val NO_MOVE: Move = { d: "", rights: 0, k: 0, c: NO_CP, p: NO_PP, rc: NO_RC, h: NO_HP, preNv: FOREVER_NODE }
   var stage: int      // 0: before A's step, 1: after it, 2: after B's answer
-  var mv: Move        // A's step, as B needs it
+  var mv: Move        // A's step parameters, as B needs them
   var matchOk: bool   // B's answer was enabled
 
   action aStay = all {
@@ -226,110 +469,116 @@ module bisim {
   }
 
   // --------------------------------------------- an arbitrary state of Struct
-  // Drawn as indInit in inductive.qnt draws a state: a node's cache one
-  // passport per number, the history one checkpoint per generation and
-  // number, everything else from its whole bounded type, then filtered by
-  // Struct. Every state of Struct arises this way.
-  pure val SLOTS = tuples(GENS, NOS)
+  pure def mkPoolPp(dev: (int, int) -> str, loR: (int, int) -> int,
+                    hasLo: (int, int) -> bool, hasHi: (int, int) -> bool): Set[VPassport] =
+    SLOTS.filter(s => hasLo.get(s))
+      .map(s => { gen: s._1, no: s._2, dev: dev.get(s), rights: loR.get(s) })
+      .union(SLOTS.filter(s => hasHi.get(s))
+        .map(s => { gen: s._1, no: s._2, dev: dev.get(s), rights: 3 - loR.get(s) }))
+
   action drawA = {
-    nondet gens = setOfMaps(P_DEVICES, GENS).oneOf()
+    nondet gens = setOfMaps(P_DEVICES, V_GENS).oneOf()
+    nondet cpGen = setOfMaps(P_DEVICES, V_GENS).oneOf()
     nondet cpNo = setOfMaps(P_DEVICES, 0.to(P_MAX_NO)).oneOf()
     nondet cpStart = setOfMaps(P_DEVICES, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet cpValid = setOfMaps(P_DEVICES, NOS.powerset()).oneOf()
+    nondet cpValid = setOfMaps(P_DEVICES, V_NOS.powerset()).oneOf()
     nondet cpNext = setOfMaps(P_DEVICES, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet cpGen = setOfMaps(P_DEVICES, GENS).oneOf()
-    nondet ppIn = setOfMaps(P_DEVICES, setOfMaps(NOS, Set(false, true))).oneOf()
-    nondet ppGen = setOfMaps(P_DEVICES, setOfMaps(NOS, GENS)).oneOf()
-    nondet ppDev = setOfMaps(P_DEVICES, setOfMaps(NOS, P_DEVICES)).oneOf()
-    nondet ppRights = setOfMaps(P_DEVICES, setOfMaps(NOS, RIGHTS)).oneOf()
+    nondet ppIn = setOfMaps(P_DEVICES, setOfMaps(SLOTS, Set(false, true))).oneOf()
+    nondet ppDev = setOfMaps(P_DEVICES, setOfMaps(SLOTS, P_DEVICES)).oneOf()
+    nondet ppRights = setOfMaps(P_DEVICES, setOfMaps(SLOTS, RIGHTS)).oneOf()
     nondet hIn = setOfMaps(SLOTS, Set(false, true)).oneOf()
     nondet hStart = setOfMaps(SLOTS, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet hValid = setOfMaps(SLOTS, NOS.powerset()).oneOf()
+    nondet hValid = setOfMaps(SLOTS, V_NOS.powerset()).oneOf()
     nondet hNext = setOfMaps(SLOTS, 1.to(P_MAX_NO + 1)).oneOf()
     nondet rcs = setOfMaps(P_DEVICES, Set(-1, 0, 1)).oneOf()
     nondet halts = setOfMaps(P_DEVICES, Set(false, true)).oneOf()
     nondet forevers = setOfMaps(P_DEVICES, Set(false, true)).oneOf()
     nondet hps = setOfMaps(P_DEVICES, HPS.powerset()).oneOf()
-    nondet rg = GENS.oneOf()
+    nondet rg = V_GENS.oneOf()
     nondet rcp = 0.to(P_MAX_NO).oneOf()
     nondet rnx = 1.to(P_MAX_NO + 1).oneOf()
-    nondet rv = NOS.powerset().oneOf()
-    nondet rrv = NOS.powerset().oneOf()
-    nondet rfull = setOfMaps(NOS, RIGHTS).oneOf()
+    nondet rv = V_NOS.powerset().oneOf()
+    nondet rrv = V_NOS.powerset().oneOf()
+    nondet rfull = setOfMaps(V_NOS, RIGHTS).oneOf()
     nondet pcp = CPS.powerset().oneOf()
-    nondet ppp = PPS.powerset().oneOf()
+    nondet pppDev = setOfMaps(SLOTS, P_DEVICES).oneOf()
+    nondet pppLoR = setOfMaps(SLOTS, Set(0, 1)).oneOf()
+    nondet pppHasLo = setOfMaps(SLOTS, Set(false, true)).oneOf()
+    nondet pppHasHi = setOfMaps(SLOTS, Set(false, true)).oneOf()
     nondet prc = RCS.powerset().oneOf()
     nondet php = HPS.powerset().oneOf()
     nondet pdata = DATAS.powerset().oneOf()
-    nondet b = BROKEN.powerset().oneOf()
-    nondet sn = Set("accept", "grant").powerset().oneOf()
+    nondet br = BROKEN.powerset().oneOf()
+    nondet sn = TAGS.powerset().oneOf()
     val hist = SLOTS.filter(s => hIn.get(s))
       .map(s => { gen: s._1, no: s._2, start: hStart.get(s), valid: hValid.get(s), nextNo: hNext.get(s) })
     val ns = P_DEVICES.mapBy(d => {
       gen: gens.get(d),
       cp: { gen: cpGen.get(d), no: cpNo.get(d), start: cpStart.get(d), valid: cpValid.get(d), nextNo: cpNext.get(d) },
-      pps: NOS.filter(k => ppIn.get(d).get(k))
-        .map(k => { gen: ppGen.get(d).get(k), no: k, dev: ppDev.get(d).get(k), rights: ppRights.get(d).get(k) }),
-      rc: rcs.get(d), halted: halts.get(d),
-      forever: forevers.get(d), recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
+      pps: SLOTS.filter(s => ppIn.get(d).get(s))
+        .map(s => { gen: s._1, no: s._2, dev: ppDev.get(d).get(s), rights: ppRights.get(d).get(s) }),
+      rc: rcs.get(d), halted: halts.get(d), forever: forevers.get(d),
+      recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
     })
     val r = { gen: rg, cpNo: rcp, nextNo: rnx, valid: rv,
-              rights: NOS.filter(k => k < rnx).mapBy(k => rfull.get(k)), revoked: rrv }
-    val p = { cp: pcp, pp: ppp, rc: prc, hp: php, data: pdata }
+              rights: V_NOS.filter(k => k < rnx).mapBy(k => rfull.get(k)), revoked: rrv }
+    val p = { cp: pcp, pp: mkPoolPp(pppDev, pppLoR, pppHasLo, pppHasHi), rc: prc, hp: php, data: pdata }
     all {
-      structOf(ns, r, p, hist, b, sn),
-      A::nodes' = ns, A::root' = r, A::pool' = p, A::history' = hist, A::broken' = b, A::seen' = sn,
+      structOf(ns, r, p, hist, br, sn),
+      A::nodes' = ns, A::root' = r, A::pool' = p, A::history' = hist, A::broken' = br, A::seen' = sn,
     }
   }
 
   action drawB = {
-    nondet gens = setOfMaps(P_DEVICES, GENS).oneOf()
+    nondet gens = setOfMaps(P_DEVICES, V_GENS).oneOf()
+    nondet cpGen = setOfMaps(P_DEVICES, V_GENS).oneOf()
     nondet cpNo = setOfMaps(P_DEVICES, 0.to(P_MAX_NO)).oneOf()
     nondet cpStart = setOfMaps(P_DEVICES, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet cpValid = setOfMaps(P_DEVICES, NOS.powerset()).oneOf()
+    nondet cpValid = setOfMaps(P_DEVICES, V_NOS.powerset()).oneOf()
     nondet cpNext = setOfMaps(P_DEVICES, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet cpGen = setOfMaps(P_DEVICES, GENS).oneOf()
-    nondet ppIn = setOfMaps(P_DEVICES, setOfMaps(NOS, Set(false, true))).oneOf()
-    nondet ppGen = setOfMaps(P_DEVICES, setOfMaps(NOS, GENS)).oneOf()
-    nondet ppDev = setOfMaps(P_DEVICES, setOfMaps(NOS, P_DEVICES)).oneOf()
-    nondet ppRights = setOfMaps(P_DEVICES, setOfMaps(NOS, RIGHTS)).oneOf()
+    nondet ppIn = setOfMaps(P_DEVICES, setOfMaps(SLOTS, Set(false, true))).oneOf()
+    nondet ppDev = setOfMaps(P_DEVICES, setOfMaps(SLOTS, P_DEVICES)).oneOf()
+    nondet ppRights = setOfMaps(P_DEVICES, setOfMaps(SLOTS, RIGHTS)).oneOf()
     nondet hIn = setOfMaps(SLOTS, Set(false, true)).oneOf()
     nondet hStart = setOfMaps(SLOTS, 1.to(P_MAX_NO + 1)).oneOf()
-    nondet hValid = setOfMaps(SLOTS, NOS.powerset()).oneOf()
+    nondet hValid = setOfMaps(SLOTS, V_NOS.powerset()).oneOf()
     nondet hNext = setOfMaps(SLOTS, 1.to(P_MAX_NO + 1)).oneOf()
     nondet rcs = setOfMaps(P_DEVICES, Set(-1, 0, 1)).oneOf()
     nondet halts = setOfMaps(P_DEVICES, Set(false, true)).oneOf()
     nondet forevers = setOfMaps(P_DEVICES, Set(false, true)).oneOf()
     nondet hps = setOfMaps(P_DEVICES, HPS.powerset()).oneOf()
-    nondet rg = GENS.oneOf()
+    nondet rg = V_GENS.oneOf()
     nondet rcp = 0.to(P_MAX_NO).oneOf()
     nondet rnx = 1.to(P_MAX_NO + 1).oneOf()
-    nondet rv = NOS.powerset().oneOf()
-    nondet rrv = NOS.powerset().oneOf()
-    nondet rfull = setOfMaps(NOS, RIGHTS).oneOf()
+    nondet rv = V_NOS.powerset().oneOf()
+    nondet rrv = V_NOS.powerset().oneOf()
+    nondet rfull = setOfMaps(V_NOS, RIGHTS).oneOf()
     nondet pcp = CPS.powerset().oneOf()
-    nondet ppp = PPS.powerset().oneOf()
+    nondet pppDev = setOfMaps(SLOTS, P_DEVICES).oneOf()
+    nondet pppLoR = setOfMaps(SLOTS, Set(0, 1)).oneOf()
+    nondet pppHasLo = setOfMaps(SLOTS, Set(false, true)).oneOf()
+    nondet pppHasHi = setOfMaps(SLOTS, Set(false, true)).oneOf()
     nondet prc = RCS.powerset().oneOf()
     nondet php = HPS.powerset().oneOf()
     nondet pdata = DATAS.powerset().oneOf()
-    nondet b = BROKEN.powerset().oneOf()
-    nondet sn = Set("accept", "grant").powerset().oneOf()
+    nondet br = BROKEN.powerset().oneOf()
+    nondet sn = TAGS.powerset().oneOf()
     val hist = SLOTS.filter(s => hIn.get(s))
       .map(s => { gen: s._1, no: s._2, start: hStart.get(s), valid: hValid.get(s), nextNo: hNext.get(s) })
     val ns = P_DEVICES.mapBy(d => {
       gen: gens.get(d),
       cp: { gen: cpGen.get(d), no: cpNo.get(d), start: cpStart.get(d), valid: cpValid.get(d), nextNo: cpNext.get(d) },
-      pps: NOS.filter(k => ppIn.get(d).get(k))
-        .map(k => { gen: ppGen.get(d).get(k), no: k, dev: ppDev.get(d).get(k), rights: ppRights.get(d).get(k) }),
-      rc: rcs.get(d), halted: halts.get(d),
-      forever: forevers.get(d), recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
+      pps: SLOTS.filter(s => ppIn.get(d).get(s))
+        .map(s => { gen: s._1, no: s._2, dev: ppDev.get(d).get(s), rights: ppRights.get(d).get(s) }),
+      rc: rcs.get(d), halted: halts.get(d), forever: forevers.get(d),
+      recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
     })
     val r = { gen: rg, cpNo: rcp, nextNo: rnx, valid: rv,
-              rights: NOS.filter(k => k < rnx).mapBy(k => rfull.get(k)), revoked: rrv }
-    val p = { cp: pcp, pp: ppp, rc: prc, hp: php, data: pdata }
+              rights: V_NOS.filter(k => k < rnx).mapBy(k => rfull.get(k)), revoked: rrv }
+    val p = { cp: pcp, pp: mkPoolPp(pppDev, pppLoR, pppHasLo, pppHasHi), rc: prc, hp: php, data: pdata }
     all {
-      structOf(ns, r, p, hist, b, sn),
-      B::nodes' = ns, B::root' = r, B::pool' = p, B::history' = hist, B::broken' = b, B::seen' = sn,
+      structOf(ns, r, p, hist, br, sn),
+      B::nodes' = ns, B::root' = r, B::pool' = p, B::history' = hist, B::broken' = br, B::seen' = sn,
     }
   }
 
@@ -340,7 +589,7 @@ module bisim {
 
   // Names run-inductive.ps1 uses for its first, cheap check (Apalache download).
   action modelInit = initStruct
-  action modelStep = stepReboot
+  action modelStep = stepRecoveryChange
   val IndInv = structA
 
   val sameSafety = (viewA == viewB) implies (A::safety iff B::safety)
@@ -350,256 +599,319 @@ module bisim {
   val witnessAnswered = stage != 2
 
   // ------------------------------------------------- A's step, branch by branch
-  // The branches of `step` in membership.qnt as inductive.qnt splits them,
-  // with the values each action picks inside drawn here and recorded. O2
-  // runs stepX from initSafe; O4 runs matchX from initPair.
   action pre = all { stage == 0, A::safety }
+
   action stepRootAdmit = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet d = P_DEVICES.oneOf() nondet r = RIGHTS.oneOf()
-    all { A::rootIssue(d, r, Set()), mv' = { ...NO_MOVE, kind: "admit", d: d, r: r } } }
-  action stepRootChangeRights = all { pre, bStay, stage' = 1, matchOk' = true,
-    A::root.valid != Set(),
+    all { A::rootIssue(d, r, Set()), mv' = { ...NO_MOVE, d: d, rights: r } } }
+  action stepRootChangeRights = all { pre, bStay, stage' = 1, matchOk' = true, A::root.valid != Set(),
     nondet k = A::root.valid.oneOf()
     val old = A::pool.pp.filter(p => p.gen == A::root.gen and p.no == k)
     all { old != Set(), nondet p = old.oneOf() nondet r = RIGHTS.oneOf()
-          all { A::rootIssue(p.dev, r, Set(k)), mv' = { ...NO_MOVE, kind: "change", d: p.dev, r: r, k: k } } } }
-  action stepRootRevoke = all { pre, bStay, stage' = 1, matchOk' = true,
-    A::root.valid != Set(), A::root.cpNo < P_MAX_NO,
-    nondet k = A::root.valid.oneOf()
-    val v = A::root.valid.exclude(Set(k))
-    val c = A::rootCheckpoint(v, A::root.nextNo)
-    all { A::commit(A::nodes, { ...A::root, cpNo: A::root.cpNo + 1, valid: v, revoked: A::root.revoked.union(Set(k)) },
-                    { ...A::pool, cp: A::pool.cp.union(Set(c)) }, A::history.union(Set(c))),
-          mv' = { ...NO_MOVE, kind: "revoke", k: k } } }
-  action stepRootEquivocateCp = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet c = A::pool.cp.filter(c => c.gen == A::root.gen and c.no >= 1).oneOf()
-    nondet k = 1.to(P_MAX_NO).oneOf()
-    val v = if (c.valid.contains(k)) c.valid.exclude(Set(k)) else c.valid.union(Set(k))
-    val c2 = { ...c, valid: v.filter(x => c.start <= x and x < c.nextNo) }
-    all { c2 != c, A::commit(A::nodes, A::root, { ...A::pool, cp: A::pool.cp.union(Set(c2)) }, A::history),
-          mv' = { ...NO_MOVE, kind: "eqCp", c: c, k: k } } }
-  action stepRootEquivocatePp = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet p = A::pool.pp.filter(p => p.gen == A::root.gen).oneOf()
-    val p2 = { ...p, rights: 3 - p.rights }
-    all { A::commit(A::nodes, A::root, { ...A::pool, pp: A::pool.pp.union(Set(p2)) }, A::history),
-          mv' = { ...NO_MOVE, kind: "eqPp", p: p } } }
-  action stepRecoveryChange = all { pre, bStay, stage' = 1, matchOk' = true,
-    A::recoveryChange, mv' = { ...NO_MOVE, kind: "recovery" } }
-  action stepRecoveryEquivocate = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet rc = A::pool.rc.oneOf()
-    val rc2 = { ...rc, key: 1 - rc.key }
-    all { A::commit(A::nodes, A::root, { ...A::pool, rc: A::pool.rc.union(Set(rc2)) }, A::history),
-          mv' = { ...NO_MOVE, kind: "eqRc", rc: rc } } }
-  // adversaryProof: the proof assembled from two conflicting records.
-  action stepAdversaryProof = all { pre, bStay, stage' = 1, matchOk' = true,
-    any {
-      nondet a = A::pool.cp.oneOf() nondet b = A::pool.cp.oneOf()
-      all { A::cpConflict(a, b), A::setNodeless(A::pool.hp.union(Set({ kind: "cp", gen: a.gen, no: a.no }))),
-            mv' = { ...NO_MOVE, kind: "proof", h: { kind: "cp", gen: a.gen, no: a.no } } },
-      nondet a = A::pool.pp.oneOf() nondet b = A::pool.pp.oneOf()
-      all { A::ppConflict(a, b), A::setNodeless(A::pool.hp.union(Set({ kind: "pp", gen: a.gen, no: a.no }))),
-            mv' = { ...NO_MOVE, kind: "proof", h: { kind: "pp", gen: a.gen, no: a.no } } },
-      nondet a = A::pool.rc.oneOf() nondet b = A::pool.rc.oneOf()
-      all { a.gen == b.gen and a != b, A::setNodeless(A::pool.hp.union(Set({ kind: "rc", gen: a.gen, no: 0 }))),
-            mv' = { ...NO_MOVE, kind: "proof", h: { kind: "rc", gen: a.gen, no: 0 } } },
-    } }
-  action stepRecvCp = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    all { A::pool.cp != Set(), nondet c = A::pool.cp.oneOf()
-          all { A::nodeRecvCp(d, c), mv' = { ...NO_MOVE, kind: "recvCp", d: d, c: c } } } }
-  action stepRecvPp = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    all { A::pool.pp != Set(), nondet p = A::pool.pp.oneOf()
-          all { A::nodeRecvPp(d, p), mv' = { ...NO_MOVE, kind: "recvPp", d: d, p: p } } } }
-  action stepRecvRc = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    all { A::pool.rc != Set(), nondet rc = A::pool.rc.oneOf()
-          all { A::nodeRecvRc(d, rc), mv' = { ...NO_MOVE, kind: "recvRc", d: d, rc: rc } } } }
-  action stepRecvHp = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    all { A::pool.hp != Set(), nondet h = A::pool.hp.oneOf()
-          all { A::nodeRecvHp(d, h), mv' = { ...NO_MOVE, kind: "recvHp", d: d, h: h } } } }
-  action stepAcceptData = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    all { A::pool.data != Set(), nondet m = A::pool.data.oneOf()
-          all { A::nodeAcceptData(d, m), mv' = { ...NO_MOVE, kind: "accept", d: d, m: m } } } }
-  // nodeHearsHalted: the proof it hands to nodeRecvHp.
+          all { A::rootIssue(p.dev, r, Set(k)), mv' = { ...NO_MOVE, k: k, rights: r } } } }
+  action stepRootRevoke = all { pre, bStay, stage' = 1, matchOk' = true, A::rootRevoke, mv' = NO_MOVE }
+  action stepRootEquivocateCp = all { pre, bStay, stage' = 1, matchOk' = true, A::rootEquivocateCp, mv' = NO_MOVE }
+  action stepRootEquivocatePp = all { pre, bStay, stage' = 1, matchOk' = true, A::rootEquivocatePp, mv' = NO_MOVE }
+  action stepRecoveryChange = all { pre, bStay, stage' = 1, matchOk' = true, A::recoveryChange, mv' = NO_MOVE }
+  action stepRecoveryEquivocate = all { pre, bStay, stage' = 1, matchOk' = true, A::recoveryEquivocate, mv' = NO_MOVE }
+  action stepAdversaryProof = all { pre, bStay, stage' = 1, matchOk' = true, A::adversaryProof, mv' = NO_MOVE }
+  action stepRecvCp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.cp != Set(),
+    nondet d = P_DEVICES.oneOf() nondet c = A::pool.cp.oneOf()
+    all { A::nodeRecvCp(d, c),
+          mv' = { ...NO_MOVE, d: d, c: c, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+  action stepRecvPp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.pp != Set(),
+    nondet d = P_DEVICES.oneOf() nondet p = A::pool.pp.oneOf()
+    all { A::nodeRecvPp(d, p),
+          mv' = { ...NO_MOVE, d: d, p: p, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+  action stepRecvRc = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.rc != Set(),
+    nondet d = P_DEVICES.oneOf() nondet rc = A::pool.rc.oneOf()
+    all { A::nodeRecvRc(d, rc),
+          mv' = { ...NO_MOVE, d: d, rc: rc, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+  action stepRecvHp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.hp != Set(),
+    nondet d = P_DEVICES.oneOf() nondet h = A::pool.hp.oneOf()
+    all { A::nodeRecvHp(d, h),
+          mv' = { ...NO_MOVE, d: d, h: h, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+  action stepAcceptData = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.data != Set(),
+    nondet d = P_DEVICES.oneOf() nondet m = A::pool.data.oneOf()
+    all { A::nodeAcceptData(d, m), mv' = NO_MOVE } }
   action stepHearsHalted = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet d = P_DEVICES.oneOf()
-    val n = A::nodes.get(d)
-    val proofs = A::pool.hp.filter(h =>
-      (h.kind != "rc" and h.gen == n.gen and A::haltedPeer(d, n.gen)) or (h.kind == "rc" and A::foreverPeer(d)))
-    all { proofs != Set(), nondet h = proofs.oneOf()
-          all { A::nodeRecvHp(d, h), mv' = { ...NO_MOVE, kind: "hears", d: d, h: h } } } }
+    all { A::nodeHearsHalted(d),
+          mv' = { ...NO_MOVE, d: d, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
   action stepReboot = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf() all { A::nodeReboot(d), mv' = { ...NO_MOVE, kind: "reboot", d: d } } }
-  // nodeSend: the passport number and channel of the message.
+    nondet d = P_DEVICES.oneOf()
+    all { A::nodeReboot(d),
+          mv' = { ...NO_MOVE, d: d, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
   action stepSend = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    val n = A::nodes.get(d)
-    val mine = A::pool.pp.filter(p => p.dev == d and p.gen == n.gen)
-    all { not(n.halted), mine != Set(), nondet p = mine.oneOf() nondet ch0 = Set(false, true).oneOf()
-          all { A::setNode(d, n, { ...A::pool, data: A::pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen,
-                                                                               cpNo: n.cp.no, ch0: ch0 })) }),
-                mv' = { ...NO_MOVE, kind: "send", d: d, ppNo: p.no, ch0: ch0 } } } }
-  // nodeGrant: the passport it grants to.
+    nondet d = P_DEVICES.oneOf() all { A::nodeSend(d), mv' = NO_MOVE } }
   action stepGrant = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet d = P_DEVICES.oneOf()
-    val n = A::nodes.get(d)
-    all { n.pps != Set(), not(n.halted), nondet p = n.pps.oneOf()
-          all { p.dev != d, A::canRead(p.rights), A::validUnder(p, n.cp),
-                val e = { node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, ch0: false, cp: n.cp,
-                          halted: n.halted }
-                A::commitWith(A::nodes, A::root, A::pool, A::history, A::entryProblems(e, A::history, true), Set("grant")),
-                mv' = { ...NO_MOVE, kind: "grant", d: d, p: p } } } }
+    nondet d = P_DEVICES.oneOf() all { A::nodes.get(d).pps != Set(), A::nodeGrant(d), mv' = NO_MOVE } }
 
   // --------------------------------------------------------------- B's answer
-  // B does nothing when the views already agree; otherwise it takes the same
-  // action as A with A's values. Each guard copies the guard of that action
-  // in membership.qnt under MUTANT = "none" (with the condition of its branch
-  // in `step` and the set its value is picked from), so that B's step is taken
-  // exactly when the guard holds; matchOk records it.
   action bNone = all { bStay, matchOk' = false }
-  action answer = {
-    val r = B::root
-    if (mv.kind == "admit") {
-      val c = B::rootCheckpoint(r.valid.union(Set(r.nextNo)), r.nextNo + 1)
-      if (r.nextNo <= P_MAX_NO and r.cpNo < P_MAX_NO and c.nextNo - c.start <= P_WINDOW)
-        all { B::rootIssue(mv.d, mv.r, Set()), matchOk' = true }
+
+  pure def cpFlip(c: VCheckpoint, k: int): VCheckpoint = {
+    val v = if (c.valid.contains(k)) c.valid.exclude(Set(k)) else c.valid.union(Set(k))
+    { ...c, valid: v.filter(x => c.start <= x and x < c.nextNo) }
+  }
+
+  action respondRootAdmit = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else if (B::root.nextNo <= P_MAX_NO and B::root.cpNo < P_MAX_NO
+             and (B::root.nextNo + 1) - vWindowStart(B::root.valid.union(Set(B::root.nextNo)), B::root.nextNo + 1) <= P_WINDOW)
+      all { B::rootIssue(mv.d, mv.rights, Set()), matchOk' = true }
+    else bNone,
+  }
+  action respondRootChangeRights = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val old = B::pool.pp.filter(p => p.gen == B::root.gen and p.no == mv.k)
+      if (B::root.valid.contains(mv.k) and old != Set()
+          and B::root.nextNo <= P_MAX_NO and B::root.cpNo < P_MAX_NO
+          and (B::root.nextNo + 1) - vWindowStart(B::root.valid.exclude(Set(mv.k)).union(Set(B::root.nextNo)), B::root.nextNo + 1) <= P_WINDOW)
+        all { matchOk' = true, nondet p = old.oneOf() B::rootIssue(p.dev, mv.rights, Set(mv.k)) }
       else bNone
-    }
-    else if (mv.kind == "change") {
-      val c = B::rootCheckpoint(r.valid.exclude(Set(mv.k)).union(Set(r.nextNo)), r.nextNo + 1)
-      if (r.valid != Set() and r.valid.contains(mv.k)
-          and B::pool.pp.exists(p => p.gen == r.gen and p.no == mv.k and p.dev == mv.d)
-          and r.nextNo <= P_MAX_NO and r.cpNo < P_MAX_NO and c.nextNo - c.start <= P_WINDOW)
-        all { B::rootIssue(mv.d, mv.r, Set(mv.k)), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "revoke")
-      if (r.valid != Set() and r.cpNo < P_MAX_NO and r.valid.contains(mv.k)) {
-        val v = r.valid.exclude(Set(mv.k))
-        val c = B::rootCheckpoint(v, r.nextNo)
-        all { B::commit(B::nodes, { ...r, cpNo: r.cpNo + 1, valid: v, revoked: r.revoked.union(Set(mv.k)) },
-                        { ...B::pool, cp: B::pool.cp.union(Set(c)) }, B::history.union(Set(c))),
-              matchOk' = true }
+    },
+  }
+  action respondRootRevoke = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ks = B::root.valid.exclude(A::root.valid)
+      if (ks != Set() and B::root.cpNo < P_MAX_NO) {
+        nondet k = ks.oneOf()
+        val v = B::root.valid.exclude(Set(k))
+        val c = B::rootCheckpoint(v, B::root.nextNo)
+        all {
+          B::commit(B::nodes, { ...B::root, cpNo: B::root.cpNo + 1, valid: v, revoked: B::root.revoked.union(Set(k)) },
+            { ...B::pool, cp: B::pool.cp.union(Set(c)) }, B::history.union(Set(c))),
+          matchOk' = true,
+        }
       } else bNone
-    else if (mv.kind == "eqCp") {
-      val c = mv.c
-      val v = if (c.valid.contains(mv.k)) c.valid.exclude(Set(mv.k)) else c.valid.union(Set(mv.k))
-      val c2 = { ...c, valid: v.filter(x => c.start <= x and x < c.nextNo) }
-      if (B::pool.cp.contains(c) and c.gen == r.gen and c.no >= 1 and 1 <= mv.k and mv.k <= P_MAX_NO and c2 != c)
-        all { B::commit(B::nodes, r, { ...B::pool, cp: B::pool.cp.union(Set(c2)) }, B::history), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "eqPp") {
-      val p2 = { ...mv.p, rights: 3 - mv.p.rights }
-      if (B::pool.pp.contains(mv.p) and mv.p.gen == r.gen)
-        all { B::commit(B::nodes, r, { ...B::pool, pp: B::pool.pp.union(Set(p2)) }, B::history), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "recovery")
-      if (r.gen < P_MAX_GEN) all { B::recoveryChange, matchOk' = true }
-      else bNone
-    else if (mv.kind == "eqRc") {
-      val rc2 = { ...mv.rc, key: 1 - mv.rc.key }
-      if (B::pool.rc.contains(mv.rc))
-        all { B::commit(B::nodes, r, { ...B::pool, rc: B::pool.rc.union(Set(rc2)) }, B::history), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "proof") {
-      val h = mv.h
-      val ok = if (h.kind == "cp")
-                 B::pool.cp.exists(a => B::pool.cp.exists(b => B::cpConflict(a, b) and a.gen == h.gen and a.no == h.no))
-               else if (h.kind == "pp")
-                 B::pool.pp.exists(a => B::pool.pp.exists(b => B::ppConflict(a, b) and a.gen == h.gen and a.no == h.no))
-               else
-                 B::pool.rc.exists(a => B::pool.rc.exists(b => a.gen == b.gen and a != b and a.gen == h.gen))
-      if (ok) all { B::setNodeless(B::pool.hp.union(Set(h))), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "recvCp")
-      if (B::pool.cp.contains(mv.c)) all { B::nodeRecvCp(mv.d, mv.c), matchOk' = true }
-      else bNone
-    else if (mv.kind == "recvPp")
-      if (B::pool.pp.contains(mv.p)) all { B::nodeRecvPp(mv.d, mv.p), matchOk' = true }
-      else bNone
-    else if (mv.kind == "recvRc")
-      if (B::pool.rc.contains(mv.rc)) all { B::nodeRecvRc(mv.d, mv.rc), matchOk' = true }
-      else bNone
-    else if (mv.kind == "recvHp")
-      if (B::pool.hp.contains(mv.h)) all { B::nodeRecvHp(mv.d, mv.h), matchOk' = true }
-      else bNone
-    else if (mv.kind == "accept") {
-      val n = B::nodes.get(mv.d)
-      // The message of the same sender, passport number, generation and
-      // channel with the lowest checkpoint number: the one the view keeps
-      // (there is exactly one). nodeAcceptData then picks the passport of
-      // that sender and number from the cache, which holds one per number
-      // (Struct), so the answer is deterministic.
-      val ms = B::pool.data.filter(x => sameData(x, mv.m)
-                                        and B::pool.data.forall(y => not(sameData(y, mv.m) and y.cpNo < x.cpNo)))
-      if (ms != Set()) {
-        nondet m = ms.oneOf()
-        if (not(n.halted) and m.src != mv.d and m.gen == n.gen and not(B::lexGt(m.gen, m.cpNo, n.gen, n.cp.no))
-            and n.pps.exists(p => p.dev == m.src and p.no == m.ppNo and B::validUnder(p, n.cp)
-                                  and (m.ch0 or B::canPublish(p.rights))))
-          all { B::nodeAcceptData(mv.d, m), matchOk' = true }
+    },
+  }
+  action respondRootEquivocateCp = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val added = A::pool.cp.filter(c => c.gen == B::root.gen).exclude(B::pool.cp)
+      val validC2 = added.filter(c2 =>
+        B::pool.cp.exists(c => c.gen == B::root.gen and c.no >= 1
+                               and V_NOS.exists(k => cpFlip(c, k) == c2 and c2 != c)))
+      if (validC2 != Set()) {
+        nondet c2 = validC2.oneOf()
+        all { B::commit(B::nodes, B::root, { ...B::pool, cp: B::pool.cp.union(Set(c2)) }, B::history), matchOk' = true }
+      } else bNone
+    },
+  }
+  action respondRootEquivocatePp = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ks = V_NOS.filter(k =>
+        A::pool.pp.filter(x => x.gen == B::root.gen and x.no == k).size() == 2
+        and B::pool.pp.filter(x => x.gen == B::root.gen and x.no == k).size() == 1)
+      val cands = B::pool.pp.filter(p => p.gen == B::root.gen and ks.contains(p.no))
+      if (cands != Set()) {
+        nondet p = cands.oneOf()
+        val p2 = { ...p, rights: 3 - p.rights }
+        all { B::commit(B::nodes, B::root, { ...B::pool, pp: B::pool.pp.union(Set(p2)) }, B::history), matchOk' = true }
+      } else bNone
+    },
+  }
+  action respondRecoveryChange = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else if (B::root.gen < P_MAX_GEN)
+      all { B::recoveryChange, matchOk' = true }
+    else bNone,
+  }
+  action respondRecoveryEquivocate = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val added = A::pool.rc.exclude(B::pool.rc)
+      val validRc2 = added.filter(rc2 => B::pool.rc.contains({ ...rc2, key: 1 - rc2.key }))
+      if (validRc2 != Set()) {
+        nondet rc2 = validRc2.oneOf()
+        all { B::commit(B::nodes, B::root, { ...B::pool, rc: B::pool.rc.union(Set(rc2)) }, B::history), matchOk' = true }
+      } else bNone
+    },
+  }
+  action respondAdversaryProof = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else if (A::pool.hp.exists(h => h.kind == "rc") and not(B::pool.hp.exists(h => h.kind == "rc"))) {
+      val rcs = B::pool.rc.filter(a => B::pool.rc.exists(b => a.gen == b.gen and a != b))
+      if (rcs != Set()) {
+        nondet a = rcs.oneOf()
+        all { B::setNodeless(B::pool.hp.union(Set({ kind: "rc", gen: a.gen, no: 0 }))), matchOk' = true }
+      } else bNone
+    } else {
+      val newGens = V_GENS.filter(g => A::pool.hp.exists(h => h.kind != "rc" and h.gen == g)
+                                       and not(B::pool.hp.exists(h => h.kind != "rc" and h.gen == g)))
+      val cpCands = B::pool.cp.filter(a => newGens.contains(a.gen)
+                                           and B::pool.cp.exists(b => a.gen == b.gen and a.no == b.no and a != b))
+      val ppCands = B::pool.pp.filter(a => newGens.contains(a.gen)
+                                           and B::pool.pp.exists(b => a.gen == b.gen and a.no == b.no and a != b))
+      if (cpCands != Set()) {
+        nondet a = cpCands.oneOf()
+        all { B::setNodeless(B::pool.hp.union(Set({ kind: "cp", gen: a.gen, no: a.no }))), matchOk' = true }
+      } else if (ppCands != Set()) {
+        nondet a = ppCands.oneOf()
+        all { B::setNodeless(B::pool.hp.union(Set({ kind: "pp", gen: a.gen, no: a.no }))), matchOk' = true }
+      } else bNone
+    },
+  }
+  action respondRecvCp = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) {
+        nondet dB = ds.oneOf()
+        val nB = B::nodes.get(dB)
+        if (viewB.hpGens.contains(nB.gen)) {
+          val hs = B::pool.hp.filter(x => x.kind != "rc" and x.gen == nB.gen)
+          if (hs != Set()) all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        } else if (mv.preNv.tag == "live_old") {
+          if (A::nodes.get(mv.d).halted) {
+            val cands = B::pool.cp.filter(x => x.gen == nB.gen and x.no == nB.cp.no and x != nB.cp)
+            if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvCp(dB, x) }
+            else bNone
+          } else {
+            val eNos = V_NOS.filter(k => B::pool.pp.filter(x => x.gen == nB.gen and x.no == k).size() >= 2)
+            val want = oldCpProj(mv.c, eNos)
+            val cands = B::pool.cp.filter(x => x.gen == nB.gen and oldCpProj(x, eNos) == want)
+            if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvCp(dB, x) }
+            else bNone
+          }
+        } else if (B::pool.cp.contains(mv.c))
+          all { B::nodeRecvCp(dB, mv.c), matchOk' = true }
         else bNone
       } else bNone
-    }
-    else if (mv.kind == "hears") {
-      val n = B::nodes.get(mv.d)
-      val proofs = B::pool.hp.filter(h =>
-        (h.kind != "rc" and h.gen == n.gen and B::haltedPeer(mv.d, n.gen)) or (h.kind == "rc" and B::foreverPeer(mv.d)))
-      if (proofs != Set() and proofs.contains(mv.h)) all { B::nodeRecvHp(mv.d, mv.h), matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "reboot") all { B::nodeReboot(mv.d), matchOk' = true }
-    else if (mv.kind == "send") {
-      val n = B::nodes.get(mv.d)
-      val mine = B::pool.pp.filter(p => p.dev == mv.d and p.gen == n.gen)
-      if (not(n.halted) and mine != Set() and mine.exists(p => p.no == mv.ppNo))
-        all { B::setNode(mv.d, n, { ...B::pool, data: B::pool.data.union(Set({ src: mv.d, ppNo: mv.ppNo, gen: n.gen,
-                                                                               cpNo: n.cp.no, ch0: mv.ch0 })) }),
-              matchOk' = true }
-      else bNone
-    }
-    else if (mv.kind == "grant") {
-      val n = B::nodes.get(mv.d)
-      val p = mv.p
-      if (n.pps != Set() and not(n.halted) and n.pps.contains(p) and p.dev != mv.d and B::canRead(p.rights)
-          and B::validUnder(p, n.cp)) {
-        val e = { node: mv.d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, ch0: false, cp: n.cp,
-                  halted: n.halted }
-        all { B::commitWith(B::nodes, r, B::pool, B::history, B::entryProblems(e, B::history, true), Set("grant")),
-              matchOk' = true }
-      } else bNone
-    }
-    else bNone
+    },
   }
-  action respond = all { stage == 1, aStay, stage' = 2, mv' = mv,
-    if (viewA == viewB) all { bStay, matchOk' = true } else answer }
-  action matchRootAdmit = any { all { viewA == viewB, stepRootAdmit }, respond }
-  action matchRootChangeRights = any { all { viewA == viewB, stepRootChangeRights }, respond }
-  action matchRootRevoke = any { all { viewA == viewB, stepRootRevoke }, respond }
-  action matchRootEquivocateCp = any { all { viewA == viewB, stepRootEquivocateCp }, respond }
-  action matchRootEquivocatePp = any { all { viewA == viewB, stepRootEquivocatePp }, respond }
-  action matchRecoveryChange = any { all { viewA == viewB, stepRecoveryChange }, respond }
-  action matchRecoveryEquivocate = any { all { viewA == viewB, stepRecoveryEquivocate }, respond }
-  action matchAdversaryProof = any { all { viewA == viewB, stepAdversaryProof }, respond }
-  action matchRecvCp = any { all { viewA == viewB, stepRecvCp }, respond }
-  action matchRecvPp = any { all { viewA == viewB, stepRecvPp }, respond }
-  action matchRecvRc = any { all { viewA == viewB, stepRecvRc }, respond }
-  action matchRecvHp = any { all { viewA == viewB, stepRecvHp }, respond }
-  action matchAcceptData = any { all { viewA == viewB, stepAcceptData }, respond }
-  action matchHearsHalted = any { all { viewA == viewB, stepHearsHalted }, respond }
-  action matchReboot = any { all { viewA == viewB, stepReboot }, respond }
-  action matchSend = any { all { viewA == viewB, stepSend }, respond }
-  action matchGrant = any { all { viewA == viewB, stepGrant }, respond }
+  action respondRecvPp = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) {
+        nondet dB = ds.oneOf()
+        if (viewB.hpGens.contains(B::nodes.get(dB).gen)) {
+          val hs = B::pool.hp.filter(x => x.kind != "rc" and x.gen == B::nodes.get(dB).gen)
+          if (hs != Set()) all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        } else if (A::nodes.get(mv.d).halted) {
+          val cands = B::pool.pp.filter(x => x.gen == mv.p.gen and x.no == mv.p.no
+                                             and B::nodes.get(dB).pps.exists(q => q.gen == x.gen and q.no == x.no and q != x))
+          if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvPp(dB, x) }
+          else bNone
+        } else {
+          val cands = B::pool.pp.filter(x => x.gen == mv.p.gen and x.no == mv.p.no)
+          if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvPp(dB, x) }
+          else bNone
+        }
+      } else bNone
+    },
+  }
+  action respondRecvRc = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) {
+        nondet dB = ds.oneOf()
+        val nB = B::nodes.get(dB)
+        if (A::nodes.get(mv.d).forever) {
+          val rcs = B::pool.rc.filter(x => x.gen == nB.gen and nB.rc >= 0 and x.key != nB.rc)
+          if (rcs != Set()) all { matchOk' = true, nondet x = rcs.oneOf() B::nodeRecvRc(dB, x) }
+          else bNone
+        } else if (B::pool.rc.contains(mv.rc))
+          all { B::nodeRecvRc(dB, mv.rc), matchOk' = true }
+        else bNone
+      } else bNone
+    },
+  }
+  action respondRecvHp = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) {
+        nondet dB = ds.oneOf()
+        if (mv.h.kind == "rc") {
+          val hs = B::pool.hp.filter(x => x.kind == "rc")
+          if (hs != Set()) all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        } else {
+          val hs = B::pool.hp.filter(x => x.kind != "rc" and x.gen == mv.h.gen)
+          if (hs != Set()) all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        }
+      } else bNone
+    },
+  }
+  action respondHearsHalted = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) {
+        nondet dB = ds.oneOf()
+        if (A::nodes.get(mv.d).forever) {
+          val hs = B::pool.hp.filter(x => x.kind == "rc")
+          if (B::foreverPeer(dB) and hs != Set())
+            all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        } else {
+          val g = B::nodes.get(dB).gen
+          val hs = B::pool.hp.filter(x => x.kind != "rc" and x.gen == g)
+          if (B::haltedPeer(dB, g) and hs != Set())
+            all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
+          else bNone
+        }
+      } else bNone
+    },
+  }
+  action respondReboot = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else {
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      if (ds != Set()) all { matchOk' = true, nondet dB = ds.oneOf() B::nodeReboot(dB) }
+      else bNone
+    },
+  }
+  action respondStutter = all {
+    stage == 1, aStay, stage' = 2, mv' = mv,
+    if (viewA == viewB) all { bStay, matchOk' = true }
+    else bNone,
+  }
+
+  action matchRootAdmit = any { all { viewA == viewB, stepRootAdmit }, respondRootAdmit }
+  action matchRootChangeRights = any { all { viewA == viewB, stepRootChangeRights }, respondRootChangeRights }
+  action matchRootRevoke = any { all { viewA == viewB, stepRootRevoke }, respondRootRevoke }
+  action matchRootEquivocateCp = any { all { viewA == viewB, stepRootEquivocateCp }, respondRootEquivocateCp }
+  action matchRootEquivocatePp = any { all { viewA == viewB, stepRootEquivocatePp }, respondRootEquivocatePp }
+  action matchRecoveryChange = any { all { viewA == viewB, stepRecoveryChange }, respondRecoveryChange }
+  action matchRecoveryEquivocate = any { all { viewA == viewB, stepRecoveryEquivocate }, respondRecoveryEquivocate }
+  action matchAdversaryProof = any { all { viewA == viewB, stepAdversaryProof }, respondAdversaryProof }
+  action matchRecvCp = any { all { viewA == viewB, stepRecvCp }, respondRecvCp }
+  action matchRecvPp = any { all { viewA == viewB, stepRecvPp }, respondRecvPp }
+  action matchRecvRc = any { all { viewA == viewB, stepRecvRc }, respondRecvRc }
+  action matchRecvHp = any { all { viewA == viewB, stepRecvHp }, respondRecvHp }
+  action matchAcceptData = any { all { viewA == viewB, stepAcceptData }, respondStutter }
+  action matchHearsHalted = any { all { viewA == viewB, stepHearsHalted }, respondHearsHalted }
+  action matchReboot = any { all { viewA == viewB, stepReboot }, respondReboot }
+  action matchSend = any { all { viewA == viewB, stepSend }, respondStutter }
+  action matchGrant = any { all { viewA == viewB, stepGrant }, respondStutter }
 }
 
-// The proof instance: the constants of `tiny_tlc` in instances.qnt.
 module tiny_tlc_bisim {
   import bisim(P_DEVICES = Set("a", "b"), P_MAX_GEN = 2, P_MAX_NO = 2, P_WINDOW = 2).*
 }

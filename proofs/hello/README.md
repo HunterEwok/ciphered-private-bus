@@ -49,5 +49,4 @@ proofs/run-tamarin.sh -m hello -w <folder> -p          # every lemma and every p
 
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
-| 2026-11-21 | `96a5de7d9e38` (before the self-connection check) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 4 of 4 lemmas verified, 2 of 2 probes falsified; 0.4 min in total |
-| 2026-11-21 | `4d8b9f9d3b55` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 5 of 5 lemmas verified, 3 of 3 probes falsified; 0.6 min in total |
+| 2026-11-23 | `30a7b40c8eee` (commit 6c43fea) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 5 of 5 lemmas verified, 3 of 3 probes falsified; 0.3 min in total |

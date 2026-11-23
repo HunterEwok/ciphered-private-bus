@@ -56,5 +56,4 @@ proofs/run-tamarin.sh -m channels -w <folder> -p          # every lemma and ever
 
 | Date | Model | Run | Result |
 | --- | --- | --- | --- |
-| 2026-11-21 | `e034fd793b3d` (before the review fixes) | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 6 of 6 lemmas verified, 4 of 4 probes falsified; 2.5 min in total |
 | 2026-11-21 | `2bb74e27518f` | Tamarin 1.12.0, `run-tamarin.sh -c` (every lemma and every probe), 4 cores, one prover at a time | 8 of 8 lemmas verified, 5 of 5 probes falsified; 2.2 min in total |

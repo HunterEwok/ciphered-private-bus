@@ -70,10 +70,12 @@ in class, key, and idempotence, and all bodies of a call that is not idempotent 
 call that was executed and is not idempotent has consumed that nonce; a commander's pending call is in
 the pool and is its latest call. Together they make `atMostOnce` and `freshNonce` follow.
 
-The instances are `tiny_ind` (one commander and the root, 3 nonces, checked in CI), `mid_ind` (both
-kinds of commander and the root, 4 nonces, one reset, no outsider: a commander removed from the
-passport stands for one) for a long run, and `small_ind` (the size of `small`), which ran out of a
-24 GB heap.
+The instances are `tiny_ind` (one commander and the root, 3 nonces, checked in CI), `small_ind` (the
+size of `small`: both kinds of commander, an outsider and the root, 6 nonces, two resets) for a long
+run, and `mid_ind` between the two. `indInit` draws each call's intent field by field and the bodies
+of each call as a bitmap over (nonce, epoch), and `IndInv` checks records field by field: drawing the
+pool of calls as a subset of every possible call (about 1,700 records at the size of `small`) made the
+solver run out of a 53 GB heap.
 
 ## Running
 
@@ -93,6 +95,5 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model calls -
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
 | 2026-11-21 | `dfa55320e4e3` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 12 probes against `safety`, 6 witnesses on `tiny`, breadth-first until the first violation | 18 of 18 violated as expected, 1.0 to 1.3 min each |
-| 2026-11-21 | `dfa55320e4e3`, invariant `5ca3ada08f0a` (commit 56d4c14) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (1 check at a time, 49 GB heap) | `mid_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.8 min, the 10 step branches in 16.8 to 26.2 min, `IndInv` implies `safety` in 9.8 min; 213 min in total. Safety holds in every reachable state of `mid_ind` |
+| 2026-11-23 | `dfa55320e4e3`, invariant `bfcba4e4a1d1` (commit 4ebbe06) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (12 GB heap) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 0.7 min, the 10 step branches in 1.4 to 2.3 min, `IndInv` implies `safety` in 1.8 min; 20.5 min in total. Safety holds in every reachable state of `small` |
 
-`small_ind` ran out of the Java heap (8 GB, then 24 GB) in every branch of the step and has no verdict.

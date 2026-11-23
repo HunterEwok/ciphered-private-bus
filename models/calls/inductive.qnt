@@ -165,9 +165,12 @@ module inductive {
     val ca = tuples(EXECS, NONCES, EPOCHS).filter(t => ip.get(t._1) and bodies.get(t))
       .map(t => { cmd: t._1.cmd, id: t._1.id, idem: ii.get(t._1), act: ia.get(t._1), key: ik.get(t._1),
                   nonce: t._2, epoch: t._3 })
-    val pc = DEVICES.mapBy(d => { cmd: d, id: ki.get(d) - 1, idem: ii.get({ cmd: d, id: ki.get(d) - 1 }),
-      act: ia.get({ cmd: d, id: ki.get(d) - 1 }), key: ik.get({ cmd: d, id: ki.get(d) - 1 }),
-      nonce: pn.get(d), epoch: pe.get(d) })
+    // The lookup key stays inside EXECS; with nextId 1 the id 0 makes IndInv
+    // reject an active pending call, as before.
+    val pc = DEVICES.mapBy(d => {
+      val e = { cmd: d, id: if (ki.get(d) > 1) ki.get(d) - 1 else 1 }
+      { cmd: d, id: ki.get(d) - 1, idem: ii.get(e), act: ia.get(e), key: ik.get(e), nonce: pn.get(d), epoch: pe.get(d) }
+    })
     nondet sn = TAGS.powerset().oneOf()
     val cm = DEVICES.mapBy(d => { nonce: kn.get(d), epoch: ke.get(d), nextId: ki.get(d),
       pending: if (pa.get(d)) { active: true, call: pc.get(d), triedEpoch: pte.get(d), triedMismatch: ptm.get(d) }

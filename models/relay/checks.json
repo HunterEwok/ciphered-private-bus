@@ -74,98 +74,98 @@
         "steps": 0
       },
       {
-        "name": "Struct, safety and RecvPub imply Struct",
+        "name": "Struct and safety and RecvPub imply Struct",
         "init": "initSafe",
         "step": "stepRecvPub",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvGrant imply Struct",
+        "name": "Struct and safety and RecvGrant imply Struct",
         "init": "initSafe",
         "step": "stepRecvGrant",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvReq imply Struct",
+        "name": "Struct and safety and RecvReq imply Struct",
         "init": "initSafe",
         "step": "stepRecvReq",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvCall imply Struct",
+        "name": "Struct and safety and RecvCall imply Struct",
         "init": "initSafe",
         "step": "stepRecvCall",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Connect imply Struct",
+        "name": "Struct and safety and Connect imply Struct",
         "init": "initSafe",
         "step": "stepConnect",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Disconnect imply Struct",
+        "name": "Struct and safety and Disconnect imply Struct",
         "init": "initSafe",
         "step": "stepDisconnect",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootRevoke imply Struct",
+        "name": "Struct and safety and RootRevoke imply Struct",
         "init": "initSafe",
         "step": "stepRootRevoke",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootUnlist imply Struct",
+        "name": "Struct and safety and RootUnlist imply Struct",
         "init": "initSafe",
         "step": "stepRootUnlist",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootChange imply Struct",
+        "name": "Struct and safety and RootChange imply Struct",
         "init": "initSafe",
         "step": "stepRootChange",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootTicket imply Struct",
+        "name": "Struct and safety and RootTicket imply Struct",
         "init": "initSafe",
         "step": "stepRootTicket",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and LearnCp imply Struct",
+        "name": "Struct and safety and LearnCp imply Struct",
         "init": "initSafe",
         "step": "stepLearnCp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and LearnRootChange imply Struct",
+        "name": "Struct and safety and LearnRootChange imply Struct",
         "init": "initSafe",
         "step": "stepLearnRootChange",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and LearnTicket imply Struct",
+        "name": "Struct and safety and LearnTicket imply Struct",
         "init": "initSafe",
         "step": "stepLearnTicket",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvJoin imply Struct",
+        "name": "Struct and safety and RecvJoin imply Struct",
         "init": "initSafe",
         "step": "stepRecvJoin",
         "invariant": "structA",

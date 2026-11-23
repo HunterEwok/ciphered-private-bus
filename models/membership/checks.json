@@ -115,119 +115,119 @@
         "steps": 0
       },
       {
-        "name": "Struct, safety and RootAdmit imply Struct",
+        "name": "Struct and safety and RootAdmit imply Struct",
         "init": "initSafe",
         "step": "stepRootAdmit",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootChangeRights imply Struct",
+        "name": "Struct and safety and RootChangeRights imply Struct",
         "init": "initSafe",
         "step": "stepRootChangeRights",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootRevoke imply Struct",
+        "name": "Struct and safety and RootRevoke imply Struct",
         "init": "initSafe",
         "step": "stepRootRevoke",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootEquivocateCp imply Struct",
+        "name": "Struct and safety and RootEquivocateCp imply Struct",
         "init": "initSafe",
         "step": "stepRootEquivocateCp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RootEquivocatePp imply Struct",
+        "name": "Struct and safety and RootEquivocatePp imply Struct",
         "init": "initSafe",
         "step": "stepRootEquivocatePp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecoveryChange imply Struct",
+        "name": "Struct and safety and RecoveryChange imply Struct",
         "init": "initSafe",
         "step": "stepRecoveryChange",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecoveryEquivocate imply Struct",
+        "name": "Struct and safety and RecoveryEquivocate imply Struct",
         "init": "initSafe",
         "step": "stepRecoveryEquivocate",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and AdversaryProof imply Struct",
+        "name": "Struct and safety and AdversaryProof imply Struct",
         "init": "initSafe",
         "step": "stepAdversaryProof",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvCp imply Struct",
+        "name": "Struct and safety and RecvCp imply Struct",
         "init": "initSafe",
         "step": "stepRecvCp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvPp imply Struct",
+        "name": "Struct and safety and RecvPp imply Struct",
         "init": "initSafe",
         "step": "stepRecvPp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvRc imply Struct",
+        "name": "Struct and safety and RecvRc imply Struct",
         "init": "initSafe",
         "step": "stepRecvRc",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and RecvHp imply Struct",
+        "name": "Struct and safety and RecvHp imply Struct",
         "init": "initSafe",
         "step": "stepRecvHp",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and AcceptData imply Struct",
+        "name": "Struct and safety and AcceptData imply Struct",
         "init": "initSafe",
         "step": "stepAcceptData",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and HearsHalted imply Struct",
+        "name": "Struct and safety and HearsHalted imply Struct",
         "init": "initSafe",
         "step": "stepHearsHalted",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Reboot imply Struct",
+        "name": "Struct and safety and Reboot imply Struct",
         "init": "initSafe",
         "step": "stepReboot",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Send imply Struct",
+        "name": "Struct and safety and Send imply Struct",
         "init": "initSafe",
         "step": "stepSend",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Grant imply Struct",
+        "name": "Struct and safety and Grant imply Struct",
         "init": "initSafe",
         "step": "stepGrant",
         "invariant": "structA",

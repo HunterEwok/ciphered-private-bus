@@ -59,70 +59,70 @@
         "steps": 0
       },
       {
-        "name": "Struct, safety and Answer imply Struct",
+        "name": "Struct and safety and Answer imply Struct",
         "init": "initSafe",
         "step": "stepAnswer",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Learn imply Struct",
+        "name": "Struct and safety and Learn imply Struct",
         "init": "initSafe",
         "step": "stepLearn",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Mismatch imply Struct",
+        "name": "Struct and safety and Mismatch imply Struct",
         "init": "initSafe",
         "step": "stepMismatch",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Start imply Struct",
+        "name": "Struct and safety and Start imply Struct",
         "init": "initSafe",
         "step": "stepStart",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Epoch imply Struct",
+        "name": "Struct and safety and Epoch imply Struct",
         "init": "initSafe",
         "step": "stepEpoch",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Reply imply Struct",
+        "name": "Struct and safety and Reply imply Struct",
         "init": "initSafe",
         "step": "stepReply",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Change imply Struct",
+        "name": "Struct and safety and Change imply Struct",
         "init": "initSafe",
         "step": "stepChange",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Call imply Struct",
+        "name": "Struct and safety and Call imply Struct",
         "init": "initSafe",
         "step": "stepCall",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Reset imply Struct",
+        "name": "Struct and safety and Reset imply Struct",
         "init": "initSafe",
         "step": "stepReset",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Rotate imply Struct",
+        "name": "Struct and safety and Rotate imply Struct",
         "init": "initSafe",
         "step": "stepRotate",
         "invariant": "structA",

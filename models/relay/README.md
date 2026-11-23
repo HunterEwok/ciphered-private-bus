@@ -137,6 +137,14 @@ interchangeable for `safety`, so TLC with the view finds a violation exactly
 when TLC without it would. Run with `run-tlc.ps1 -Model relay -View` and
 `run-inductive.ps1 -Model relay -Section bisim`.
 
+Besides the types, the proof's structural invariant `Struct` holds three facts
+that are also parts of `safety`: one grant per request (`oneGrantOneRequest`),
+the bound on the join buffer (the state half of `joinsBounded`), and no call
+objects in the store (half of `nothingTransient`). The comment in `view.qnt`
+lists only the first. All three are proven by O1 and O2 like every other fact
+of `Struct`, from the initial state and from a safe state, so no part of
+`safety` is assumed; they let the proof draw the store slot by slot.
+
 ## Running
 
 Requirements as for the other models: Quint 0.33.1 from [`models/package-lock.json`](../package-lock.json)

@@ -32,9 +32,10 @@
 #
 # -View runs the instance and state view named under "view" in checks.json
 # (file, instance, operator) with the TLC option VIEW: TLC keeps one state per
-# value of the view. Use it only with a view whose exactness for safety is
-# proven (calls: view.qnt, section "bisim" of run-inductive.ps1). The summary
-# records the hash of the view's file next to the model hash.
+# value of the view. The view is proven exact for `safety` on its own instance
+# only (models/<model>/view.qnt, section "bisim" of run-inductive.ps1), so
+# -View refuses -Probes, -Temporal, another -Invariant and another -Main. The
+# summary records the hash of the view's file next to the model hash.
 #
 # Exit status: 0 no error found (with -Probes: every outcome as expected),
 # 2 invariant violated, 3 no verdict (time limit, disk limit, or an error).
@@ -68,6 +69,8 @@ $Checks = Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Jso
 $SourceFile = "instances.qnt"
 if ($View) {
     if (-not $Checks.view) { throw "models/$Model/checks.json has no view" }
+    if ($Probes -or $Temporal -or $Invariant -ne "safety") { throw "-View is proven for safety only: no -Probes, -Temporal or -Invariant" }
+    if ($Main -and $Main -ne $Checks.view.instance) { throw "-View is proven for the instance $($Checks.view.instance) only, not $Main" }
     $SourceFile = $Checks.view.file
     if (-not $Main) { $Main = $Checks.view.instance }
 }

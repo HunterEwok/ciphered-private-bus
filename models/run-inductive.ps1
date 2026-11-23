@@ -135,6 +135,9 @@ if ($Checks.jobs) {
     # invariant, steps, and optionally main), such as the proof of a TLC view.
     $jobs = @()
     foreach ($j in @($Checks.jobs)) {
+        # -Only takes a comma-separated list, so a name must not hold a comma.
+        if ($j.name -like "*,*") { throw "Job name holds a comma: $($j.name)" }
+        if ($j.expect -and $j.expect -ne 'violated') { throw "Job $($j.name): expect must be 'violated' or absent, not '$($j.expect)'" }
         $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }),
                      $(if ($j.expect) { $j.expect } else { "holds" }))
     }

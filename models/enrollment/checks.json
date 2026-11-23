@@ -49,49 +49,49 @@
         "steps": 0
       },
       {
-        "name": "Struct, safety and PairHonest imply Struct",
+        "name": "Struct and safety and PairHonest imply Struct",
         "init": "initSafe",
         "step": "stepPairHonest",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and AdvJoiner imply Struct",
+        "name": "Struct and safety and AdvJoiner imply Struct",
         "init": "initSafe",
         "step": "stepAdvJoiner",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and AdvAcceptor imply Struct",
+        "name": "Struct and safety and AdvAcceptor imply Struct",
         "init": "initSafe",
         "step": "stepAdvAcceptor",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Send imply Struct",
+        "name": "Struct and safety and Send imply Struct",
         "init": "initSafe",
         "step": "stepSend",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Admit imply Struct",
+        "name": "Struct and safety and Admit imply Struct",
         "init": "initSafe",
         "step": "stepAdmit",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and Request imply Struct",
+        "name": "Struct and safety and Request imply Struct",
         "init": "initSafe",
         "step": "stepRequest",
         "invariant": "structA",
         "steps": 1
       },
       {
-        "name": "Struct, safety and BadRequest imply Struct",
+        "name": "Struct and safety and BadRequest imply Struct",
         "init": "initSafe",
         "step": "stepBadRequest",
         "invariant": "structA",

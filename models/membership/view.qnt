@@ -102,7 +102,12 @@ module tiny_tlc_view {
 // one, which keep issued checkpoints in that shape), one passport per number
 // in a node's cache, one honest checkpoint per generation and number, and
 // processed proofs other than root change proofs of the node's generation or
-// an older one. It does not include `safety` and leaves `broken` arbitrary.
+// an older one. Two of these facts are also parts of `safety`: the window
+// bound of every issued checkpoint (windowBounded) and one passport per number
+// in a cache (the conflict half of cacheConsistent). O1 and O2 prove them like
+// every other fact of Struct, so no part of `safety` is assumed; the per-number
+// cache fact is what makes the answer to an acceptance deterministic. `broken`
+// is left arbitrary.
 //
 // B's answer: no step when A's step left the views equal; otherwise the step
 // of B that the case analysis below gives. Several actions of the model pick
@@ -457,9 +462,7 @@ module bisim {
   action bNone = all { bStay, matchOk' = false }
   action answer = {
     val r = B::root
-    val n = B::nodes.get(mv.d)
     if (mv.kind == "admit") {
-      val p = { gen: r.gen, no: r.nextNo, dev: mv.d, rights: mv.r }
       val c = B::rootCheckpoint(r.valid.union(Set(r.nextNo)), r.nextNo + 1)
       if (r.nextNo <= P_MAX_NO and r.cpNo < P_MAX_NO and c.nextNo - c.start <= P_WINDOW)
         all { B::rootIssue(mv.d, mv.r, Set()), matchOk' = true }
@@ -528,6 +531,7 @@ module bisim {
       if (B::pool.hp.contains(mv.h)) all { B::nodeRecvHp(mv.d, mv.h), matchOk' = true }
       else bNone
     else if (mv.kind == "accept") {
+      val n = B::nodes.get(mv.d)
       // The message of the same sender, passport number, generation and
       // channel with the lowest checkpoint number: the one the view keeps
       // (there is exactly one). nodeAcceptData then picks the passport of
@@ -545,6 +549,7 @@ module bisim {
       } else bNone
     }
     else if (mv.kind == "hears") {
+      val n = B::nodes.get(mv.d)
       val proofs = B::pool.hp.filter(h =>
         (h.kind != "rc" and h.gen == n.gen and B::haltedPeer(mv.d, n.gen)) or (h.kind == "rc" and B::foreverPeer(mv.d)))
       if (proofs != Set() and proofs.contains(mv.h)) all { B::nodeRecvHp(mv.d, mv.h), matchOk' = true }
@@ -552,6 +557,7 @@ module bisim {
     }
     else if (mv.kind == "reboot") all { B::nodeReboot(mv.d), matchOk' = true }
     else if (mv.kind == "send") {
+      val n = B::nodes.get(mv.d)
       val mine = B::pool.pp.filter(p => p.dev == mv.d and p.gen == n.gen)
       if (not(n.halted) and mine != Set() and mine.exists(p => p.no == mv.ppNo))
         all { B::setNode(mv.d, n, { ...B::pool, data: B::pool.data.union(Set({ src: mv.d, ppNo: mv.ppNo, gen: n.gen,
@@ -560,6 +566,7 @@ module bisim {
       else bNone
     }
     else if (mv.kind == "grant") {
+      val n = B::nodes.get(mv.d)
       val p = mv.p
       if (n.pps != Set() and not(n.halted) and n.pps.contains(p) and p.dev != mv.d and B::canRead(p.rights)
           and B::validUnder(p, n.cp)) {

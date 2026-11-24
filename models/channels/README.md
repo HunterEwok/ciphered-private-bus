@@ -87,6 +87,21 @@ last lemma is what makes `rotateOnRemove` follow, and it needs the persisted rot
 The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the size of `small`)
 for a long run.
 
+## State view for TLC
+
+Exhaustive TLC of `tiny` runs with a TLC `VIEW` defined in `view.qnt`. The view drops what no longer
+influences `safety`: the witness tags, the readers granted the current key (they feed only a witness
+tag), the ghost key counter (equal to the source's generation), every grant its reader can no longer
+accept unless it is of the current key, and every publication no reader can accept again, because no
+reader holds its key or can still be granted it, or because its number is neither new nor able to
+enter the window of any reader that may hold the key. These conditions are monotone: a reader's
+highest generation, highest number and window floor never go back, and the source never returns to an
+older key. Module `bisim` proves with Apalache that states with equal views are interchangeable for
+`safety` (obligations O1 to O4 in `view.qnt`, with the inductive invariant as `Struct`), so TLC with the
+view finds a violation exactly when TLC without it would. B answers each step of A with the same step
+and the same choices; a step that reads a dropped grant or publication changes nothing in A, and B
+answers it with no step.
+
 ## Running
 
 ```sh
@@ -95,7 +110,8 @@ python3 models/channels/check.py --inductive tiny_ind    # IndInv in CI
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -View -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels -Section bisim -WorkDir <folder> -Java <path to java>
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -Probes -WorkDir <folder> -Java <path to java>
 powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels -Split -WorkDir <folder> -Java <path to java>
 ```

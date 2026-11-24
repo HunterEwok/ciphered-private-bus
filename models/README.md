@@ -51,7 +51,7 @@ the safety checks speak about is reachable.
 **Records.** A result is recorded in the model's README with the model hash and the hash of the
 proof file (`run-tlc.ps1` and `run-inductive.ps1` compute both from the files and write them to the
 run's `summary.txt`), the commit, the bounds and the time (R-VER-1). A run that was interrupted, or
-that left no `summary.txt`, is not a result (R-VER-5); its checks are run again.
+that left no `summary.txt`, is not a result (R-VER-5).
 
 ## What the results establish and what they rest on
 

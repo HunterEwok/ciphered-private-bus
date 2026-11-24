@@ -106,8 +106,8 @@ holds until the goal is reached; the first one holds until the goal is reached o
 node leaves the generation or the peer is no longer halted there), which the property also
 accepts. Either way the property holds. The probe
 `halted_silent` removes the answer: `safety` still holds, and `HearingEnabled` fails on
-`probe_halted_silent_ind`. A direct TLC check of the temporal formula did not finish: even
-`live_tlc`, one number per generation and two devices, grew past 20 million states.
+`probe_halted_silent_ind`. A direct TLC check of the temporal formula is out of reach: even
+`live_tlc`, one number per generation and two devices, has more than 20 million states.
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated:
 the violation shows that halts, permanent halts, accepted data, key grants, root changes, sends
@@ -143,7 +143,7 @@ The cache and history lemmas keep the proof small. The arbitrary state of obliga
 from one slot per number (3 instead of any subset of 108 passports) and the history from one
 slot per generation and number (9 instead of any subset of 102 checkpoints), and membership in
 the bounded types is checked field by field rather than by comparison with every element of
-the type. Without this, a step branch of `large_ind` ran out of a 53 GB heap.
+the type. The plain encoding of a step branch of `large_ind` does not fit in a 53 GB heap.
 
 The instances are `tiny_ind` (the size of `tiny_tlc`, checked in CI), `small_ind` (three
 devices, three numbers per generation), and `large_ind` (three devices, three generations,
@@ -181,8 +181,8 @@ read only that node and the pool, and the other actions change no node (`nodeHea
 the effect of `nodeRecvHp` with a proof from the pool), so every step of a model with more
 devices preserves the invariant of each node exactly when the one-device steps do. With one
 device, `nodeAcceptData`, `nodeGrant` and `nodeHearsHalted` are never enabled and are not
-checked; the first two change no node. With two devices in one state the arbitrary state of
-obligation 2 ran out of memory even at the smallest size. Obligation 4 runs on two devices.
+checked; the first two change no node. Two devices in one state put the arbitrary state of
+obligation 2 beyond the solver's memory even at the smallest size. Obligation 4 runs on two devices.
 
 The instances are `conv_tiny_ind` and `conv_tiny_pair` (two generations, two numbers, checked in
 CI) and `conv_large_ind` and `conv_large_pair` (three generations and three numbers, as in
@@ -267,9 +267,8 @@ steps enabled with one device, and obligation 4 on `conv_large_pair`):
 powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model membership -Section convergence -WorkDir <folder> -Java <path to java> -Split -Parallel 1
 ```
 
-`-Only` repeats single checks of an earlier run that had no verdict, for example `-Split -Parallel 1
--Only RootChangeRights` with the whole heap for one check; checks of two runs of the same model and
-invariant hashes together make one result.
+`-Only` runs selected checks, for example `-Split -Parallel 1 -Only RootChangeRights` with the
+whole heap for one check; checks of the same model and invariant hashes together make one result.
 
 Apalache hands each check to one solver, which runs on one core. With `-Split` the second
 obligation is checked branch by branch of the step (`stepRootAdmit` to `stepGrant` in
@@ -289,6 +288,3 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 | 2026-11-23 | `70c2b729bc7a`, convergence invariant `db8b9788f5fe` (commit 9d14dcd) | Apalache 0.62.4, `run-inductive.ps1 -Section convergence -Split -Parallel 1`, maintainer's server (53 GB heap) | `conv_large_ind` and `conv_large_pair`: init implies the per-node invariant, it and each of the 14 step branches imply it, it implies `modelSafetyRest`, and a pair of nodes with the same records is converged | 17 of 17 hold: init in 2.0 min, the 14 step branches in 50.5 to 69.0 min (`RecvRc` the longest), safety in 55.9 min, pair implies convergence in 42.7 min; 15.2 h in total. Convergence (S7) holds in every reachable state of `large_ind` |
 | 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 6`, maintainer's server (8 GB heap) | `tiny_tlc_bisim`, all pairs of states satisfying `Struct` | all 49 checks pass: init and the 17 step branches preserve `Struct` (1.3 to 3.6 min), equal views agree on `safety` (2.6 min), each of the 28 step cases is answered with an equal view (4.3 to 10.7 min), both witnesses violated as expected; 42.6 min in total. TLC with the view is exact for `safety` |
 | 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | TLC 1.7.4, `run-tlc.ps1 -View -Share 0.5`, maintainer's server (32 workers) | `tiny_tlc`, exhaustive, `VIEW safetyView` | no error: 1,746,254 distinct states (118,764,134 generated), depth 27, 6 min 40 s; probability of a fingerprint collision 1.1E-5 (TLC's optimistic estimate), 3.5E-7 (from the actual fingerprints) |
-
-Earlier runs of a previous revision are not cited (R-VER-5). The exhaustive TLC run of
-`tiny_tlc` was stopped before it ended, for lack of disk space, and is not a result.

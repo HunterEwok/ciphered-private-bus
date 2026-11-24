@@ -73,9 +73,9 @@ the pool and is its latest call. Together they make `atMostOnce` and `freshNonce
 The instances are `tiny_ind` (one commander and the root, 3 nonces, checked in CI), `small_ind` (the
 size of `small`: both kinds of commander, an outsider and the root, 6 nonces, two resets) for a long
 run, and `mid_ind` between the two. `indInit` draws each call's intent field by field and the bodies
-of each call as a bitmap over (nonce, epoch), and `IndInv` checks records field by field: drawing the
-pool of calls as a subset of every possible call (about 1,700 records at the size of `small`) made the
-solver run out of a 53 GB heap.
+of each call as a bitmap over (nonce, epoch), and `IndInv` checks records field by field: a pool of
+calls drawn as a subset of every possible call (about 1,700 records at the size of `small`) is beyond
+the solver's memory.
 
 ## Running
 

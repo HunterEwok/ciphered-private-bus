@@ -37,6 +37,11 @@
 # -View refuses -Probes, -Temporal, another -Invariant and another -Main. The
 # summary records the hash of the view's file next to the model hash.
 #
+# -Fp picks TLC's fingerprint function (0 to 130); without it TLC picks one at
+# random. The summary records the one used. An exhaustive run can miss a state
+# only if two distinct states share a fingerprint; a second run with another
+# function makes the same miss need a collision in both runs.
+#
 # Exit status: 0 no error found (with -Probes: every outcome as expected),
 # 2 invariant violated, 3 no verdict (time limit, disk limit, or an error).
 
@@ -54,7 +59,8 @@ param(
     [int]$CheckpointMinutes = 60,
     [int]$TimeoutMinutes = 0,
     [switch]$Probes,
-    [switch]$View
+    [switch]$View,
+    [int]$Fp = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -246,6 +252,10 @@ $tlcArgs = @("-XX:+UseParallelGC", "-Xmx${heapGb}g", "-XX:MaxDirectMemorySize=${
              "-Djava.io.tmpdir=`"$(Join-Path $RunDir 'tmp')`"", "-cp", "`"$tools`"", "tlc2.TLC",
              "-workers", "$workers", "-deadlock", "-gzip", "-checkpoint", "$CheckpointMinutes", "-metadir", "states")
 if ($Recover) { $tlcArgs += @("-recover", "`"$Recover`"") }
+if ($Fp -ge 0) {
+    if ($Fp -gt 130) { throw "-Fp must be between 0 and 130" }
+    $tlcArgs += @("-fp", "$Fp")
+}
 $tlcArgs += "$Main.tla"
 
 $log = Join-Path $RunDir "tlc.log"
@@ -310,6 +320,8 @@ $text = if (Test-Path $log) { Get-Content $log } else { @() }
 # fingerprint, which could have left states unexplored; the summary keeps it.
 $keys = 'No error has been found|Error:|is violated|were violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed|calculated \(optimistic\)|based on the actual fingerprints'
 $result = @($text | Where-Object { $_ -match $keys })
+$fpLine = $text | Where-Object { $_ -match 'with fp \d+' } | Select-Object -First 1
+$fpUsed = if ($fpLine -and ($fpLine -match 'with fp (\d+)')) { $Matches[1] } else { "" }
 $stopped = $stoppedForDisk -or $stoppedForTime
 $ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stopped
 $violated = ($text -match 'is violated|Temporal properties were violated').Count -gt 0 -and -not $stopped
@@ -318,6 +330,7 @@ $summary = @(
     "commit: $commit",
     "instance: $Main, invariant: $Invariant$(if ($Temporal) { ", temporal: $Temporal" })",
     "tla2tools: $TlaToolsVersion",
+    "fingerprint function: $(if ($fpUsed) { $fpUsed } else { 'not reported' })",
     ("limits: {0} workers of {1} cores, heap {2} GB, direct {3} GB" -f $workers, $cores, $heapGb, $directGb),
     "started: $($started.ToString('u')), ended: $($ended.ToString('u')), elapsed: $($ended - $started)",
     "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif ($stoppedForTime) { 'stopped at the time limit, not a result' } elseif ($violated) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",

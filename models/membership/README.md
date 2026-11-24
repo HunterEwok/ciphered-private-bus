@@ -187,6 +187,24 @@ record, so moving from generation 2 to 3, or skipping from 1 to 3, needs three. 
 obligation 2. A TLC run of `conv_tlc` is no substitute: it allows one number per generation, so
 two checkpoints of one generation never arrive out of order.
 
+## State view for TLC
+
+Exhaustive TLC of `tiny_tlc` does not finish on its own: the pools hold every
+record ever issued, in any combination, and the run still grew by seven
+million states a minute at depth 12. `view.qnt` defines a TLC `VIEW` that keeps
+only what a guard or `safety` can still read: data messages are dropped
+(sending and accepting them never change anything else), the history becomes
+the two window facts, passports become counts per (generation, number) slot,
+halt proofs become the generations that have one, halted nodes and nodes of
+settled generations lose their checkpoint and cache, and old generations with
+a conflict keep only the bits that can still conflict. Module `bisim` proves
+with Apalache that states with equal views are interchangeable for `safety`,
+so TLC with the view finds a violation exactly when TLC without it would. Its
+structural invariant `Struct` bounds every record and node generation by the
+Root's, and for O4 the six steps with several outcomes are split into cases
+that together cover the whole step. Run with `run-tlc.ps1 -Model membership
+-View` and `run-inductive.ps1 -Model membership -Section bisim`.
+
 ## Running
 
 Requirements: Quint 0.33.1, pinned in [`models/package-lock.json`](../package-lock.json)
@@ -264,6 +282,8 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 | 2026-11-23 | `70c2b729bc7a` (commit 112a58e) | TLC 1.7.4, `run-tlc.ps1 -Probes -Share 0.3`, maintainer's server (19 workers, 22 GB heap) | every probe against `safety` and every witness on `tiny_tlc`, breadth-first until the first violation | 24 of 24 violated as expected (17 probes, 7 witnesses), depth 2 to 10, 26 min in total; the longest is `probe_accept_old_data_gen` (35,879,533 distinct states, depth 10, 4.0 min) |
 | 2026-11-22 | `70c2b729bc7a`, invariant `6b74c23aed0f` (commit a1c4658) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (53 GB heap) | `large_ind`, all states satisfying `IndInv` | all four obligations hold: init in 1.9 min, the 17 step branches in 4.9 to 19.8 min (`HearsHalted` the longest), `IndInv` implies `safety` in 3.8 min and `HearingEnabled` in 4.0 min; 169 min in total. Safety and `haltPropagates` hold in every reachable state of `large_ind` |
 | 2026-11-23 | `70c2b729bc7a`, convergence invariant `db8b9788f5fe` (commit 9d14dcd) | Apalache 0.62.4, `run-inductive.ps1 -Section convergence -Split -Parallel 1`, maintainer's server (53 GB heap) | `conv_large_ind` and `conv_large_pair`: init implies the per-node invariant, it and each of the 14 step branches imply it, it implies `modelSafetyRest`, and a pair of nodes with the same records is converged | 17 of 17 hold: init in 2.0 min, the 14 step branches in 50.5 to 69.0 min (`RecvRc` the longest), safety in 55.9 min, pair implies convergence in 42.7 min; 15.2 h in total. Convergence (S7) holds in every reachable state of `large_ind` |
+| 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 6`, maintainer's server (8 GB heap) | `tiny_tlc_bisim`, all pairs of states satisfying `Struct` | all 49 checks pass: init and the 17 step branches preserve `Struct` (1.3 to 3.6 min), equal views agree on `safety` (2.6 min), each of the 28 step cases is answered with an equal view (4.3 to 10.7 min), both witnesses violated as expected; 42.6 min in total. TLC with the view is exact for `safety` |
+| 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | TLC 1.7.4, `run-tlc.ps1 -View -Share 0.5`, maintainer's server (32 workers) | `tiny_tlc`, exhaustive, `VIEW safetyView` | no error: 1,746,254 distinct states (118,764,134 generated), depth 27, 6 min 40 s |
 
 Earlier runs of a previous revision are not cited (R-VER-5). The exhaustive TLC run of
 `tiny_tlc` was stopped before it ended, for lack of disk space, and is not a result.

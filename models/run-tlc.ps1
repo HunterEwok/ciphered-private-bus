@@ -306,7 +306,9 @@ $ended = Get-Date
 
 # ----------------------------------------------------------------------- summary
 $text = if (Test-Path $log) { Get-Content $log } else { @() }
-$keys = 'No error has been found|Error:|is violated|were violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed'
+# TLC also estimates the probability that two distinct states shared a
+# fingerprint, which could have left states unexplored; the summary keeps it.
+$keys = 'No error has been found|Error:|is violated|were violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed|calculated \(optimistic\)|based on the actual fingerprints'
 $result = @($text | Where-Object { $_ -match $keys })
 $stopped = $stoppedForDisk -or $stoppedForTime
 $ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stopped

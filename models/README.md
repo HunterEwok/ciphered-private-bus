@@ -81,8 +81,11 @@ its SMT solver Z3, and the Java runtime. The versions are pinned in
 
 **Fingerprints.** TLC stores a 64-bit fingerprint of each state, not the state. Two different states
 with the same fingerprint make TLC treat the second as already explored, so an exhaustive run can in
-principle miss states. TLC prints an estimate of the probability that this happened; it is recorded
-with each exhaustive TLC result.
+principle miss states. TLC prints two estimates of the probability that this happened, an optimistic
+one from the numbers of states and one from the fingerprints actually stored; both are recorded with
+each exhaustive TLC result. The largest is that of channels (0.067 optimistic, 7.7E-4 from the
+actual fingerprints, for 254 million distinct states). The Apalache proofs store no fingerprints and
+carry no such probability.
 
 **Model and code.** The models describe the protocol, not the core. Whether the core takes the same
 transitions is level V3, tested by replaying model traces, not proven.

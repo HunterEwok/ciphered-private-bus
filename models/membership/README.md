@@ -93,13 +93,18 @@ of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventua
 the proof. It is proved from the inductive invariant, for every reachable state of `large_ind`
 (see below): `IndInv` implies `HearingEnabled`, which says that while a node has a halted peer of
 its generation and is not halted, or a permanently halted peer and is not permanently halted,
-`nodeHearsHalted` is enabled for it. Weak fairness gives a step of that action that changes the
-state. Such a step either reaches the goal (the node halts, or its halt becomes permanent) or only
-adds a proof to the node's finite set of received proofs: an already halted node may take another
-proof of its generation, which is a stutter when the proof is known and a new element otherwise.
-The second kind can happen only finitely often, and the action stays enabled while the condition
-holds, so a step of the first kind follows unless the condition ends first; either way the
-property holds. The probe
+`nodeHearsHalted` is enabled for it. Weak fairness needs more than a true guard: it needs a step
+of the action that changes the state. While a node has a halted peer of its generation and is not
+halted, every proof the action can choose halts it (a proof of its generation halts it, a root
+change proof halts it permanently), so every step changes the state and reaches the goal. While a
+node has a permanently halted peer and is not permanently halted, `IndInv` puts a root change proof
+in the pool (a permanent halt has one behind it), the action can choose it, and it makes the halt
+permanent. The other choices offer an already halted node another proof of its generation: a
+stutter when the proof is known, a new element of its finite set of received proofs otherwise, so
+they change the state only finitely often. A permanent halt is never undone, so this condition
+holds until the goal is reached; the first one holds until the goal is reached or it ends (the
+node leaves the generation or the peer is no longer halted there), which the property also
+accepts. Either way the property holds. The probe
 `halted_silent` removes the answer: `safety` still holds, and `HearingEnabled` fails on
 `probe_halted_silent_ind`. A direct TLC check of the temporal formula did not finish: even
 `live_tlc`, one number per generation and two devices, grew past 20 million states.
@@ -280,7 +285,7 @@ states and the running time. An interrupted run is not a result (R-VER-5).
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
 | 2026-11-23 | `70c2b729bc7a` (commit 112a58e) | TLC 1.7.4, `run-tlc.ps1 -Probes -Share 0.3`, maintainer's server (19 workers, 22 GB heap) | every probe against `safety` and every witness on `tiny_tlc`, breadth-first until the first violation | 24 of 24 violated as expected (17 probes, 7 witnesses), depth 2 to 10, 26 min in total; the longest is `probe_accept_old_data_gen` (35,879,533 distinct states, depth 10, 4.0 min) |
-| 2026-11-22 | `70c2b729bc7a`, invariant `6b74c23aed0f` (commit a1c4658) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (53 GB heap) | `large_ind`, all states satisfying `IndInv` | all four obligations hold: init in 1.9 min, the 17 step branches in 4.9 to 19.8 min (`HearsHalted` the longest), `IndInv` implies `safety` in 3.8 min and `HearingEnabled` in 4.0 min; 169 min in total. Safety and `haltPropagates` hold in every reachable state of `large_ind` |
+| 2026-11-22 | `70c2b729bc7a`, invariant `6b74c23aed0f` (commit a1c4658) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (53 GB heap) | `large_ind`, all states satisfying `IndInv` | all four obligations hold: init in 1.9 min, the 17 step branches in 4.9 to 19.8 min (`HearsHalted` the longest), `IndInv` implies `safety` in 3.8 min and `HearingEnabled` in 4.0 min; 169 min in total. Safety holds in every reachable state of `large_ind`, and `haltPropagates` on every behaviour of it under the fairness it assumes (see the liveness argument above) |
 | 2026-11-23 | `70c2b729bc7a`, convergence invariant `db8b9788f5fe` (commit 9d14dcd) | Apalache 0.62.4, `run-inductive.ps1 -Section convergence -Split -Parallel 1`, maintainer's server (53 GB heap) | `conv_large_ind` and `conv_large_pair`: init implies the per-node invariant, it and each of the 14 step branches imply it, it implies `modelSafetyRest`, and a pair of nodes with the same records is converged | 17 of 17 hold: init in 2.0 min, the 14 step branches in 50.5 to 69.0 min (`RecvRc` the longest), safety in 55.9 min, pair implies convergence in 42.7 min; 15.2 h in total. Convergence (S7) holds in every reachable state of `large_ind` |
 | 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 6`, maintainer's server (8 GB heap) | `tiny_tlc_bisim`, all pairs of states satisfying `Struct` | all 49 checks pass: init and the 17 step branches preserve `Struct` (1.3 to 3.6 min), equal views agree on `safety` (2.6 min), each of the 28 step cases is answered with an equal view (4.3 to 10.7 min), both witnesses violated as expected; 42.6 min in total. TLC with the view is exact for `safety` |
 | 2026-11-24 | `70c2b729bc7a`, view `6941373df49b` (commit c6c47d3) | TLC 1.7.4, `run-tlc.ps1 -View -Share 0.5`, maintainer's server (32 workers) | `tiny_tlc`, exhaustive, `VIEW safetyView` | no error: 1,746,254 distinct states (118,764,134 generated), depth 27, 6 min 40 s |

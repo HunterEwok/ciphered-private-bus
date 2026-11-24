@@ -68,13 +68,6 @@
         "steps": 1
       },
       {
-        "name": "Struct and safety and EnvJoin imply Struct",
-        "init": "initSafe",
-        "step": "stepEnvJoin",
-        "invariant": "structA",
-        "steps": 1
-      },
-      {
         "name": "Struct and safety and SourceRotate imply Struct",
         "init": "initSafe",
         "step": "stepSourceRotate",
@@ -141,13 +134,6 @@
         "name": "EnvRemove answered with an equal view",
         "init": "initPair",
         "step": "matchEnvRemove",
-        "invariant": "matched",
-        "steps": 2
-      },
-      {
-        "name": "EnvJoin answered with an equal view",
-        "init": "initPair",
-        "step": "matchEnvJoin",
         "invariant": "matched",
         "steps": 2
       },

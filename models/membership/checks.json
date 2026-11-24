@@ -110,7 +110,7 @@
       {
         "name": "init implies Struct",
         "init": "initStruct",
-        "step": "stepRootAdmit",
+        "step": "stepRecoveryChange",
         "invariant": "structA",
         "steps": 0
       },
@@ -236,7 +236,7 @@
       {
         "name": "equal views agree on safety",
         "init": "initPair",
-        "step": "stepRootAdmit",
+        "step": "stepRecoveryChange",
         "invariant": "sameSafety",
         "steps": 0
       },
@@ -290,37 +290,107 @@
         "steps": 2
       },
       {
-        "name": "AdversaryProof answered with an equal view",
+        "name": "AdversaryProof (cp) answered with an equal view",
         "init": "initPair",
-        "step": "matchAdversaryProof",
+        "step": "matchAdversaryProofCp",
         "invariant": "matched",
         "steps": 2
       },
       {
-        "name": "RecvCp answered with an equal view",
+        "name": "AdversaryProof (pp) answered with an equal view",
         "init": "initPair",
-        "step": "matchRecvCp",
+        "step": "matchAdversaryProofPp",
         "invariant": "matched",
         "steps": 2
       },
       {
-        "name": "RecvPp answered with an equal view",
+        "name": "AdversaryProof (rc) answered with an equal view",
         "init": "initPair",
-        "step": "matchRecvPp",
+        "step": "matchAdversaryProofRc",
         "invariant": "matched",
         "steps": 2
       },
       {
-        "name": "RecvRc answered with an equal view",
+        "name": "RecvCp (halt) answered with an equal view",
         "init": "initPair",
-        "step": "matchRecvRc",
+        "step": "matchRecvCpHalt",
         "invariant": "matched",
         "steps": 2
       },
       {
-        "name": "RecvHp answered with an equal view",
+        "name": "RecvCp (advance) answered with an equal view",
         "init": "initPair",
-        "step": "matchRecvHp",
+        "step": "matchRecvCpAdv",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvCp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvCpNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (halt) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpHalt",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (add) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpAdd",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (forever) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcForever",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (advance) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcAdv",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (rc) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpRc",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (gen) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpGen",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpNoop",
         "invariant": "matched",
         "steps": 2
       },
@@ -332,9 +402,16 @@
         "steps": 2
       },
       {
-        "name": "HearsHalted answered with an equal view",
+        "name": "HearsHalted (rc) answered with an equal view",
         "init": "initPair",
-        "step": "matchHearsHalted",
+        "step": "matchHearsHaltedRc",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "HearsHalted (gen) answered with an equal view",
+        "init": "initPair",
+        "step": "matchHearsHaltedGen",
         "invariant": "matched",
         "steps": 2
       },
@@ -370,7 +447,7 @@
       {
         "name": "witness: B answers a step",
         "init": "initPair",
-        "step": "matchReboot",
+        "step": "matchRootAdmit",
         "invariant": "witnessAnswered",
         "steps": 2,
         "expect": "violated"

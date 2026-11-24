@@ -38,7 +38,9 @@
 # the summary on success ("result"). A section may instead list all its
 # checks under "jobs" (name, init, step, invariant, steps, optional main,
 # optional "expect": "violated" for a non-vacuity witness, which passes when
-# Apalache finds a violation); -Only then takes check names.
+# Apalache finds a violation, or "expect": "disabled" for a step branch that the
+# instance never enables, which passes when Apalache finds no state of the
+# initial action that enables the step); -Only then takes check names.
 #
 # Exit status: 0 every obligation holds, 1 otherwise.
 
@@ -137,7 +139,7 @@ if ($Checks.jobs) {
     foreach ($j in @($Checks.jobs)) {
         # -Only takes a comma-separated list, so a name must not hold a comma.
         if ($j.name -like "*,*") { throw "Job name holds a comma: $($j.name)" }
-        if ($j.expect -and $j.expect -ne 'violated') { throw "Job $($j.name): expect must be 'violated' or absent, not '$($j.expect)'" }
+        if ($j.expect -and $j.expect -notin @('violated', 'disabled')) { throw "Job $($j.name): expect must be 'violated', 'disabled' or absent, not '$($j.expect)'" }
         $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }),
                      $(if ($j.expect) { $j.expect } else { "holds" }))
     }
@@ -304,6 +306,12 @@ try {
                                          elseif ($results[$c.Index] -eq "holds") { "HOLDS, a violation was expected" }
                                          else { $results[$c.Index] }
                 }
+                # A branch the instance never enables: Apalache's deadlock is its pass.
+                if ($jobs[$c.Index].Count -gt 6 -and $jobs[$c.Index][6] -eq "disabled") {
+                    $results[$c.Index] = if ($results[$c.Index] -like "DEADLOCK*") { "disabled as expected" }
+                                         elseif ($results[$c.Index] -eq "holds") { "ENABLED, no transition was expected" }
+                                         else { $results[$c.Index] }
+                }
             } elseif ($TimeoutHours -gt 0 -and ((Get-Date) - $c.Started).TotalHours -ge $TimeoutHours) {
                 Stop-Tree $c.Quint
                 $results[$c.Index] = Get-Verdict $c $true; $done = $true
@@ -330,7 +338,7 @@ try {
 $rows = @(); $failures = 0
 for ($i = 0; $i -lt $jobs.Count; $i++) {
     $verdict, $mins = $results[$i] -split '\|'
-    $pass = $verdict -eq "holds" -or $verdict -eq "violated as expected"
+    $pass = $verdict -eq "holds" -or $verdict -eq "violated as expected" -or $verdict -eq "disabled as expected"
     if (-not $pass) { $failures++ }
     $rows += ("{0,-4}  {1,-44} {2}  {3,8} min" -f $(if ($pass) { "pass" } else { "FAIL" }), $jobs[$i][0], $verdict, $mins)
 }

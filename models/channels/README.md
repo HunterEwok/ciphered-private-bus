@@ -101,9 +101,9 @@ older key. Module `bisim` proves with Apalache that states with equal views are 
 view finds a violation exactly when TLC without it would. B answers each step of A with the same step
 and the same choices; a step that reads a dropped grant or publication changes nothing in A, and B
 answers it with no step. The proof runs on `tiny_bisim`, which has the constants of `tiny`; `tiny` has no
-late devices, so `envJoin` is disabled in every state and has no transition. Apalache reports such a
-branch as a deadlock, so the proof's list of branches in `checks.json` leaves `EnvJoin` out of O2 and
-O4.
+late devices, so `envJoin` has no transition. Two checks confirm it with Apalache: no state that
+satisfies `Struct` and `safety`, and no pair with equal views, enables `EnvJoin` (Apalache reports a
+deadlock, which is the expected result), so O2 and O4 hold for it with nothing to answer.
 
 ## Running
 

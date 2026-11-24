@@ -68,6 +68,14 @@
         "steps": 1
       },
       {
+        "name": "EnvJoin has no transition from Struct and safety",
+        "init": "initSafe",
+        "step": "stepEnvJoin",
+        "invariant": "structA",
+        "steps": 1,
+        "expect": "disabled"
+      },
+      {
         "name": "Struct and safety and SourceRotate imply Struct",
         "init": "initSafe",
         "step": "stepSourceRotate",
@@ -136,6 +144,14 @@
         "step": "matchEnvRemove",
         "invariant": "matched",
         "steps": 2
+      },
+      {
+        "name": "EnvJoin has no transition from a pair with equal views",
+        "init": "initPair",
+        "step": "matchEnvJoin",
+        "invariant": "matched",
+        "steps": 2,
+        "expect": "disabled"
       },
       {
         "name": "SourceRotate answered with an equal view",

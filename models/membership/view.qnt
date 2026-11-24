@@ -139,6 +139,14 @@ module viewdefs {
     p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
   pure def curGenOk(n: VNode): bool = n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen)
   pure def cacheOk(n: VNode): bool = n.pps.forall(p => vValidIn(p, n.cp))
+  // Records in one (generation, number) slot, without set cardinality, which
+  // Apalache encodes far more expensively than a quantifier. A slot holds at
+  // most two passports (Struct), so "two" and "one" give the exact count.
+  pure def onePp(ps: Set[VPassport], g: int, k: int): bool = ps.exists(x => x.gen == g and x.no == k)
+  pure def twoPp(ps: Set[VPassport], g: int, k: int): bool =
+    ps.exists(x => x.gen == g and x.no == k and ps.exists(y => y.gen == g and y.no == k and y != x))
+  pure def twoCp(cs: Set[VCheckpoint], g: int, k: int): bool =
+    cs.exists(x => x.gen == g and x.no == k and cs.exists(y => y.gen == g and y.no == k and y != x))
   pure val FOREVER_NODE: NodeView = {
     tag: "forever",
     gen: 0,
@@ -260,7 +268,7 @@ module viewdefs {
       val canProveGens = V_GENS.filter(g =>
         g >= minGen and not(hpGens.contains(g)) and not(cpNeeded.contains(g)) and not(oldConflict.contains(g))
         and hasConflict.get(g))
-      val equivPp = V_SLOTS.filter(s => p.pp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2)
+      val equivPp = V_SLOTS.filter(s => twoPp(p.pp, s._1, s._2))
       val rcBoth = V_GENS.filter(g => p.rc.contains({ gen: g, key: 0 }) and p.rc.contains({ gen: g, key: 1 }))
       {
         allForever: false,
@@ -276,10 +284,10 @@ module viewdefs {
         oldCpProjs: p.cp.filter(c => oldConflict.contains(c.gen))
           .map(c => oldCpProj(c, V_NOS.filter(k => equivPp.contains((c.gen, k))))),
         oldCpConfl: V_SLOTS.filter(s =>
-          oldConflict.contains(s._1) and p.cp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2),
+          oldConflict.contains(s._1) and twoCp(p.cp, s._1, s._2)),
         poolPp: V_SLOTS.mapBy(s =>
           if (cpNeeded.contains(s._1)) {
-            val cnt = p.pp.filter(x => x.gen == s._1 and x.no == s._2).size()
+            val cnt = if (twoPp(p.pp, s._1, s._2)) 2 else if (onePp(p.pp, s._1, s._2)) 1 else 0
             if (s._1 < r.gen and cnt < 2) 0 else cnt
           } else if (oldConflict.contains(s._1)) {
             if (equivPp.contains(s)) 2 else 0
@@ -442,7 +450,7 @@ module bisim {
     val hasUnhalted = V_GENS.mapBy(g => V_DEVICES.exists(e => not(ns.get(e).halted) and ns.get(e).gen == g))
     val oldConflict = V_GENS.filter(g =>
       g < r.gen and not(hpGens.contains(g)) and hasConflict.get(g) and hasUnhalted.get(g))
-    val equivPp = V_SLOTS.filter(s => p.pp.filter(x => x.gen == s._1 and x.no == s._2).size() >= 2)
+    val equivPp = V_SLOTS.filter(s => twoPp(p.pp, s._1, s._2))
     val rcBoth = V_GENS.filter(g => p.rc.contains({ gen: g, key: 0 }) and p.rc.contains({ gen: g, key: 1 }))
     nodeViewOf(ns.get(d), r.gen, hpGens, cleanOld, oldConflict, equivPp, rcBoth)
   }
@@ -452,9 +460,15 @@ module bisim {
   pure val NO_PP: VPassport = { gen: 0, no: 0, dev: "", rights: 0 }
   pure val NO_RC: VRootChange = { gen: 0, key: 0 }
   pure val NO_HP: VHaltProof = { kind: "", gen: 0, no: 0 }
+  // A's state before its step is kept in the move, and B's answer computes the
+  // view of A's node from it; computing it inside A's step would put the view
+  // into the checks of Struct (O2), which never read it.
   type Move = { d: str, rights: int, k: int, c: VCheckpoint, p: VPassport, rc: VRootChange, h: VHaltProof,
-                preNv: NodeView }
-  pure val NO_MOVE: Move = { d: "", rights: 0, k: 0, c: NO_CP, p: NO_PP, rc: NO_RC, h: NO_HP, preNv: FOREVER_NODE }
+                preNodes: str -> VNode, preRoot: VRoot, prePool: VPool }
+  pure val NO_ROOT: VRoot = { gen: 0, cpNo: 0, nextNo: 0, valid: Set(), rights: Map(), revoked: Set() }
+  pure val NO_POOL: VPool = { cp: Set(), pp: Set(), rc: Set(), hp: Set(), data: Set() }
+  pure val NO_MOVE: Move = { d: "", rights: 0, k: 0, c: NO_CP, p: NO_PP, rc: NO_RC, h: NO_HP,
+                             preNodes: Map(), preRoot: NO_ROOT, prePool: NO_POOL }
   var stage: int      // 0: before A's step, 1: after it, 2: after B's answer
   var mv: Move        // A's step parameters, as B needs them
   var matchOk: bool   // B's answer was enabled
@@ -618,30 +632,30 @@ module bisim {
   action stepRecvCp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.cp != Set(),
     nondet d = P_DEVICES.oneOf() nondet c = A::pool.cp.oneOf()
     all { A::nodeRecvCp(d, c),
-          mv' = { ...NO_MOVE, d: d, c: c, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, c: c, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepRecvPp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.pp != Set(),
     nondet d = P_DEVICES.oneOf() nondet p = A::pool.pp.oneOf()
     all { A::nodeRecvPp(d, p),
-          mv' = { ...NO_MOVE, d: d, p: p, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, p: p, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepRecvRc = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.rc != Set(),
     nondet d = P_DEVICES.oneOf() nondet rc = A::pool.rc.oneOf()
     all { A::nodeRecvRc(d, rc),
-          mv' = { ...NO_MOVE, d: d, rc: rc, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, rc: rc, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepRecvHp = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.hp != Set(),
     nondet d = P_DEVICES.oneOf() nondet h = A::pool.hp.oneOf()
     all { A::nodeRecvHp(d, h),
-          mv' = { ...NO_MOVE, d: d, h: h, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, h: h, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepAcceptData = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.data != Set(),
     nondet d = P_DEVICES.oneOf() nondet m = A::pool.data.oneOf()
     all { A::nodeAcceptData(d, m), mv' = NO_MOVE } }
   action stepHearsHalted = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet d = P_DEVICES.oneOf()
     all { A::nodeHearsHalted(d),
-          mv' = { ...NO_MOVE, d: d, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepReboot = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet d = P_DEVICES.oneOf()
     all { A::nodeReboot(d),
-          mv' = { ...NO_MOVE, d: d, preNv: curNodeView(A::nodes, A::root, A::pool, d, viewA.hpGens) } } }
+          mv' = { ...NO_MOVE, d: d, preNodes: A::nodes, preRoot: A::root, prePool: A::pool } } }
   action stepSend = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet d = P_DEVICES.oneOf() all { A::nodeSend(d), mv' = NO_MOVE } }
   action stepGrant = all { pre, bStay, stage' = 1, matchOk' = true,
@@ -711,8 +725,8 @@ module bisim {
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
       val ks = V_NOS.filter(k =>
-        A::pool.pp.filter(x => x.gen == B::root.gen and x.no == k).size() == 2
-        and B::pool.pp.filter(x => x.gen == B::root.gen and x.no == k).size() == 1)
+        twoPp(A::pool.pp, B::root.gen, k)
+        and onePp(B::pool.pp, B::root.gen, k) and not(twoPp(B::pool.pp, B::root.gen, k)))
       val cands = B::pool.pp.filter(p => p.gen == B::root.gen and ks.contains(p.no))
       if (cands != Set()) {
         nondet p = cands.oneOf()
@@ -769,7 +783,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) {
         nondet dB = ds.oneOf()
         val nB = B::nodes.get(dB)
@@ -777,13 +792,13 @@ module bisim {
           val hs = B::pool.hp.filter(x => x.kind != "rc" and x.gen == nB.gen)
           if (hs != Set()) all { matchOk' = true, nondet x = hs.oneOf() B::nodeRecvHp(dB, x) }
           else bNone
-        } else if (mv.preNv.tag == "live_old") {
+        } else if (preNv.tag == "live_old") {
           if (A::nodes.get(mv.d).halted) {
             val cands = B::pool.cp.filter(x => x.gen == nB.gen and x.no == nB.cp.no and x != nB.cp)
             if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvCp(dB, x) }
             else bNone
           } else {
-            val eNos = V_NOS.filter(k => B::pool.pp.filter(x => x.gen == nB.gen and x.no == k).size() >= 2)
+            val eNos = V_NOS.filter(k => twoPp(B::pool.pp, nB.gen, k))
             val want = oldCpProj(mv.c, eNos)
             val cands = B::pool.cp.filter(x => x.gen == nB.gen and oldCpProj(x, eNos) == want)
             if (cands != Set()) all { matchOk' = true, nondet x = cands.oneOf() B::nodeRecvCp(dB, x) }
@@ -799,7 +814,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) {
         nondet dB = ds.oneOf()
         if (viewB.hpGens.contains(B::nodes.get(dB).gen)) {
@@ -823,7 +839,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) {
         nondet dB = ds.oneOf()
         val nB = B::nodes.get(dB)
@@ -841,7 +858,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) {
         nondet dB = ds.oneOf()
         if (mv.h.kind == "rc") {
@@ -860,7 +878,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) {
         nondet dB = ds.oneOf()
         if (A::nodes.get(mv.d).forever) {
@@ -882,7 +901,8 @@ module bisim {
     stage == 1, aStay, stage' = 2, mv' = mv,
     if (viewA == viewB) all { bStay, matchOk' = true }
     else {
-      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == mv.preNv)
+      val preNv = curNodeView(mv.preNodes, mv.preRoot, mv.prePool, mv.d, viewB.hpGens)
+      val ds = P_DEVICES.filter(e => curNodeView(B::nodes, B::root, B::pool, e, viewB.hpGens) == preNv)
       if (ds != Set()) all { matchOk' = true, nondet dB = ds.oneOf() B::nodeReboot(dB) }
       else bNone
     },

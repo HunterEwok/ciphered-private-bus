@@ -10,7 +10,7 @@ and what it rests on.
 | Model | Exhaustive TLC on `tiny` | Inductive proof (Apalache) | Probes and witnesses |
 | --- | --- | --- | --- |
 | [membership](membership/) | with a proven view, `tiny_tlc` | `large_ind`; convergence on `conv_large_ind` | TLC |
-| [channels](channels/) | every state | `small_ind` | TLC |
+| [channels](channels/) | with a proven view | `small_ind` | TLC |
 | [calls](calls/) | with a proven view | `small_ind` | TLC |
 | [enrollment](enrollment/) | with a proven view | `small_ind` | TLC |
 | [streams](streams/) | every state | `small_ind` | TLC |
@@ -19,9 +19,9 @@ and what it rests on.
 ## How a result is obtained
 
 **Exhaustive TLC.** TLC explores every reachable state of the instance and checks `safety` in each.
-For channels and streams it stores every state. For the other four the state space of `tiny` is too
-large to store, and TLC runs with a `VIEW`: two states with the same view are stored once, and only
-the first one found is explored further. A view is not trusted on its own. Each `view.qnt` carries a
+For streams it stores every state. For the other five TLC runs with a `VIEW`, which keeps the number
+of stored states, and with it the probability of a fingerprint collision (below), small: two states
+with the same view are stored once, and only the first one found is explored further. A view is not trusted on its own. Each `view.qnt` carries a
 proof, checked by Apalache on two copies A and B of the model, that the view is exact for `safety`:
 
 - O1. Every initial state satisfies `Struct`.
@@ -83,8 +83,8 @@ its SMT solver Z3, and the Java runtime. The versions are pinned in
 with the same fingerprint make TLC treat the second as already explored, so an exhaustive run can in
 principle miss states. TLC prints two estimates of the probability that this happened, an optimistic
 one from the numbers of states and one from the fingerprints actually stored; both are recorded with
-each exhaustive TLC result. The largest is that of channels (0.067 optimistic, 7.7E-4 from the
-actual fingerprints, for 254 million distinct states). The Apalache proofs store no fingerprints and
+each exhaustive TLC result. The largest is that of streams (9.3E-4 optimistic, 3.6E-5 from the
+actual fingerprints, for 47 million distinct states). The Apalache proofs store no fingerprints and
 carry no such probability.
 
 **Model and code.** The models describe the protocol, not the core. Whether the core takes the same

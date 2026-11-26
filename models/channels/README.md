@@ -87,6 +87,24 @@ last lemma is what makes `rotateOnRemove` follow, and it needs the persisted rot
 The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the size of `small`)
 for a long run.
 
+## State view for TLC
+
+Exhaustive TLC of `tiny` runs with a TLC `VIEW` defined in `view.qnt`. The view drops what no longer
+influences `safety`: the witness tags, the readers granted the current key (they feed only a witness
+tag), the ghost key counter (equal to the source's generation), every grant its reader can no longer
+accept unless it is of the current key, and every publication no reader can accept again, because no
+reader holds its key or can still be granted it, or because its number is neither new nor able to
+enter the window of any reader that may hold the key. These conditions are monotone: a reader's
+highest generation, highest number and window floor never go back, and the source never returns to an
+older key. Module `bisim` proves with Apalache that states with equal views are interchangeable for
+`safety` (obligations O1 to O4 in `view.qnt`, with the inductive invariant as `Struct`), so TLC with the
+view finds a violation exactly when TLC without it would. B answers each step of A with the same step
+and the same choices; a step that reads a dropped grant or publication changes nothing in A, and B
+answers it with no step. The proof runs on `tiny_bisim`, which has the constants of `tiny`; `tiny` has no
+late devices, so `envJoin` has no transition. Two checks confirm it with Apalache: no state that
+satisfies `Struct` and `safety`, and no pair with equal views, enables `EnvJoin` (Apalache reports a
+deadlock, which is the expected result), so O2 and O4 hold for it with nothing to answer.
+
 ## Running
 
 ```sh
@@ -95,7 +113,8 @@ python3 models/channels/check.py --inductive tiny_ind    # IndInv in CI
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -View -WorkDir <folder> -Java <path to java>
+powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels -Section bisim -WorkDir <folder> -Java <path to java>
 powershell -ExecutionPolicy Bypass -File models\run-tlc.ps1 -Model channels -Probes -WorkDir <folder> -Java <path to java>
 powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels -Split -WorkDir <folder> -Java <path to java>
 ```
@@ -108,4 +127,6 @@ powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channel
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
 | 2026-11-21 | `d4085bb6dda6` | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (49 workers) | 14 probes against `safety`, 7 witnesses on `tiny`, breadth-first until the first violation | 21 of 21 violated as expected, depth 8 to 15, 9 s to 78 s each |
+| 2026-11-24 | `d4085bb6dda6`, view `c83d88078c76` (commit f0ca664) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Split -Parallel 4`, maintainer's server (6 GB heap) | `tiny_bisim`, all pairs of states satisfying `Struct` | all 24 checks pass: init and the 9 enabled step branches preserve `Struct` (0.9 to 4.5 min), `EnvJoin` has no transition from a state satisfying `Struct` and `safety` (1.7 min) nor from a pair with equal views (6.0 min), equal views agree on `safety` (2.1 min), each of the 9 enabled branches is answered with an equal view (9.0 to 131.5 min, `ReaderPub` the longest), both witnesses violated as expected; 2 h 32 min in total. TLC with the view is exact for `safety` |
+| 2026-11-24 | `d4085bb6dda6`, view `c83d88078c76` (commit f0ca664) | TLC 1.7.4, `run-tlc.ps1 -View`, maintainer's server (54 workers, 64 GB heap) | `tiny`, exhaustive, `VIEW safetyView` | no error: 29,966,498 distinct states (586,616,335 generated), depth 28, 4 min 54 s; probability of a fingerprint collision 9.0E-4 (TLC's optimistic estimate), 2.8E-5 (from the actual fingerprints) |
 | 2026-11-21 | `d4085bb6dda6`, invariant `5555ca83833d` | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server (6 checks at a time, 8 GB heap each) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 0.9 min, the 10 step branches in 3.1 to 34.4 min (`ReaderPub` the longest), `IndInv` implies `safety` in 3.1 min; 38 min in total. Safety holds in every reachable state of `small` |

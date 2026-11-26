@@ -24,7 +24,7 @@
     "witnessMismatchRetryExecuted"
   ],
   "inductive": {
-    "instance": "mid_ind",
+    "instance": "small_ind",
     "smallInstance": "tiny_ind",
     "parallel": 1,
     "steps": [
@@ -39,5 +39,189 @@
       "stepReset",
       "stepRotate"
     ]
+  },
+  "view": {
+    "file": "view.qnt",
+    "instance": "tiny_view",
+    "operator": "safetyView"
+  },
+  "bisim": {
+    "file": "view.qnt",
+    "instance": "tiny_bisim",
+    "smallInstance": "tiny_bisim",
+    "parallel": 1,
+    "jobs": [
+      {
+        "name": "init implies Struct",
+        "init": "initStruct",
+        "step": "stepRotate",
+        "invariant": "structA",
+        "steps": 0
+      },
+      {
+        "name": "Struct and safety and Answer imply Struct",
+        "init": "initSafe",
+        "step": "stepAnswer",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Learn imply Struct",
+        "init": "initSafe",
+        "step": "stepLearn",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Mismatch imply Struct",
+        "init": "initSafe",
+        "step": "stepMismatch",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Start imply Struct",
+        "init": "initSafe",
+        "step": "stepStart",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Epoch imply Struct",
+        "init": "initSafe",
+        "step": "stepEpoch",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Reply imply Struct",
+        "init": "initSafe",
+        "step": "stepReply",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Change imply Struct",
+        "init": "initSafe",
+        "step": "stepChange",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Call imply Struct",
+        "init": "initSafe",
+        "step": "stepCall",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Reset imply Struct",
+        "init": "initSafe",
+        "step": "stepReset",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Rotate imply Struct",
+        "init": "initSafe",
+        "step": "stepRotate",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "equal views agree on safety",
+        "init": "initPair",
+        "step": "stepRotate",
+        "invariant": "sameSafety",
+        "steps": 0
+      },
+      {
+        "name": "Answer answered with an equal view",
+        "init": "initPair",
+        "step": "matchAnswer",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Learn answered with an equal view",
+        "init": "initPair",
+        "step": "matchLearn",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Mismatch answered with an equal view",
+        "init": "initPair",
+        "step": "matchMismatch",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Start answered with an equal view",
+        "init": "initPair",
+        "step": "matchStart",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Epoch answered with an equal view",
+        "init": "initPair",
+        "step": "matchEpoch",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Reply answered with an equal view",
+        "init": "initPair",
+        "step": "matchReply",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Change answered with an equal view",
+        "init": "initPair",
+        "step": "matchChange",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Call answered with an equal view",
+        "init": "initPair",
+        "step": "matchCall",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Reset answered with an equal view",
+        "init": "initPair",
+        "step": "matchReset",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Rotate answered with an equal view",
+        "init": "initPair",
+        "step": "matchRotate",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "witness: a pair with equal views",
+        "init": "initPair",
+        "step": "stepRotate",
+        "invariant": "witnessPair",
+        "steps": 0,
+        "expect": "violated"
+      },
+      {
+        "name": "witness: B answers a step",
+        "init": "initPair",
+        "step": "matchRotate",
+        "invariant": "witnessAnswered",
+        "steps": 2,
+        "expect": "violated"
+      }
+    ],
+    "result": "states with equal views are interchangeable for safety: TLC with the view is exact"
   }
 }

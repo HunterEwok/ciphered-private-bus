@@ -29,5 +29,147 @@
       "stepRequest",
       "stepBadRequest"
     ]
+  },
+  "view": {
+    "file": "view.qnt",
+    "instance": "tiny_view",
+    "operator": "safetyView"
+  },
+  "bisim": {
+    "file": "view.qnt",
+    "instance": "tiny_bisim",
+    "smallInstance": "tiny_bisim",
+    "parallel": 1,
+    "jobs": [
+      {
+        "name": "init implies Struct",
+        "init": "initStruct",
+        "step": "stepPairHonest",
+        "invariant": "structA",
+        "steps": 0
+      },
+      {
+        "name": "Struct and safety and PairHonest imply Struct",
+        "init": "initSafe",
+        "step": "stepPairHonest",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and AdvJoiner imply Struct",
+        "init": "initSafe",
+        "step": "stepAdvJoiner",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and AdvAcceptor imply Struct",
+        "init": "initSafe",
+        "step": "stepAdvAcceptor",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Send imply Struct",
+        "init": "initSafe",
+        "step": "stepSend",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Admit imply Struct",
+        "init": "initSafe",
+        "step": "stepAdmit",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Request imply Struct",
+        "init": "initSafe",
+        "step": "stepRequest",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and BadRequest imply Struct",
+        "init": "initSafe",
+        "step": "stepBadRequest",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "equal views agree on safety",
+        "init": "initPair",
+        "step": "stepPairHonest",
+        "invariant": "sameSafety",
+        "steps": 0
+      },
+      {
+        "name": "PairHonest answered with an equal view",
+        "init": "initPair",
+        "step": "matchPairHonest",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AdvJoiner answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdvJoiner",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AdvAcceptor answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdvAcceptor",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Send answered with an equal view",
+        "init": "initPair",
+        "step": "matchSend",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Admit answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdmit",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Request answered with an equal view",
+        "init": "initPair",
+        "step": "matchRequest",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "BadRequest answered with an equal view",
+        "init": "initPair",
+        "step": "matchBadRequest",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "witness: a pair with equal views",
+        "init": "initPair",
+        "step": "stepPairHonest",
+        "invariant": "witnessPair",
+        "steps": 0,
+        "expect": "violated"
+      },
+      {
+        "name": "witness: B answers a step",
+        "init": "initPair",
+        "step": "matchSend",
+        "invariant": "witnessAnswered",
+        "steps": 2,
+        "expect": "violated"
+      }
+    ],
+    "result": "states with equal views are interchangeable for safety: TLC with the view is exact"
   }
 }

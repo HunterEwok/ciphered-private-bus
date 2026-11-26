@@ -38,6 +38,16 @@ module inductive {
   // ------------------------------------------------------------------- parts
   pure def exOf(x: Call): Exec = { cmd: x.cmd, id: x.id }
 
+  // Membership in CALLS and REPLIES, field by field: a set of a few thousand
+  // records would make every subset test quadratic for the solver.
+  pure def isCall(x: Call): bool = and {
+    DEVICES.contains(x.cmd), IDS.contains(x.id), ACTIONS.contains(x.act), KEYS.contains(x.key),
+    NONCES.contains(x.nonce), EPOCHS.contains(x.epoch),
+  }
+  pure def isReply(r: Reply): bool = and {
+    DEVICES.contains(r.cmd), IDS.contains(r.id), 0 <= r.nextNonce, r.nextNonce <= MAX_NONCE,
+  }
+
   // The target's counters and slots: every slot holds a nonce issued to its
   // device in the current era and not consumed.
   pure def targetOk(sl: str -> int, te: int, pp: str -> Set[int], nm: Set[str], is: int, it: int -> Issue, er: int,
@@ -63,10 +73,10 @@ module inductive {
   // not idempotent has consumed it.
   pure def callsOk(ca: Set[Call], re: Set[Reply], is: int, co: Set[int], ex: Set[Exec], inn: Exec -> Call,
                    cm: str -> Commander): bool = and {
-    ca.subseteq(CALLS), re.subseteq(REPLIES), ex.subseteq(EXECS), inn.keys() == EXECS,
+    ca.forall(x => isCall(x)), re.forall(r => isReply(r)), ex.subseteq(EXECS), inn.keys() == EXECS,
     ca.forall(x => x.nonce <= is),
     re.forall(r => r.nextNonce <= is),
-    EXECS.forall(e => inn.get(e) == noCall or (CALLS.contains(inn.get(e)) and exOf(inn.get(e)) == e
+    EXECS.forall(e => inn.get(e) == noCall or (isCall(inn.get(e)) and exOf(inn.get(e)) == e
                                               and ca.contains(inn.get(e)))),
     EXECS.forall(e => (inn.get(e) == noCall) iff (e.id >= cm.get(e.cmd).nextId)),
     ca.forall(x => agrees(x, inn.get(exOf(x)))),
@@ -128,10 +138,10 @@ module inductive {
     nondet ke = setOfMaps(DEVICES, EPOCHS).oneOf()
     nondet ki = setOfMaps(DEVICES, 1.to(MAX_CALLS + 1)).oneOf()
     nondet pa = setOfMaps(DEVICES, Set(false, true)).oneOf()
-    nondet pc = setOfMaps(DEVICES, CALLS).oneOf()
+    nondet pn = setOfMaps(DEVICES, NONCES).oneOf()
+    nondet pe = setOfMaps(DEVICES, EPOCHS).oneOf()
     nondet pte = setOfMaps(DEVICES, Set(false, true)).oneOf()
     nondet ptm = setOfMaps(DEVICES, Set(false, true)).oneOf()
-    nondet ca = CALLS.powerset().oneOf()
     nondet re = REPLIES.powerset().oneOf()
     nondet sh = NONCES.powerset().oneOf()
     nondet is = 0.to(MAX_NONCE).oneOf()
@@ -139,7 +149,28 @@ module inductive {
     nondet er = 0.to(MAX_RESETS).oneOf()
     nondet co = NONCES.powerset().oneOf()
     nondet ex = EXECS.powerset().oneOf()
-    nondet inn = setOfMaps(EXECS, CALLS.union(Set(noCall))).oneOf()
+    // Intents field by field, and the bodies of each call as a bitmap over
+    // (nonce, epoch): IndInv makes every body agree with its call's intent in
+    // all other fields, so these draw every state of IndInv.
+    nondet ip = setOfMaps(EXECS, Set(false, true)).oneOf()
+    nondet ii = setOfMaps(EXECS, Set(false, true)).oneOf()
+    nondet ia = setOfMaps(EXECS, ACTIONS).oneOf()
+    nondet ik = setOfMaps(EXECS, KEYS).oneOf()
+    nondet ino = setOfMaps(EXECS, NONCES).oneOf()
+    nondet iep = setOfMaps(EXECS, EPOCHS).oneOf()
+    nondet bodies = setOfMaps(tuples(EXECS, NONCES, EPOCHS), Set(false, true)).oneOf()
+    val inn = EXECS.mapBy(e => if (ip.get(e))
+      { cmd: e.cmd, id: e.id, idem: ii.get(e), act: ia.get(e), key: ik.get(e), nonce: ino.get(e), epoch: iep.get(e) }
+      else noCall)
+    val ca = tuples(EXECS, NONCES, EPOCHS).filter(t => ip.get(t._1) and bodies.get(t))
+      .map(t => { cmd: t._1.cmd, id: t._1.id, idem: ii.get(t._1), act: ia.get(t._1), key: ik.get(t._1),
+                  nonce: t._2, epoch: t._3 })
+    // The lookup key stays inside EXECS; with nextId 1 the id 0 makes IndInv
+    // reject an active pending call, as before.
+    val pc = DEVICES.mapBy(d => {
+      val e = { cmd: d, id: if (ki.get(d) > 1) ki.get(d) - 1 else 1 }
+      { cmd: d, id: ki.get(d) - 1, idem: ii.get(e), act: ia.get(e), key: ik.get(e), nonce: pn.get(d), epoch: pe.get(d) }
+    })
     nondet sn = TAGS.powerset().oneOf()
     val cm = DEVICES.mapBy(d => { nonce: kn.get(d), epoch: ke.get(d), nextId: ki.get(d),
       pending: if (pa.get(d)) { active: true, call: pc.get(d), triedEpoch: pte.get(d), triedMismatch: ptm.get(d) }
@@ -157,15 +188,6 @@ module tiny_ind {
   import inductive(I_COMMANDERS = Set("a"), I_OUTSIDERS = Set(), I_ROOT = "r", I_PRESENCE = Set("a"),
                    I_RIGHTS = Map("a" -> Set(1, 2)), I_MAX_NONCE = 3, I_MAX_EPOCH = 3, I_MAX_CALLS = 2,
                    I_MAX_RESETS = 1, I_MUTANT = "none").*
-}
-
-// Between the two: both kinds of commander and the root, without an outsider
-// (a commander removed from the passport stands for one), 4 nonces, 1 reset.
-// small_ind ran out of a 24 GB heap.
-module mid_ind {
-  import inductive(I_COMMANDERS = Set("a", "b"), I_OUTSIDERS = Set(), I_ROOT = "r", I_PRESENCE = Set("b"),
-                   I_RIGHTS = Map("a" -> Set(1), "b" -> Set(1, 2)), I_MAX_NONCE = 4, I_MAX_EPOCH = 3,
-                   I_MAX_CALLS = 2, I_MAX_RESETS = 1, I_MUTANT = "none").*
 }
 
 module small_ind {

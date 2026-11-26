@@ -1,0 +1,47 @@
+{
+  "tlcInstance": "tiny",
+  "witnessInstance": "tiny",
+  "probes": [
+    "ordered_gap",
+    "lossy_old",
+    "id_only",
+    "no_dir",
+    "unknown_opens",
+    "reuse_no",
+    "ignore_credit",
+    "no_credit_check",
+    "credit_replay",
+    "evict",
+    "reset_busy",
+    "halt_keeps",
+    "revoke_keeps"
+  ],
+  "witnesses": [
+    "witnessOrderedData",
+    "witnessCreditAdded",
+    "witnessLossyGap",
+    "witnessTooMany",
+    "witnessStaleDropped",
+    "witnessResetClosed",
+    "witnessOrderClose",
+    "witnessCreditClose"
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "parallel": 1,
+    "steps": [
+      "stepCall",
+      "stepOpen",
+      "stepReply",
+      "stepSend",
+      "stepOverrun",
+      "stepReceive",
+      "stepReset",
+      "stepHalt",
+      "stepRevoke",
+      "stepReboot",
+      "stepLinkDown"
+    ]
+  }
+}

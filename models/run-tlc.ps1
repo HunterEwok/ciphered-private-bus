@@ -17,12 +17,30 @@
 # Ctrl+C stops only the progress output; TLC keeps running. To stop TLC, use
 # Stop-Process with the PID the script prints. To continue a stopped run from
 # its last checkpoint, pass -Recover with the checkpoint folder (states\<date>).
+# A run that ends with a verdict deletes its checkpoint and temporary files;
+# the log and the summary stay.
+# TLC writes a checkpoint every -CheckpointMinutes (default 60); 0 writes none,
+# which saves disk space and time, but a stopped run then starts over.
+# The state queue on disk is compressed (-gzip): about a sixth of the space
+# at the same speed.
 #
 # -Probes checks the translation to TLA+ instead: it runs TLC on every probe
 # instance (each must violate `safety`) and on every witness (each must be
 # violated), as listed in the model's checks.json, one after another with -TimeoutMinutes each, and prints a table of
 # expected and actual outcomes. A run that reaches its time limit has no
 # verdict and counts as a failure.
+#
+# -View runs the instance and state view named under "view" in checks.json
+# (file, instance, operator) with the TLC option VIEW: TLC keeps one state per
+# value of the view. The view is proven exact for `safety` on its own instance
+# only (models/<model>/view.qnt, section "bisim" of run-inductive.ps1), so
+# -View refuses -Probes, -Temporal, another -Invariant and another -Main. The
+# summary records the hash of the view's file next to the model hash.
+#
+# -Fp picks TLC's fingerprint function (0 to 130); without it TLC picks one at
+# random. The summary records the one used. An exhaustive run can miss a state
+# only if two distinct states share a fingerprint; a second run with another
+# function makes the same miss need a collision in both runs.
 #
 # Exit status: 0 no error found (with -Probes: every outcome as expected),
 # 2 invariant violated, 3 no verdict (time limit, disk limit, or an error).
@@ -38,8 +56,11 @@ param(
     [int]$MinFreeDiskPercent = 15,
     [int]$IntervalSeconds = 60,
     [string]$Recover = "",
+    [int]$CheckpointMinutes = 60,
     [int]$TimeoutMinutes = 0,
-    [switch]$Probes
+    [switch]$Probes,
+    [switch]$View,
+    [int]$Fp = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +72,14 @@ $ModelsDir = $PSScriptRoot
 $ModelDir = Join-Path $ModelsDir $Model
 if (-not (Test-Path (Join-Path $ModelDir "checks.json"))) { throw "No model $Model (models/$Model/checks.json)" }
 $Checks = Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json
+$SourceFile = "instances.qnt"
+if ($View) {
+    if (-not $Checks.view) { throw "models/$Model/checks.json has no view" }
+    if ($Probes -or $Temporal -or $Invariant -ne "safety") { throw "-View is proven for safety only: no -Probes, -Temporal or -Invariant" }
+    if ($Main -and $Main -ne $Checks.view.instance) { throw "-View is proven for the instance $($Checks.view.instance) only, not $Main" }
+    $SourceFile = $Checks.view.file
+    if (-not $Main) { $Main = $Checks.view.instance }
+}
 if (-not $Main) { $Main = $Checks.tlcInstance }
 $OnWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
 
@@ -161,7 +190,7 @@ Say ("Model {0}, commit {1}, instance {2}, run folder {3}" -f $hash, $commit, $M
 Say "Compiling to TLA+"
 $compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$Invariant")
 if ($Temporal) { $compileArgs += "--temporal=$Temporal" }
-$compileArgs += "instances.qnt"
+$compileArgs += $SourceFile
 Push-Location $ModelDir
 try { $lines = @(Invoke-Native $quint $compileArgs) } finally { Pop-Location }
 $start = -1; $end = -1
@@ -199,6 +228,15 @@ if (-not (Test-Path $tools)) {
 
 $cfg = @("INIT q_init", "NEXT q_step", "INVARIANT q_inv")
 if ($Temporal) { $cfg += "PROPERTY q_temporalProps" }
+$viewLine = @()
+if ($View) {
+    $cfg += "VIEW $($Checks.view.operator)"
+    $vsha = [System.Security.Cryptography.SHA256]::Create()
+    $vhash = (-join ($vsha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $ModelDir $SourceFile))) |
+        ForEach-Object { $_.ToString("x2") })).Substring(0, 12)
+    $viewLine = @("view: $SourceFile $vhash, operator $($Checks.view.operator)")
+    Say "View $SourceFile $vhash, operator $($Checks.view.operator)"
+}
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "$Main.cfg"), $cfg)
 
 # Resource limits.
@@ -212,8 +250,12 @@ Say ("Limits: {0} of {1} cores, heap {2} GB, direct memory {3} GB of {4} GB RAM,
 
 $tlcArgs = @("-XX:+UseParallelGC", "-Xmx${heapGb}g", "-XX:MaxDirectMemorySize=${directGb}g",
              "-Djava.io.tmpdir=`"$(Join-Path $RunDir 'tmp')`"", "-cp", "`"$tools`"", "tlc2.TLC",
-             "-workers", "$workers", "-deadlock", "-checkpoint", "60", "-metadir", "states")
+             "-workers", "$workers", "-deadlock", "-gzip", "-checkpoint", "$CheckpointMinutes", "-metadir", "states")
 if ($Recover) { $tlcArgs += @("-recover", "`"$Recover`"") }
+if ($Fp -ge 0) {
+    if ($Fp -gt 130) { throw "-Fp must be between 0 and 130" }
+    $tlcArgs += @("-fp", "$Fp")
+}
 $tlcArgs += "$Main.tla"
 
 $log = Join-Path $RunDir "tlc.log"
@@ -274,22 +316,36 @@ $ended = Get-Date
 
 # ----------------------------------------------------------------------- summary
 $text = if (Test-Path $log) { Get-Content $log } else { @() }
-$keys = 'No error has been found|Error:|is violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed'
+# TLC also estimates the probability that two distinct states shared a
+# fingerprint, which could have left states unexplored; the summary keeps it.
+$keys = 'No error has been found|Error:|is violated|were violated|states generated, .* distinct states found|depth of the complete state graph|Finished in|Model checking completed|calculated \(optimistic\)|based on the actual fingerprints'
 $result = @($text | Where-Object { $_ -match $keys })
+$fpLine = $text | Where-Object { $_ -match 'with fp \d+' } | Select-Object -First 1
+$fpUsed = if ($fpLine -and ($fpLine -match 'with fp (\d+)')) { $Matches[1] } else { "" }
 $stopped = $stoppedForDisk -or $stoppedForTime
 $ok = ($text -match 'No error has been found').Count -gt 0 -and -not $stopped
-$violated = ($text -match 'is violated').Count -gt 0 -and -not $stopped
+$violated = ($text -match 'is violated|Temporal properties were violated').Count -gt 0 -and -not $stopped
 $summary = @(
     "model hash: $hash",
     "commit: $commit",
     "instance: $Main, invariant: $Invariant$(if ($Temporal) { ", temporal: $Temporal" })",
     "tla2tools: $TlaToolsVersion",
+    "fingerprint function: $(if ($fpUsed) { $fpUsed } else { 'not reported' })",
     ("limits: {0} workers of {1} cores, heap {2} GB, direct {3} GB" -f $workers, $cores, $heapGb, $directGb),
     "started: $($started.ToString('u')), ended: $($ended.ToString('u')), elapsed: $($ended - $started)",
     "result: $(if ($ok) { 'no error found' } elseif ($stoppedForDisk) { 'stopped for disk space, not a result' } elseif ($stoppedForTime) { 'stopped at the time limit, not a result' } elseif ($violated) { 'VIOLATED, the trace is in tlc.log' } else { 'no verdict, see tlc.log and tlc.err' })",
     ""
 ) + $result
+if ($viewLine.Count -gt 0) { $summary = $summary[0..2] + $viewLine + $summary[3..($summary.Count - 1)] }
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }
+# A run with a verdict needs no checkpoint: free the disk. A run without one
+# keeps its checkpoint under states, so it can continue with -Recover.
+if ($ok -or $violated) {
+    foreach ($d in @("states", "tmp")) {
+        $path = Join-Path $RunDir $d
+        if (Test-Path $path) { Remove-Item -Recurse -Force -Path $path -ErrorAction SilentlyContinue }
+    }
+}
 if ($ok) { exit 0 } elseif ($violated) { exit 2 } else { exit 3 }

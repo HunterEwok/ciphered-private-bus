@@ -21,8 +21,26 @@
 #   powershell -ExecutionPolicy Bypass -File models\run-inductive.ps1 -Model channels `
 #     -WorkDir D:\runs -Java C:\jdk\bin\java.exe -Split
 #   ... -Model membership -Main large_ind -Split -Parallel 12
+#   ... -Model membership -Main large_ind -Split -Parallel 1 -Only RootChangeRights
+#
+# -Only runs a subset of the checks, to repeat those of an earlier run that
+# had no verdict: "init", "safety", an implied fact by name, or step branches named as in the progress
+# output (without "step"). Each obligation stands on its own, so the checks of
+# two runs of the same model and invariant hashes together make one result.
 #
 # -Main defaults to "inductive.instance" in checks.json.
+#
+# -Section names another section of checks.json with the same layout, for a
+# second invariant of the model (membership: "convergence"). Such a section
+# may name its file ("file", default inductive.qnt), its safety invariant
+# ("safety", default modelSafety), further checks on other instances
+# ("extra": name, main, init, invariant, each at 0 steps) and the sentence of
+# the summary on success ("result"). A section may instead list all its
+# checks under "jobs" (name, init, step, invariant, steps, optional main,
+# optional "expect": "violated" for a non-vacuity witness, which passes when
+# Apalache finds a violation, or "expect": "disabled" for a step branch that the
+# instance never enables, which passes when Apalache finds no state of the
+# initial action that enables the step); -Only then takes check names.
 #
 # Exit status: 0 every obligation holds, 1 otherwise.
 
@@ -34,17 +52,21 @@ param(
     [switch]$Split,
     [int]$Parallel = 0,
     [double]$Share = 0.85,
-    [int]$Port = 8822,
+    [int]$Port = 0,
     [int]$IntervalSeconds = 60,
-    [int]$TimeoutHours = 0
+    [int]$TimeoutHours = 0,
+    [string[]]$Only = @(),
+    [string]$Section = "inductive"
 )
 
 $ErrorActionPreference = "Stop"
 $ModelsDir = $PSScriptRoot
 $ModelDir = Join-Path $ModelsDir $Model
 if (-not (Test-Path (Join-Path $ModelDir "checks.json"))) { throw "No model $Model (models/$Model/checks.json)" }
-$Checks = (Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json).inductive
-if (-not $Checks) { throw "models/$Model/checks.json has no inductive section" }
+$Checks = (Get-Content (Join-Path $ModelDir "checks.json") -Raw | ConvertFrom-Json).$Section
+if (-not $Checks) { throw "models/$Model/checks.json has no $Section section" }
+$File = if ($Checks.file) { $Checks.file } else { "inductive.qnt" }
+$SafetyInv = if ($Checks.safety) { $Checks.safety } else { "modelSafety" }
 if (-not $Main) { $Main = $Checks.instance }
 $OnWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
 
@@ -85,7 +107,7 @@ if ($versions -notmatch '(?ms)^\[apalache\].*?^version\s*=\s*"([^"]+)"') { throw
 $apalache = $Matches[1]
 
 $modelHash = Get-ShortHash @("$Model.qnt", "instances.qnt")
-$invHash = Get-ShortHash @("inductive.qnt")
+$invHash = Get-ShortHash @($File)
 $saved = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 $commit = "$(& git -C $ModelDir rev-parse --short HEAD 2>$null)".Trim()
 $ErrorActionPreference = $saved
@@ -103,22 +125,56 @@ if (-not $jar) {
     Say "Downloading Apalache $apalache"
     Push-Location $ModelDir
     $saved = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    try { & $quint verify "--main=$($Checks.smallInstance)" --init=modelInit --step=modelStep --invariant=IndInv --max-steps=0 "--apalache-version=$apalache" inductive.qnt 2>&1 | Out-Null }
+    try { & $quint verify "--main=$($Checks.smallInstance)" --init=modelInit --step=modelStep --invariant=IndInv --max-steps=0 "--apalache-version=$apalache" $File 2>&1 | Out-Null }
     finally { $ErrorActionPreference = $saved; Pop-Location }
     $jar = Find-ApalacheJar
     if (-not $jar) { throw "apalache.jar $apalache not found under $($env:QUINT_HOME)" }
 }
 
-# The checks. Each is (name, init, step, invariant, steps).
-$jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0))
-if ($Split) {
-    foreach ($s in $Checks.steps) {
-        $jobs += , @(("IndInv and {0} imply IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1)
+# The checks. Each is (name, init, step, invariant, steps, instance).
+if ($Checks.jobs) {
+    # A section that lists its checks itself ("jobs": name, init, step,
+    # invariant, steps, and optionally main), such as the proof of a TLC view.
+    $jobs = @()
+    foreach ($j in @($Checks.jobs)) {
+        # -Only takes a comma-separated list, so a name must not hold a comma.
+        if ($j.name -like "*,*") { throw "Job name holds a comma: $($j.name)" }
+        if ($j.expect -and $j.expect -notin @('violated', 'disabled')) { throw "Job $($j.name): expect must be 'violated', 'disabled' or absent, not '$($j.expect)'" }
+        $jobs += , @($j.name, $j.init, $j.step, $j.invariant, [int]$j.steps, $(if ($j.main) { $j.main } else { $Main }),
+                     $(if ($j.expect) { $j.expect } else { "holds" }))
     }
 } else {
-    $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1)
+$jobs = @(, @("init implies IndInv", "modelInit", "modelStep", "IndInv", 0, $Main))
+if ($Split) {
+    foreach ($s in $Checks.steps) {
+        $jobs += , @(("IndInv and {0} imply IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1, $Main)
+    }
+} else {
+    $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1, $Main)
 }
-$jobs += , @("IndInv implies safety", "indInit", "modelStep", "modelSafety", 0)
+$jobs += , @("IndInv implies safety", "indInit", "modelStep", $SafetyInv, 0, $Main)
+# Further facts that IndInv implies ("inductive.implied" in checks.json), such
+# as the enabledness lemma behind a liveness property.
+foreach ($n in @($Checks.implied)) {
+    if ($n) { $jobs += , @("IndInv implies $n", "indInit", "modelStep", $n, 0, $Main) }
+}
+foreach ($x in @($Checks.extra)) {
+    if ($x) { $jobs += , @($x.name, $x.init, "modelStep", $x.invariant, 0, $x.main) }
+}
+}
+# With powershell -File a list arrives as one string, "a,b".
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Only.Count -gt 0) {
+    $picked = @()
+    $known = @()
+    foreach ($j in $jobs) {
+        if ($Checks.jobs) { $key = $j[0] } elseif ($j[0] -like "init *") { $key = "init" } elseif ($j[3] -eq $SafetyInv) { $key = "safety" } elseif ($j[3] -ne "IndInv") { $key = $j[3] } else { $key = $j[2] -replace '^step', '' }
+        $known += $key
+        if ($Only -contains $key) { $picked += , $j }
+    }
+    foreach ($o in $Only) { if ($known -notcontains $o) { throw "-Only ${o}: not one of $($known -join ', ')" } }
+    $jobs = $picked
+}
 
 # Resources: every running check has its own server and heap.
 if ($Parallel -le 0) { $Parallel = if ($Split) { 8 } else { 1 } }
@@ -154,7 +210,11 @@ function Test-Port([int]$P) {
 
 # Every check gets a port of its own, counting up from -Port and skipping
 # ports in use, so that a server still shutting down (or left over from an
-# earlier run) never stops the run.
+# earlier run) never stops the run. Without -Port each run starts from its
+# own block of 50 ports chosen by its process id: two runs side by side
+# would otherwise both find a port free while the other's server is still
+# starting, and one server would fail to bind.
+if ($Port -le 0) { $Port = 20000 + ($PID % 800) * 50 }
 $script:NextPort = $Port
 function Get-FreePort {
     for ($k = 0; $k -lt 1000; $k++) {
@@ -180,8 +240,8 @@ function Start-Check([int]$Index, [int]$Slot) {
 
 function Start-Quint($C) {
     $j = $jobs[$C.Index]
-    $qargs = @("verify", "--main=$Main", "--init=$($j[1])", "--step=$($j[2])", "--invariant=$($j[3])",
-               "--max-steps=$($j[4])", "--server-endpoint=localhost:$($C.Port)", "inductive.qnt")
+    $qargs = @("verify", "--main=$($j[5])", "--init=$($j[1])", "--step=$($j[2])", "--invariant=$($j[3])",
+               "--max-steps=$($j[4])", "--server-endpoint=localhost:$($C.Port)", $File)
     $exe = if ($OnWindows) { "cmd.exe" } else { $quint }
     $argList = if ($OnWindows) { @("/c", "`"$quint`"") + $qargs } else { $qargs }
     $C.Quint = Start-Process -FilePath $exe -ArgumentList $argList -WorkingDirectory $ModelDir -PassThru -NoNewWindow `
@@ -240,6 +300,18 @@ try {
                 }
             } elseif ($c.Quint.HasExited) {
                 $results[$c.Index] = Get-Verdict $c $false; $done = $true
+                # A witness is expected to be violated: that is its pass.
+                if ($jobs[$c.Index].Count -gt 6 -and $jobs[$c.Index][6] -eq "violated") {
+                    $results[$c.Index] = if ($results[$c.Index] -like "VIOLATED*") { "violated as expected" }
+                                         elseif ($results[$c.Index] -eq "holds") { "HOLDS, a violation was expected" }
+                                         else { $results[$c.Index] }
+                }
+                # A branch the instance never enables: Apalache's deadlock is its pass.
+                if ($jobs[$c.Index].Count -gt 6 -and $jobs[$c.Index][6] -eq "disabled") {
+                    $results[$c.Index] = if ($results[$c.Index] -like "DEADLOCK*") { "disabled as expected" }
+                                         elseif ($results[$c.Index] -eq "holds") { "ENABLED, no transition was expected" }
+                                         else { $results[$c.Index] }
+                }
             } elseif ($TimeoutHours -gt 0 -and ((Get-Date) - $c.Started).TotalHours -ge $TimeoutHours) {
                 Stop-Tree $c.Quint
                 $results[$c.Index] = Get-Verdict $c $true; $done = $true
@@ -266,8 +338,9 @@ try {
 $rows = @(); $failures = 0
 for ($i = 0; $i -lt $jobs.Count; $i++) {
     $verdict, $mins = $results[$i] -split '\|'
-    if ($verdict -ne "holds") { $failures++ }
-    $rows += ("{0,-4}  {1,-44} {2}  {3,8} min" -f $(if ($verdict -eq "holds") { "pass" } else { "FAIL" }), $jobs[$i][0], $verdict, $mins)
+    $pass = $verdict -eq "holds" -or $verdict -eq "violated as expected" -or $verdict -eq "disabled as expected"
+    if (-not $pass) { $failures++ }
+    $rows += ("{0,-4}  {1,-44} {2}  {3,8} min" -f $(if ($pass) { "pass" } else { "FAIL" }), $jobs[$i][0], $verdict, $mins)
 }
 $summary = @(
     "model: $Model",
@@ -278,7 +351,7 @@ $summary = @(
     "apalache: $apalache, $Parallel at a time, heap $heapGb GB each",
     "started: $($startedAll.ToString('u')), ended: $((Get-Date).ToString('u')), elapsed: $((Get-Date) - $startedAll)",
     ""
-) + $rows + @("", $(if ($failures -eq 0) { "result: safety holds in every reachable state" } else { "result: not proved" }))
+) + $rows + @("", $(if ($failures -eq 0 -and $Checks.result) { "result: $($Checks.result)" } elseif ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

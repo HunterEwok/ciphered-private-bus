@@ -13,7 +13,12 @@
     "reboot_rollback",
     "grant_no_right",
     "accept_old_data_gen",
-    "no_prune"
+    "no_prune",
+    "accept_no_publish",
+    "below_window_valid",
+    "window_past_set_bit",
+    "unbounded_window",
+    "need_next"
   ],
   "witnesses": [
     "witnessHalt",
@@ -21,7 +26,8 @@
     "witnessAccept",
     "witnessGrant",
     "witnessRootChange",
-    "witnessRevokedSends"
+    "witnessRevokedSends",
+    "witnessWindowMoves"
   ],
   "inductive": {
     "instance": "large_ind",
@@ -45,6 +51,408 @@
       "stepSend",
       "stepGrant"
     ],
-    "parallel": 3
+    "parallel": 3,
+    "implied": [
+      "HearingEnabled"
+    ],
+    "impliedProbes": [
+      {
+        "instance": "probe_halted_silent_ind",
+        "invariant": "HearingEnabled"
+      }
+    ]
+  },
+  "convergence": {
+    "file": "conv_inductive.qnt",
+    "instance": "conv_large_ind",
+    "smallInstance": "conv_tiny_ind",
+    "smallPair": "conv_tiny_pair",
+    "probe": "conv_probe_need_next_ind",
+    "safety": "modelSafetyRest",
+    "parallel": 1,
+    "steps": [
+      "stepRootAdmit",
+      "stepRootChangeRights",
+      "stepRootRevoke",
+      "stepRootEquivocateCp",
+      "stepRootEquivocatePp",
+      "stepRecoveryChange",
+      "stepRecoveryEquivocate",
+      "stepAdversaryProof",
+      "stepRecvCp",
+      "stepRecvPp",
+      "stepRecvRc",
+      "stepRecvHp",
+      "stepReboot",
+      "stepSend"
+    ],
+    "extra": [
+      {
+        "name": "pair implies convergence",
+        "main": "conv_large_pair",
+        "init": "pairInit",
+        "invariant": "modelConvergence"
+      }
+    ],
+    "result": "convergence holds in every reachable state (per-node invariant on one device, pair implies convergence)"
+  },
+  "view": {
+    "file": "view.qnt",
+    "instance": "tiny_tlc_view",
+    "operator": "safetyView"
+  },
+  "bisim": {
+    "file": "view.qnt",
+    "instance": "tiny_tlc_bisim",
+    "smallInstance": "tiny_tlc_bisim",
+    "parallel": 1,
+    "jobs": [
+      {
+        "name": "init implies Struct",
+        "init": "initStruct",
+        "step": "stepRecoveryChange",
+        "invariant": "structA",
+        "steps": 0
+      },
+      {
+        "name": "Struct and safety and RootAdmit imply Struct",
+        "init": "initSafe",
+        "step": "stepRootAdmit",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RootChangeRights imply Struct",
+        "init": "initSafe",
+        "step": "stepRootChangeRights",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RootRevoke imply Struct",
+        "init": "initSafe",
+        "step": "stepRootRevoke",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RootEquivocateCp imply Struct",
+        "init": "initSafe",
+        "step": "stepRootEquivocateCp",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RootEquivocatePp imply Struct",
+        "init": "initSafe",
+        "step": "stepRootEquivocatePp",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecoveryChange imply Struct",
+        "init": "initSafe",
+        "step": "stepRecoveryChange",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecoveryEquivocate imply Struct",
+        "init": "initSafe",
+        "step": "stepRecoveryEquivocate",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and AdversaryProof imply Struct",
+        "init": "initSafe",
+        "step": "stepAdversaryProof",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecvCp imply Struct",
+        "init": "initSafe",
+        "step": "stepRecvCp",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecvPp imply Struct",
+        "init": "initSafe",
+        "step": "stepRecvPp",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecvRc imply Struct",
+        "init": "initSafe",
+        "step": "stepRecvRc",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and RecvHp imply Struct",
+        "init": "initSafe",
+        "step": "stepRecvHp",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and AcceptData imply Struct",
+        "init": "initSafe",
+        "step": "stepAcceptData",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and HearsHalted imply Struct",
+        "init": "initSafe",
+        "step": "stepHearsHalted",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Reboot imply Struct",
+        "init": "initSafe",
+        "step": "stepReboot",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Send imply Struct",
+        "init": "initSafe",
+        "step": "stepSend",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "Struct and safety and Grant imply Struct",
+        "init": "initSafe",
+        "step": "stepGrant",
+        "invariant": "structA",
+        "steps": 1
+      },
+      {
+        "name": "equal views agree on safety",
+        "init": "initPair",
+        "step": "stepRecoveryChange",
+        "invariant": "sameSafety",
+        "steps": 0
+      },
+      {
+        "name": "RootAdmit answered with an equal view",
+        "init": "initPair",
+        "step": "matchRootAdmit",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RootChangeRights answered with an equal view",
+        "init": "initPair",
+        "step": "matchRootChangeRights",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RootRevoke answered with an equal view",
+        "init": "initPair",
+        "step": "matchRootRevoke",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RootEquivocateCp answered with an equal view",
+        "init": "initPair",
+        "step": "matchRootEquivocateCp",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RootEquivocatePp answered with an equal view",
+        "init": "initPair",
+        "step": "matchRootEquivocatePp",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecoveryChange answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecoveryChange",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecoveryEquivocate answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecoveryEquivocate",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AdversaryProof (cp) answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdversaryProofCp",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AdversaryProof (pp) answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdversaryProofPp",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AdversaryProof (rc) answered with an equal view",
+        "init": "initPair",
+        "step": "matchAdversaryProofRc",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvCp (halt) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvCpHalt",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvCp (advance) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvCpAdv",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvCp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvCpNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (halt) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpHalt",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (add) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpAdd",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvPp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvPpNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (forever) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcForever",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (advance) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcAdv",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvRc (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvRcNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (rc) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpRc",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (gen) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpGen",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "RecvHp (noop) answered with an equal view",
+        "init": "initPair",
+        "step": "matchRecvHpNoop",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "AcceptData answered with an equal view",
+        "init": "initPair",
+        "step": "matchAcceptData",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "HearsHalted (rc) answered with an equal view",
+        "init": "initPair",
+        "step": "matchHearsHaltedRc",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "HearsHalted (gen) answered with an equal view",
+        "init": "initPair",
+        "step": "matchHearsHaltedGen",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Reboot answered with an equal view",
+        "init": "initPair",
+        "step": "matchReboot",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Send answered with an equal view",
+        "init": "initPair",
+        "step": "matchSend",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "Grant answered with an equal view",
+        "init": "initPair",
+        "step": "matchGrant",
+        "invariant": "matched",
+        "steps": 2
+      },
+      {
+        "name": "witness: a pair with equal views",
+        "init": "initPair",
+        "step": "stepRootAdmit",
+        "invariant": "witnessPair",
+        "steps": 0,
+        "expect": "violated"
+      },
+      {
+        "name": "witness: B answers a step",
+        "init": "initPair",
+        "step": "matchRootAdmit",
+        "invariant": "witnessAnswered",
+        "steps": 2,
+        "expect": "violated"
+      }
+    ],
+    "result": "states with equal views are interchangeable for safety: TLC with the view is exact"
   }
 }

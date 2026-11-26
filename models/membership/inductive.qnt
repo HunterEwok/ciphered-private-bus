@@ -14,34 +14,59 @@ module inductive {
   const I_DEVICES: Set[str]
   const I_MAX_GEN: int
   const I_MAX_NO: int
+  const I_WINDOW: int
   const I_MUTANT: str
-  import membership(DEVICES = I_DEVICES, MAX_GEN = I_MAX_GEN, MAX_NO = I_MAX_NO, MUTANT = I_MUTANT, TRACK_RECV = false).* from "./membership"
+  import membership(DEVICES = I_DEVICES, MAX_GEN = I_MAX_GEN, MAX_NO = I_MAX_NO, WINDOW = I_WINDOW, MUTANT = I_MUTANT, TRACK_RECV = false).* from "./membership"
 
   // ------------------------------------------------------------ bounded types
   val GENS = 1.to(MAX_GEN)
   val NOS = 1.to(MAX_NO)
-  // Every checkpoint, honest or not, has its valid numbers below its next
-  // number, and a next number at most one above its own number: each
-  // passport the Root issues comes with a new checkpoint. Limiting the type
-  // to such checkpoints keeps the solver's sets small.
-  val CPS: Set[Checkpoint] = tuples(GENS, 0.to(MAX_NO), NOS.powerset(), 1.to(MAX_NO + 1))
-    .map(t => { gen: t._1, no: t._2, valid: t._3, nextNo: t._4 })
-    .filter(c => c.nextNo <= c.no + 1 and c.valid.forall(k => k < c.nextNo))
-  val PPS: Set[Passport] = tuples(GENS, NOS, DEVICES, Set(0, 1))
+  // Every checkpoint, honest or not, has its valid numbers in its window
+  // [start, nextNo), a window of at most WINDOW numbers, and a next number at
+  // most one above its own number: each passport the Root issues comes with a
+  // new checkpoint. Limiting the type to such checkpoints keeps the solver's
+  // sets small.
+  val CPS: Set[Checkpoint] = tuples(GENS, 0.to(MAX_NO), 1.to(MAX_NO + 1), NOS.powerset(), 1.to(MAX_NO + 1))
+    .map(t => { gen: t._1, no: t._2, start: t._3, valid: t._4, nextNo: t._5 })
+    .filter(c => and {
+      c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= WINDOW,
+      c.valid.forall(k => c.start <= k and k < c.nextNo),
+    })
+  val PPS: Set[Passport] = tuples(GENS, NOS, DEVICES, RIGHTS)
     .map(t => { gen: t._1, no: t._2, dev: t._3, rights: t._4 })
   val RCS: Set[RootChange] = tuples(GENS, Set(0, 1)).map(t => { gen: t._1, key: t._2 })
   val HPS: Set[HaltProof] = tuples(Set("cp", "pp", "rc"), GENS, 0.to(MAX_NO))
     .map(t => { kind: t._1, gen: t._2, no: t._3 })
-  val DATAS: Set[Data] = tuples(DEVICES, NOS, GENS, 0.to(MAX_NO))
-    .map(t => { src: t._1, ppNo: t._2, gen: t._3, cpNo: t._4 })
+  val DATAS: Set[Data] = tuples(DEVICES, NOS, GENS, 0.to(MAX_NO), Set(false, true))
+    .map(t => { src: t._1, ppNo: t._2, gen: t._3, cpNo: t._4, ch0: t._5 })
 
   pure def below(s: Set[int], c: Checkpoint): Set[int] = s.filter(k => k < c.nextNo)
+
+  // Membership in the bounded types, written as predicates on the fields.
+  // "x in CPS" for a symbolic x makes the solver compare x with every element
+  // of CPS, and a subset of CPS checked that way costs |CPS| squared; these
+  // predicates cost one comparison per field. Each is exactly membership in
+  // the set above with the same name.
+  def isCp(c: Checkpoint): bool = and {
+    GENS.contains(c.gen), 0 <= c.no, c.no <= MAX_NO, 1 <= c.start, c.start <= MAX_NO + 1,
+    1 <= c.nextNo, c.nextNo <= MAX_NO + 1, c.valid.subseteq(NOS),
+    c.nextNo <= c.no + 1, c.start <= c.nextNo, c.nextNo - c.start <= WINDOW,
+    c.valid.forall(k => c.start <= k and k < c.nextNo),
+  }
+  def isPp(p: Passport): bool = and { GENS.contains(p.gen), NOS.contains(p.no), DEVICES.contains(p.dev), RIGHTS.contains(p.rights) }
+  def isRc(r: RootChange): bool = and { GENS.contains(r.gen), Set(0, 1).contains(r.key) }
+  def isHp(h: HaltProof): bool = and { Set("cp", "pp", "rc").contains(h.kind), GENS.contains(h.gen), 0 <= h.no, h.no <= MAX_NO }
+  def isData(m: Data): bool = and { DEVICES.contains(m.src), NOS.contains(m.ppNo), GENS.contains(m.gen), 0 <= m.cpNo, m.cpNo <= MAX_NO }
 
   // ------------------------------------------------------------------- parts
   def nodeOk(n: Node): bool = and {
     // types
-    GENS.contains(n.gen), CPS.contains(n.cp), n.pps.subseteq(PPS), Set(-1, 0, 1).contains(n.rc),
-    n.recvCp == Set(), n.recvPp == Set(), n.recvRc == Set(), n.recvHp.subseteq(HPS),
+    GENS.contains(n.gen), isCp(n.cp), n.pps.forall(p => isPp(p)), Set(-1, 0, 1).contains(n.rc),
+    n.recvCp == Set(), n.recvPp == Set(), n.recvRc == Set(), n.recvHp.forall(h => isHp(h)),
+    // the cache holds at most one passport per number, halted or not: a
+    // conflicting passport halts the node without entering the cache, and a
+    // halted node takes no passport
+    n.pps.forall(p => n.pps.forall(q => p.no == q.no implies p == q)),
     // a permanent halt is a halt
     n.forever implies n.halted,
     // a processed root change proof made the halt permanent; any other
@@ -62,7 +87,11 @@ module inductive {
     r.valid.forall(k => 1 <= k and k < r.nextNo),
     r.revoked.forall(k => 1 <= k and k < r.nextNo),
     r.rights.keys() == NOS.filter(k => k < r.nextNo),
-    r.rights.keys().forall(k => r.rights.get(k) == 0 or r.rights.get(k) == 1),
+    r.rights.keys().forall(k => RIGHTS.contains(r.rights.get(k))),
+    // the window of the Root's next checkpoint fits (R-MEM-14)
+    // (the same as r.nextNo - windowStart(r.valid, r.nextNo) <= WINDOW,
+    // without the fold)
+    r.valid.forall(k => r.nextNo - k <= WINDOW),
     // rootHonorsRevocation
     r.valid.intersect(r.revoked) == Set(),
   }
@@ -71,16 +100,22 @@ module inductive {
   // this is what makes "revoked at or before the receiver's checkpoint"
   // equivalent to "not valid under it".
   def historyOk(r: Root, h: Set[Checkpoint]): bool = and {
-    h.subseteq(CPS),
+    h.forall(c => isCp(c) and c.no >= 1),
+    // one honest checkpoint per generation and number: the Root's counter
+    // only grows within a generation, and equivocations are not history
+    h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no == c2.no) implies c1 == c2)),
     h.forall(c => c.gen <= r.gen and (c.gen == r.gen implies and {
       c.no <= r.cpNo, c.nextNo <= r.nextNo, below(r.valid, c).subseteq(c.valid),
+      // windowKeepsValid
+      c.no == r.cpNo implies (c.valid == r.valid and c.nextNo == r.nextNo),
     })),
     h.forall(c1 => h.forall(c2 => (c1.gen == c2.gen and c1.no <= c2.no) implies
       (c1.nextNo <= c2.nextNo and below(c2.valid, c1).subseteq(c1.valid)))),
   }
 
   def poolOk(p: Pool): bool = and {
-    p.cp.subseteq(CPS), p.pp.subseteq(PPS), p.rc.subseteq(RCS), p.hp.subseteq(HPS), p.data.subseteq(DATAS),
+    p.cp.forall(c => isCp(c)), p.pp.forall(x => isPp(x)), p.rc.forall(x => isRc(x)), p.hp.forall(x => isHp(x)),
+    p.data.forall(x => isData(x)),
   }
 
   def indInvOf(ns: str -> Node, r: Root, p: Pool, h: Set[Checkpoint], b: Set[str], s: Set[str]): bool = and {
@@ -89,11 +124,35 @@ module inductive {
     rootOk(r),
     historyOk(r, h),
     poolOk(p),
+    // behind every halt lies a proof in the pool: a halt of a generation has
+    // a proof of that generation, a permanent halt a root change proof
+    // (haltPropagates rests on these, see HearingEnabled)
+    DEVICES.forall(d => (ns.get(d).halted and not(ns.get(d).forever))
+      implies p.hp.exists(x => x.kind != "rc" and x.gen == ns.get(d).gen)),
+    DEVICES.forall(d => ns.get(d).forever implies p.hp.exists(x => x.kind == "rc")),
     b == Set(),
     s.subseteq(Set("accept", "grant")),
   }
 
   val IndInv = indInvOf(nodes, root, pool, history, broken, seen)
+
+  // Liveness (haltPropagates, S8, R-MEM-10, R-MEM-13). While a node has a
+  // halted peer of its generation and is not halted itself, or has a
+  // permanently halted peer and is not permanently halted itself,
+  // nodeHearsHalted is enabled for it: its guard, written out here, holds.
+  // Every such step changes the node: it halts it, or makes its halt
+  // permanent, since a node that already is halted can only take a root
+  // change proof. Under the weak fairness of nodeHearsHalted that
+  // haltPropagates assumes, the step is therefore taken unless the condition
+  // ends first, and either way the property's "eventually" holds.
+  val HearingEnabled = DEVICES.forall(d => {
+    val n = nodes.get(d)
+    ((haltedPeer(d, n.gen) and not(n.halted)) or (foreverPeer(d) and not(n.forever))) implies and {
+      MUTANT != "halted_silent",
+      pool.hp.exists(h => (h.kind != "rc" and h.gen == n.gen and haltedPeer(d, n.gen))
+                          or (h.kind == "rc" and foreverPeer(d))),
+    }
+  })
 
   // The model's own initial state, step, and safety, under names that the
   // instances below can see (an instance does not pass on what it imports).
@@ -124,10 +183,26 @@ module inductive {
   action stepGrant = { nondet d = DEVICES.oneOf() all { nodes.get(d).pps != Set(), nodeGrant(d) } }
 
   // ------------------------------------------- an arbitrary state of IndInv
+  // A node's cache and the history are built from slots rather than picked
+  // from the powersets of PPS and CPS: a cache has one passport per number
+  // of the node's generation, the history one checkpoint per generation and
+  // number (both are part of IndInv). Every state of IndInv is still among
+  // the states built here, and the solver's sets have 3 and 9 elements
+  // instead of 108 and 102.
+  val SLOTS = tuples(GENS, NOS)
   action indInit = {
     nondet gens = setOfMaps(DEVICES, GENS).oneOf()
-    nondet cps = setOfMaps(DEVICES, CPS).oneOf()
-    nondet ppss = setOfMaps(DEVICES, PPS.powerset()).oneOf()
+    nondet cpNo = setOfMaps(DEVICES, 0.to(MAX_NO)).oneOf()
+    nondet cpStart = setOfMaps(DEVICES, 1.to(MAX_NO + 1)).oneOf()
+    nondet cpValid = setOfMaps(DEVICES, NOS.powerset()).oneOf()
+    nondet cpNext = setOfMaps(DEVICES, 1.to(MAX_NO + 1)).oneOf()
+    nondet ppIn = setOfMaps(DEVICES, setOfMaps(NOS, Set(false, true))).oneOf()
+    nondet ppDev = setOfMaps(DEVICES, setOfMaps(NOS, DEVICES)).oneOf()
+    nondet ppRights = setOfMaps(DEVICES, setOfMaps(NOS, RIGHTS)).oneOf()
+    nondet hIn = setOfMaps(SLOTS, Set(false, true)).oneOf()
+    nondet hStart = setOfMaps(SLOTS, 1.to(MAX_NO + 1)).oneOf()
+    nondet hValid = setOfMaps(SLOTS, NOS.powerset()).oneOf()
+    nondet hNext = setOfMaps(SLOTS, 1.to(MAX_NO + 1)).oneOf()
     nondet rcs = setOfMaps(DEVICES, Set(-1, 0, 1)).oneOf()
     nondet halts = setOfMaps(DEVICES, Set(false, true)).oneOf()
     nondet forevers = setOfMaps(DEVICES, Set(false, true)).oneOf()
@@ -137,16 +212,21 @@ module inductive {
     nondet rnx = 1.to(MAX_NO + 1).oneOf()
     nondet rv = NOS.powerset().oneOf()
     nondet rrv = NOS.powerset().oneOf()
-    nondet rfull = setOfMaps(NOS, Set(0, 1)).oneOf()
+    nondet rfull = setOfMaps(NOS, RIGHTS).oneOf()
     nondet pcp = CPS.powerset().oneOf()
     nondet ppp = PPS.powerset().oneOf()
     nondet prc = RCS.powerset().oneOf()
     nondet php = HPS.powerset().oneOf()
     nondet pdata = DATAS.powerset().oneOf()
-    nondet hist = CPS.powerset().oneOf()
+    val hist = SLOTS.filter(s => hIn.get(s))
+      .map(s => { gen: s._1, no: s._2, start: hStart.get(s), valid: hValid.get(s), nextNo: hNext.get(s) })
     nondet sn = Set("accept", "grant").powerset().oneOf()
     val ns = DEVICES.mapBy(d => {
-      gen: gens.get(d), cp: cps.get(d), pps: ppss.get(d), rc: rcs.get(d), halted: halts.get(d),
+      gen: gens.get(d),
+      cp: { gen: gens.get(d), no: cpNo.get(d), start: cpStart.get(d), valid: cpValid.get(d), nextNo: cpNext.get(d) },
+      pps: NOS.filter(k => ppIn.get(d).get(k))
+        .map(k => { gen: gens.get(d), no: k, dev: ppDev.get(d).get(k), rights: ppRights.get(d).get(k) }),
+      rc: rcs.get(d), halted: halts.get(d),
       forever: forevers.get(d), recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: hps.get(d),
     })
     val r = { gen: rg, cpNo: rcp, nextNo: rnx, valid: rv,
@@ -166,15 +246,21 @@ module inductive {
 
 // The instance tiny_tlc.
 module tiny_ind {
-  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_WINDOW = 2, I_MUTANT = "none").*
 }
 
 // The size of small: three devices, three numbers per generation.
 module small_ind {
-  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 2, I_MAX_NO = 3, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 2, I_MAX_NO = 3, I_WINDOW = 2, I_MUTANT = "none").*
 }
 
 // For a long run (R-VER-3): three devices, three generations, three numbers.
 module large_ind {
-  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 3, I_MAX_NO = 3, I_MUTANT = "none").*
+  import inductive(I_DEVICES = Set("a", "b", "c"), I_MAX_GEN = 3, I_MAX_NO = 3, I_WINDOW = 2, I_MUTANT = "none").*
+}
+
+// Probe (R-VER-2): a halted node does not answer with its proof, so
+// "IndInv implies HearingEnabled" must fail.
+module probe_halted_silent_ind {
+  import inductive(I_DEVICES = Set("a", "b"), I_MAX_GEN = 2, I_MAX_NO = 2, I_WINDOW = 2, I_MUTANT = "halted_silent").*
 }

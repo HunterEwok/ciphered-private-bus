@@ -190,16 +190,6 @@ module tiny_ind {
                    I_MAX_RESETS = 1, I_MUTANT = "none").*
 }
 
-// Between the two: both kinds of commander and the root, without an outsider
-// (a commander removed from the passport stands for one), 4 nonces, 1 reset.
-// small_ind once ran out of memory: indInit drew calls and intents from the
-// full record set CALLS; it now draws them field by field (see indInit).
-module mid_ind {
-  import inductive(I_COMMANDERS = Set("a", "b"), I_OUTSIDERS = Set(), I_ROOT = "r", I_PRESENCE = Set("b"),
-                   I_RIGHTS = Map("a" -> Set(1), "b" -> Set(1, 2)), I_MAX_NONCE = 4, I_MAX_EPOCH = 3,
-                   I_MAX_CALLS = 2, I_MAX_RESETS = 1, I_MUTANT = "none").*
-}
-
 module small_ind {
   import inductive(I_COMMANDERS = Set("a", "b"), I_OUTSIDERS = Set("x"), I_ROOT = "r", I_PRESENCE = Set("b"),
                    I_RIGHTS = Map("a" -> Set(1), "b" -> Set(1, 2)), I_MAX_NONCE = 6, I_MAX_EPOCH = 3,

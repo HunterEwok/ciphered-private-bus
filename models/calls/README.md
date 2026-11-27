@@ -18,6 +18,41 @@ refusals with any nonce seen in the open. The header of `calls.qnt` lists every 
 | `tiny` | `a` (with user presence), root `r` | 4 | 3 | 2 | 1 | Simulator in CI, TLC |
 | `probe_*` | as `small` | | | | | One deliberate defect each; `safety` must fail (R-VER-2) |
 
+### Why `small` is large enough
+
+The safety proof runs at `small_ind`, the size of `small`. One target is enough: each target keeps
+its own slots and its own key epoch, and a body sealed for another target carries a nonce this target
+never issued, which the adversary already supplies (any value seen on the wire, or junk). Every
+property relates at most the following roles at the same time, and `small` holds a copy of each:
+
+- two named commanders, one with only the automatic right and no user-presence key, one with both
+  rights and a user-presence key: a nonce issued to one is "another device's nonce" for the other
+  (`freshNonce`), and an action that needs a right or a key one of them lacks meets one that has it
+  (`permitted`, probes `no_right_check`, `presence_not_required`). Either of them can stop being named
+  (`slotsKnown`, probe `keep_revoked_slot`);
+- the root device, whose root key has every right and whose other keys have only the rights of the
+  passport (probes `root_device_all_rights`, `root_key_any_device`);
+- an outsider, never named, that asks for a slot (`slotsKnown`, probe `slot_for_anyone`);
+- two actions, automatic and confirmation-class, which are all the classes there are; passport
+  changes only take rights away, so they end after at most two per commander;
+- six nonces. Nonces are fresh values compared only for equality, and what a step does with one
+  depends only on whether it is the slot of the sending device, no nonce, or another value; the state
+  view of `view.qnt`, proven exact for `safety`, keeps exactly these classes. Six nonces give each of
+  the three devices that can hold a slot a current nonce and a stale one, and `indInit` draws slots
+  and call bodies freely over them;
+- three key epochs: the epoch a commander knows, a newer claim it learns and retries under, and a
+  replayed claim of the old epoch that must not move it back (`epochGrows`, `oneRetryPerKind`, probe
+  `accept_any_epoch`);
+- two calls per commander, so that the bodies of an earlier call are replayed while the pending call
+  is a later one, and a call that is not idempotent meets one that is (`atMostOnce`);
+- two resets or reboots: a reset and a reboot, which erase the slots in different events, or two
+  resets so that a nonce issued between them goes stale (`freshNonce`, probes `reset_keeps_slots`,
+  `reboot_keeps_slots`).
+
+A third named commander repeats one of the first two, since every property is about one commander's
+slot, calls and rights against the target's state. Further calls, epochs or resets repeat one of the
+sequences above, and the proof covers them from every state of `IndInv`, not only from reachable ones.
+
 ## Properties
 
 | Invariant | Requirement | Property |

@@ -29,6 +29,45 @@ number of times, in any order, or never, which is what a hostile relay can do.
 
 A grant and a key request take one unit.
 
+### Why `small` is large enough
+
+The safety proof runs at `small_ind`, the size of `small`. Every property relates at most the
+following roles at the same time, and `small` holds a copy of each:
+
+- three devices: a source, a reader that holds a grant of its channel and a reader that does not
+  (`servedOnlyGranted`); or two sources that compete for the bus and a reader (`fairShare`, eviction
+  rule 4 with its tie broken by the smaller identifier); or a device that is revoked while two others
+  keep exchanging objects (`revokedPurged`). Grants and key requests name a source and a reader that
+  differ, so two readers per source are needed to tell one reader's grant from another's
+  (`oneGrantOneRequest`);
+- two channels per source, so that the retention of one channel never deletes the publications of
+  another and a grant of one channel never serves another (`retentionHolds`, `servedOnlyGranted`);
+- three publication numbers and depths 0 to 2: a third publication of depth 2 makes retention drop the
+  oldest, a newer publication of depth 1 shrinks it, and depth 0 is never stored (`retentionHolds`,
+  `nothingTransient`);
+- sizes 1 and 2, so that one arriving object can need two victims, and the largest source and the
+  source of the oldest publication can differ (probe `unfair`);
+- a source limit of 3 and a bus limit of 5: since 5 is less than twice 3, two sources each within its
+  own limit can fill the bus (eviction rule 4), and since 5 is more than 3, a single source reaches its
+  own limit first (eviction rule 1); a source holding 2 units is within its fair share while the other
+  holds 3 (`fairShare`, `evictsOnlyOwn`);
+- a join buffer of 2, the least in which keeping the newest request and dropping the oldest can be
+  told apart from dropping any other (`joinsBounded`);
+- four events, enough for a join, a revocation, the root change and the removal of the relay in one
+  run, so that a checkpoint numbered 1 of the new Root meets the checkpoint (1, 2) of the old one
+  (`checkpointForward`, `checkpointTaken`, `unlistedEmpty`). One root change is enough: the relay
+  orders checkpoints by the pair (generation, number), and a second change repeats the first one with
+  the next generation;
+- eight arrival numbers. The rules and properties read arrival numbers only through their order. The
+  store holds at most five objects, since the bus holds 5 units and every object takes at least one,
+  and `indInit` draws their numbers freely, so the states of `IndInv` hold every order of any store
+  together with an arriving object.
+
+A fourth device repeats one of these roles: three devices are already three possible sources, so
+eviction rule 4 already picks the largest of more than two. Further revocations repeat one (three
+devices can be revoked), and further joins repeat an overflow of the buffer. The proof covers these
+from every state of `IndInv`, not only from reachable ones.
+
 ## Properties
 
 `safety` is the conjunction of the invariants below. Properties of a single step, such as what a

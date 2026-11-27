@@ -17,6 +17,35 @@ forge (R-REL-11). The header of `channels.qnt` lists every abstraction.
 | `tiny` | 2 | 2 | 4 | 0..2 | 2 | Simulator in CI, TLC |
 | `probe_*` | as `small` | | | | | One deliberate defect each; `safety` must fail (R-VER-2) |
 
+### Why `small` is large enough
+
+The safety proof runs at `small_ind`, the size of `small`. One source and one channel are enough
+because the source keeps every number per channel (R-CH-8) and the recipient keeps its generation,
+highest number, floor and retained publications per channel (R-CH-9): two channels share no key,
+number or window, and a second source is a second channel. Within the channel, every property relates
+at most the following roles at the same time, and `small` holds a copy of each:
+
+- three devices: a reader that leaves the readers while it keeps running with what it holds
+  (`rotateOnRemove`), a device that starts outside the readers and joins later, and a device without
+  the read right (`noReadNoKey`, `grantsToReaders`, probe `grant_no_read`). The first two are two
+  readers with the read right, which `grantBeforePublish` needs: granting one reader must not take
+  the other off the list of readers still to be granted. No property relates more than two readers:
+  each one is about what a single device holds or was granted, against the source's state;
+- three key generations: a key, its rotation after a removal, and a second rotation after a reboot
+  that lost the key, so that a grant of a lower generation can arrive after a higher one
+  (`uniqueKeys`, probes `accept_old_grant`, `gen_not_persisted`, `mark_not_persisted`);
+- five publication numbers with blocks of 2, so that a reboot inside the first block skips to the
+  second and the source still has numbers after it (`uniqueNumbers`, probe `no_block_skip`), and the
+  sequence 1, 3, 2 at depth 2 followed by a reboot fits with room for a later publication
+  (`windowFloor`);
+- depths 0 to 2: three publications at depth 2 make trim evict one, a newer publication of depth 1
+  shrinks the retained ones, and depth 0 is never retained (`retention`, probes `no_trim`,
+  `late_clear_kept`).
+
+Further devices repeat one of these roles, further generations repeat a rotation, and further numbers
+repeat a block or a trim. The proof covers these from every state of `IndInv`, not only from reachable
+ones.
+
 ## Properties
 
 | Invariant | Requirement | Property |

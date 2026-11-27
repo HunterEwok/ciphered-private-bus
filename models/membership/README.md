@@ -25,6 +25,37 @@ With three numbers per generation a window of two binds: the Root has to reissue
 before it can issue a third. With two numbers it never binds, but the window start still moves
 past revoked and replaced numbers.
 
+### Why `large_ind` is large enough
+
+The safety proof runs at `large_ind` (three devices, three generations, three numbers per generation,
+a window of two), and so does the proof of `convergence` (`conv_large_ind`, `conv_large_pair`). Every
+property relates at most the following roles at the same time, and `large_ind` holds a copy of each:
+
+- three devices: a receiver and a sender, which every acceptance property relates
+  (`revokedIsRejected`, `grantsNeedRead`, `dataNeedsPublish`), or two nodes, which `convergence` and
+  the halt rules relate (a halted peer and a node that hears its proof); and a third device whose
+  passport is revoked or reissued, so that the window start moves past its number while the other two
+  keep valid passports (`windowKeepsValid`, `cacheConsistent`, probe `below_window_valid`). No
+  property relates more than two devices besides the Root: each is about one node's state, or one
+  node and one sender, or two nodes that processed the same records;
+- three generations: generation 1 has no root change record, so a root change record of generation 2
+  followed by one of generation 3, and a node that skips from generation 1 to 3, need three
+  (`currentGeneration`, `installedKeyOnly`, `convergence`). Two root change records of one
+  generation with different keys (L6) take the two keys of that generation (`haltIsSticky`, probe
+  `rc_no_forever`);
+- three numbers per generation with a window of two: the window binds, so the Root has to reissue a
+  passport before it issues a third (`windowBounded`, probe `unbounded_window`); two checkpoints of
+  one generation can arrive out of order (`convergence`, probe `need_next`); and the Root can
+  equivocate at one number while a later number exists (`noRollback`, `proofIsObeyed`, probe
+  `no_halt`). The rules compare numbers by order and equality and the window by the span from its
+  start, so further numbers repeat these cases at a higher start;
+- a window of two, the least that holds a cleared bit next to a set one, so that moving the start
+  past leading cleared bits differs from moving it past a set bit (probe `window_past_set_bit`).
+
+A fourth device repeats the third or one of the first two, further generations repeat a root change,
+and further numbers repeat a window move. The proof covers these from every state of `IndInv`, not
+only from reachable ones.
+
 ## Properties
 
 `safety` is the conjunction of the invariants below. Properties of a single step (a node's

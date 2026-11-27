@@ -21,6 +21,33 @@ lists every abstraction.
 
 Every instance also has the compromised acceptor `c` and the adversary's own device key.
 
+### Why `small` is large enough
+
+The safety proof runs at `small_ind`, the size of `small`. Every property relates at most the
+following roles at the same time, and `small` holds a copy of each:
+
+- two joiners, one with a user-presence key and one without, so that a payload of one joiner relayed
+  into a session of the other is refused (`bound`, probe `no_transcript_binding`), and a request that
+  swaps the presence key or the name meets a joiner that signed something else (`asSigned`, probe
+  `sig_key_only`). The adversary's own device key is the third key that may be put in a request
+  (`intended`, probe `no_fingerprint_compare`);
+- two honest acceptors, an ordinary member and the Root pairing directly (R-JOIN-9), so that both
+  paths to admission meet the same checks (`rootOnly`, `intended`);
+- one compromised acceptor. It shares everything it knows with the network adversary, so a second
+  compromised acceptor would know nothing more and could send nothing more; there is one Root, and it
+  is honest;
+- a limit of 2 attempts per code, the least in which a failed attempt is followed by one more allowed
+  attempt and then a refusal. The counters are compared only with the limit, so a larger limit
+  repeats the second attempt (`guessLimit`, probes `joiner_no_count`, `acceptor_no_count`);
+- six sessions. Sessions are compared only for equality: a request is bound to the session it names.
+  `indInit` draws the attempt counters, the used sessions and the payloads freely, so the states of
+  `IndInv` hold every count of attempts up to the limit together with any five used sessions, and a
+  new session needs only a name that differs from all of them.
+
+A third joiner or a second ordinary acceptor repeats one of these roles, since every property is
+about one joiner's key, the session it ran and the request made from it. The proof covers further
+sessions and attempts from every state of `IndInv`, not only from reachable ones.
+
 ## Properties
 
 | Invariant | Requirement | Property |

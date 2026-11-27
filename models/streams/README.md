@@ -27,6 +27,36 @@ Events are link down, "reset nonces", halt, revocation and reboot together. They
 streams live long enough for the properties to matter: without a bound, random simulation halts a
 node within a few steps.
 
+### Why `small` is large enough
+
+The safety proof runs at `small_ind`, the size of `small`. Every property relates at most the
+following roles at the same time, and `small` holds a copy of each:
+
+- two nodes, a commander and a target. Each call has its own key, so a chunk of another stream
+  instance, whether of the same peer or of another one, is a chunk that does not decrypt under the
+  stream's key; the model delivers chunks of every earlier call to either party, which stands for a
+  third node's chunks (`chunkBinding`, probes `id_only`, `no_dir`). The limit on open streams counts
+  the streams of a node whatever their peer (R-STR-6), and a third node only adds another source of
+  openings, which the commander already makes;
+- two open streams at once: one busy and one idle under the same "reset nonces" (`resetOnlyIdle`),
+  and a full table that must refuse an opening without closing either (`openKeepsStreams`, probe
+  `evict`);
+- three calls: two streams open and a third opening refused at the limit, or a stream, a reboot and
+  a new stream under the same stream number (probe `id_only`);
+- three chunk numbers per direction, so that ordered mode meets a gap after it has taken a chunk
+  (1, then 3), and lossy mode meets both a higher number after a gap and a lower one after it
+  (`orderedInOrder`, `lossyIncreasing`). The rules compare chunk numbers only by order and by "one
+  more", and `indInit` draws the last number taken freely, so every relation between it and an
+  arriving number is present;
+- a credit of 2, so that a side can hold out more than one unit and a replayed credit chunk adds to
+  credit not yet used (`creditSound`, `creditRespected`, probe `credit_replay`);
+- three events: "reset nonces", traffic and a second reset that keeps the stream, then a third reset
+  after a quiet period that closes it; or a reset, a revocation and a halt in one run
+  (`resetOnlyIdle`, `revocationClosesStreams`, `haltClosesStreams`).
+
+Further streams, calls, chunk numbers or events repeat one of these roles, and the proof covers them
+from every state of `IndInv`, not only from reachable ones.
+
 ## Properties
 
 `safety` is the conjunction of the invariants below. Properties of a single step are checked by a

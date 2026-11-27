@@ -511,16 +511,17 @@ module relay {
 
   // A ticket (B.10 rules 2 and 3): accepted only with a greater pair and of
   // the generation of the latest root change record. Mutant "old_ticket": a
-  // ticket of the old generation is accepted after a root change. A relay
+  // ticket of the old generation is accepted after a root change; mutant
+  // "ticket_rollback": a ticket with a smaller or equal pair is accepted. A relay
   // that is no longer listed takes no tickets.
   action learnTicket(g: int, n: int): bool = {
     val r = relay
     val greater = g > r.tGen or (g == r.tGen and n > r.tNo)
     all {
       r.served, g <= root.gen, (g < root.gen or n <= root.tNo), n >= 1,
-      greater, g == r.rootGen or MUTANT == "old_ticket",
+      greater or MUTANT == "ticket_rollback", g == r.rootGen or MUTANT == "old_ticket",
       commitWith({ ...r, tGen: g, tNo: n },
-        if (g != r.rootGen) Set("ticketOfCurrentRoot") else Set(),
+        if (g != r.rootGen or not(greater)) Set("ticketOfCurrentRoot") else Set(),
         if (g > 1) Set("newGenTicket") else Set()),
     }
   }
@@ -621,8 +622,8 @@ module relay {
     relay.store.filter(o => o.kind == "pub" and (o.src, o.ch) == k).size() <= relay.dep.get(k))
   // R-JOIN-8: the buffer is bounded and keeps the newest request.
   val joinsBounded = relay.joins.length() <= JOIN_MAX and not(broken.contains("newestJoinKept"))
-  // B.10 rules 2 and 3: the ticket is of the latest root generation the relay
-  // knows when accepted.
+  // B.10 rules 2 and 3: a ticket is accepted only with a greater pair than
+  // the held one, and of the latest root generation the relay knows.
   val ticketOfCurrentRoot = not(broken.contains("ticketOfCurrentRoot"))
   // B.10 rule 4: a relay no longer listed stores nothing.
   val unlistedEmpty = not(relay.served) implies (relay.store == Set() and relay.joins == List())

@@ -71,6 +71,7 @@ Probes, each expected to violate `safety`:
 | `join_unbounded` | The join buffer has no bound |
 | `join_drop_new` | On overflow the new join request is dropped instead of the oldest |
 | `old_ticket` | A ticket of the old root generation is accepted after a root change |
+| `ticket_rollback` | A ticket with a smaller or equal pair (gen, no) is accepted |
 | `keep_unserved` | A relay removed from the checkpoint keeps its data |
 | `cp_rollback` | An older checkpoint replaces a newer one |
 | `cp_number_only` | Checkpoints are compared by number without the generation |

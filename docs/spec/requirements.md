@@ -1078,12 +1078,15 @@ Appendix B, Section B.10.
 
 > **R-REL-19.** When a new relay epoch begins, the root device, at each external relay that remains in
 > the checkpoint: uploads under the old bus alias, for each member that stays valid, the member's new
-> relay access object addressed to the member's old alias (a bridge); registers the ticket of the new
-> alias and uploads the control-plane objects under it; and only then sends the closing ticket of the old
-> alias. Sources upload their retained publications and latest grants again under the new aliases. On a
-> closing ticket the relay deletes everything under the old alias except the bridges, accepts nothing
-> more there except a relay hello of a listed alias that fetches its bridge, and deletes each bridge
-> once its addressee has fetched it. A revoked device receives no bridge. A device that slept through
+> relay access object addressed to the member's old alias (a bridge), and after a root change also the
+> root change record and the checkpoint of the new generation, so that a member that slept through the
+> root change can verify its bridge; registers the ticket of the new alias and uploads the control-plane
+> objects under it; and only then sends the closing ticket of the old alias. Sources upload their
+> retained publications and latest grants again under the new aliases. On a closing ticket the relay
+> deletes everything under the old alias except the bridges and the records uploaded with them, accepts
+> nothing more there except a relay hello of a listed alias that fetches its bridge, serves the records
+> with each bridge, deletes each bridge once its addressee has fetched it, and deletes the records with
+> the last bridge. A revoked device receives no bridge. A device that slept through
 > several epochs follows the bridges from alias to alias, and MAY fetch a bridge through another external
 > relay than the one it then uses. At a relay removed from the checkpoint, the closing ticket carries no
 > bridges.

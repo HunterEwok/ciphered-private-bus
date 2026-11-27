@@ -696,17 +696,20 @@ Rules:
    epoch.
 3. A closing ticket is final: the relay accepts no further ticket for that alias. It deletes everything
    under the alias except bridges (relay access objects of the next epoch addressed to an alias of the
-   tree), serves each bridge only to its addressee after a relay hello under the closed alias, and
-   deletes each bridge once it has been served. Bridges count against the `bus_bytes` of the closed
-   alias. A closing ticket sent because the relay left the checkpoint's `relays` list is preceded by no
-   bridges.
+   tree) and the root change record and checkpoint uploaded with them, serves each bridge only to its
+   addressee after a relay hello under the closed alias, together with those records, deletes each
+   bridge once it has been served, and deletes the records with the last bridge. Bridges and these
+   records count against the `bus_bytes` of the closed alias. A closing ticket sent because the relay
+   left the checkpoint's `relays` list is preceded by no bridges.
 4. On an epoch change the root device, at each external relay that stays in the checkpoint, does three
-   things in this order: it uploads the bridges under the old alias; it registers the ticket of the new
-   alias and uploads the checkpoint, the latest root change record, and the passports under it; it sends
-   the closing ticket of the old alias. A bridge is the member's relay access object of the new epoch;
-   under the new alias the root device uploads relay access objects only when it issues one during the
-   epoch. Sources then upload their retained publications and their latest grants again under the
-   new aliases, with new upload counters.
+   things in this order: it uploads the bridges under the old alias, after a root change together with
+   the root change record and the checkpoint of the new generation, without which a member that slept
+   through the root change could not verify a relay access object of the new generation; it registers
+   the ticket of the new alias and uploads the checkpoint, the latest root change record, and the
+   passports under it; it sends the closing ticket of the old alias. A bridge is the member's relay
+   access object of the new epoch; under the new alias the root device uploads relay access objects
+   only when it issues one during the epoch. Sources then upload their retained publications and their
+   latest grants again under the new aliases, with new upload counters.
 5. After a root change, or a checkpoint that names another root device (R-MEM-17), the new root device
    starts relay epoch 1. If it holds the relay state of its predecessor, it bridges and closes the old
    aliases by rule 4. Otherwise members reach the new epoch through a member link or a member relay, as
@@ -742,7 +745,8 @@ it first; the relay answers with its own.
 `cpb relay hello v1 || 0x00 || SHA-256(own hello) || SHA-256(peer's hello)`: by the device with its link
 key, by the relay with its relay key. The relay accepts the link only if the bus alias has a ticket, the
 leaf rebuilt from fields 4 and 5 and the path lead to the `members` root of the latest ticket, and the
-signature verifies; under a closed alias it then serves only the device's bridge. The device accepts the
+signature verifies; under a closed alias it then serves only the device's bridge and the records kept
+with it. The device accepts the
 relay only if `SHA-256(encode(relay_key))[0..16]` is an external relay in its own checkpoint and the
 signature verifies. Size of the device's hello: at most 879 bytes.
 

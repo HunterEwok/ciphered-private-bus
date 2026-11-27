@@ -194,22 +194,41 @@ $RunDir = Join-Path $WorkDir ("{0}-{1}-{2}" -f $Model, $Main, $stamp)
 New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $RunDir "tmp") | Out-Null
 Say ("Model {0}, commit {1}, instance {2}, run folder {3}" -f $hash, $commit, $Main, $RunDir)
 
-# Compile the instance to TLA+.
+# Compile the instance to TLA+. Quint starts an Apalache server for the
+# compilation and stops it afterwards. Each compilation gets a free port of its
+# own, from a block chosen by the process id, instead of the shared default
+# 8822: a compilation that found the server of the previous one still shutting
+# down failed without a message. A failed compilation is tried again on a new
+# port, at most three times, and its output is shown.
+function Test-Port([int]$P) {
+    try { $tcp = New-Object System.Net.Sockets.TcpClient; $tcp.Connect("127.0.0.1", $P); $tcp.Close(); return $true } catch { return $false }
+}
+$script:NextPort = 60000 + ($PID % 100) * 50
+function Get-FreePort {
+    for ($k = 0; $k -lt 50; $k++) {
+        $p = $script:NextPort; $script:NextPort++
+        if (-not (Test-Port $p)) { return $p }
+    }
+    throw "No free port for the Apalache server below $($script:NextPort)"
+}
 Say "Compiling to TLA+"
 $compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$Invariant", "--apalache-version=$apalache")
 if ($Temporal) { $compileArgs += "--temporal=$Temporal" }
-$compileArgs += $SourceFile
-Push-Location $ModelDir
-try { $lines = @(Invoke-Native $quint $compileArgs) } finally { Pop-Location }
-$start = -1; $end = -1
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($start -lt 0 -and $lines[$i] -match "^-+ MODULE $Main -+$") { $start = $i }
-    if ($start -ge 0 -and $lines[$i] -match "^=+$") { $end = $i }
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $port = Get-FreePort
+    Push-Location $ModelDir
+    try { $lines = @(Invoke-Native $quint ($compileArgs + @("--server-endpoint=localhost:$port", $SourceFile))) } finally { Pop-Location }
+    $start = -1; $end = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($start -lt 0 -and $lines[$i] -match "^-+ MODULE $Main -+$") { $start = $i }
+        if ($start -ge 0 -and $lines[$i] -match "^=+$") { $end = $i }
+    }
+    if ($start -ge 0 -and $end -ge 0) { break }
+    Say ("Compilation attempt {0} of 3 produced no TLA+ module {1} (exit code {2}); its output:" -f $attempt, $Main, $script:NativeExit)
+    $lines | Select-Object -Last 20 | Out-Host
+    $script:NativeErrors | Select-Object -Last 20 | Out-Host
 }
-if ($start -lt 0 -or $end -lt 0) {
-    $script:NativeErrors | Out-Host
-    throw "Compilation produced no TLA+ module $Main (exit code $script:NativeExit)"
-}
+if ($start -lt 0 -or $end -lt 0) { throw "Compilation produced no TLA+ module $Main after 3 attempts" }
 $spec = Join-Path $RunDir "$Main.tla"
 [System.IO.File]::WriteAllLines($spec, $lines[$start..$end])
 

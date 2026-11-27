@@ -48,7 +48,7 @@ body and does not depend on delivery order. Equivocation evidence in Certificate
 Encoding rules common to all sections:
 
 - An unsigned message (`Hello`, `Auth`, `Get`, `BlobGet`, `NonceRequest`, `Nonce`, `Reply`, `Refusal`,
-  `RelayRefusal`, `HaltProof`, `Pair*`) places its fields directly in the top-level map next to `0: t`.
+  `RelayRefusal`, `HaltProof`, `RelayHello`, `RelayGet`, `Relayed`, `Pair*`) places its fields directly in the top-level map next to `0: t`.
   A signed object is carried as a byte string in field 1.
 - In every hash and fingerprint formula a key is taken in its encoded form,
   `encode(Key) = encode([alg, bytes])`. The algorithm is thereby part of the identifier, and keys of
@@ -88,6 +88,9 @@ A message is a map in a frame whose length field has the high bit 0. Field 0 is 
 | 10 | `RelayTicket` | Relay ticket, Section B.10 | Control |
 | 11 | `RelayRefusal` | Relay refusal to accept an object, Section B.10 | Control |
 | 12 | `HaltProof` | Halt proof: two root signatures over one head and different bodies, Section B.3 | Control |
+| 13 | `RelayAccess` | Relay epoch secret and link seed for one member, Section B.10 | Control |
+| 14 | `RelayGet` | Request for a stored object on an external relay link, Section B.10 | Control |
+| 15 | `RelayHello` | Hello on an external relay link, Section B.10 | Link |
 | 16 | `KeyGrant` | Channel key grant | Data |
 | 17 | `Publication` | Publication | Data |
 | 18 | `BlobGet` | Request for a blob segment | Data |
@@ -96,9 +99,10 @@ A message is a map in a frame whose length field has the high bit 0. Field 0 is 
 | 26 | `Call` | Call | Data |
 | 27 | `Reply` | Reply | Data |
 | 28 | `Refusal` | Public refusal | Data |
+| 19 | `Relayed` | Wrapped object on an external relay link, Section B.10 | Link |
 | 40..47 | reserved | Pairing messages, Section B.11. 40..45 are assigned; the rest are reserved | Link |
 
-Kinds 13..15, 19..23, 29..39, and 48..255 are unassigned. An unknown kind is rejected with code
+Kinds 20..23, 29..39, and 48..255 are unassigned. An unknown kind is rejected with code
 `fmt/kind`.
 
 ## B.3. Control-Plane Objects
@@ -247,8 +251,8 @@ An unsigned message.
 | No. | Field | Type | Notes |
 | --- | --- | --- | --- |
 | 1 | `bus` | bstr(32) | The bus whose object is requested. Needed because the request may precede the hello and an external relay serves many buses |
-| 2 | `what` | uint | 1 passport, 2 checkpoint, 3 latest root change record, 4 sealing key claim, 5 relay ticket |
-| 3 | `device` | bstr(16) | For a passport and a sealing key claim. For a ticket, the relay identifier |
+| 2 | `what` | uint | 1 passport, 2 checkpoint, 3 latest root change record, 4 sealing key claim, 5 reserved, 6 relay access |
+| 3 | `device` | bstr(16) | For a passport, a sealing key claim, and a relay access object |
 
 **Who is answered.** The request is unsigned, so the right to an answer comes from the link, not from
 the message. A `Get` is answered in three cases: the parties have completed the hello; the requester has
@@ -256,8 +260,9 @@ previously sent, on this link, a `Passport` message with a valid root signature 
 this bus (this is how a node with an old passport catches up with a root change, R-REL-1); or pairing
 has just completed successfully on this link and the joiner is the requester (this is how it obtains
 the root change record and the checkpoint, Section B.11). In all other cases a `Get` is left
-unanswered. A relay hands out its ticket (`what = 5`) to anyone who names the bus: the ticket is needed
-before the hello and contains nothing but the server key and the limits.
+unanswered. A relay access object (`what = 6`) is served only to the device it is issued to, after the
+hello. `Get` is used on member links only; an external relay link uses `RelayGet` (Section B.10), and
+`what = 5` is reserved.
 
 ## B.4. Link
 
@@ -496,7 +501,16 @@ labelled input.
 | `cpb publication v1` | Publication signature |
 | `cpb call v1` | Call signature |
 | `cpb hello v1` | Hello signature |
-| `cpb relay ticket v1` | Relay ticket signature |
+| `cpb relay ticket v1` | Relay ticket signature, by the period key |
+| `cpb relay access v1` | Relay access signature |
+| `cpb relay access seal v1` | HPKE info of the relay access object |
+| `cpb relay alias v1` | Device and label aliases |
+| `cpb relay link v1` | Link key generation |
+| `cpb relay period v1` | Period key generation |
+| `cpb relay wrap v1` | Wrapping key of a `Relayed` message |
+| `cpb relay hello v1` | Relay hello signature |
+| `cpb relay leaf v1` | Leaf of the members tree |
+| `cpb relay node v1` | Inner node of the members tree |
 | `cpb join seal v1` | HPKE info of the join request |
 | `cpb grant seal v1` | HPKE info of the key grant |
 | `cpb call seal v1` | HPKE info of the call |
@@ -525,6 +539,7 @@ Formulas:
 - `content_key = HKDF-SHA256(key = K, info = "cpb content v1" || 0x00 || pub_id, length 32)`
 - `blob_key` is derived the same way, with the label `cpb blob v1`
 - `reply_key` and the stream keys: `Context.Export(label || 0x00, 32)` per [RFC9180], Section 5.3
+- Aliases, link and period keys, the bus alias, the wrapping key, and the members tree: Section B.10
 - `KeyFingerprint`: the first 8 bytes of `SHA-256("cpb fingerprint v1" || 0x00 || encode(Key))` as a
   big-endian integer, shown as 20 decimal digits with leading zeros
 
@@ -538,6 +553,9 @@ Formulas:
 | Call | 5470 bytes, 5.3 KiB | 13263 bytes, 13.0 KiB, if the call is signed by the root key | Fits |
 | Publication | about 4.3 KiB | unchanged | Fits |
 | Key grant, sealing key claim, join request | up to 1.6 KiB | unchanged | Fits |
+| Relay access | 5839 bytes, 5.7 KiB | 13632 bytes, 13.3 KiB | Fits |
+| Relay ticket, relay hello | up to 879 bytes | unchanged | Fits |
+| Any of the above inside `Relayed` | plus at most 120 bytes | plus at most 120 bytes | Fits |
 
 The most deeply nested object is the passport: triple, `rest`, permit list, permit. That is depth 4.
 The longest arrays are the 128 permits of a passport and the 128 relays of a checkpoint.
@@ -563,84 +581,229 @@ Decisions that writing out the fields required:
 The list of rule codes (`area/rule`) is published together with the test vectors at gate G2: every
 code needs a vector, and writing the list without the vectors would mean writing it twice.
 
-## B.10. Relay Ticket and Quota Accounting
+## B.10. Relays: Tickets, Wrapping, and Quotas
 
-This section specifies the relay ticket format and the quota accounting rules that gate G0 required. It
-applies only to an external relay, that is, a server that is not a member of the bus. A node with the
-relay right has no ticket: its rights are set by its passport, and its memory limits by the application
-on that device. The accounting rules are the same for both.
+This section specifies how an external relay, that is, a server that is not a member of the bus, sees a
+bus (S18, Section 11.1 of the requirements specification), and the quota accounting rules that apply to
+every relay. A node with the relay right (a member relay) has no ticket and uses the ordinary `Hello`:
+its rights are set by its passport, and its memory limits by the application on that device. The
+accounting rules are the same for both kinds of relay; for an external relay "bus" means a bus alias and
+"source" the alias that uploaded.
 
 ### Relay Identifier and Key
 
 An external relay has a P-256 signing key, one for all the buses it serves. The relay identifier is
 computed in the same way as a device identifier: `RelayId = SHA-256(encode(relay_key))[0..16]`. The
-Root enters this identifier into the `relays` list of the checkpoint. For a node with the relay right,
-the list holds its device identifier.
+Root enters this identifier into the `relays` list of the checkpoint. For a member relay, the list holds
+its device identifier.
 
-### Ticket (`RelayTicket`)
+### Derivations
 
-An envelope `[body, sig]`, signed by the Root, label `cpb relay ticket v1`.
+For an external relay `RelayId` in relay epoch `e`, with relay epoch secret `R`, a member's link seed
+`S`, and the Root's period secret `P` (Section 11.1 of the requirements specification):
+
+- `DeviceAlias = HKDF-SHA256(key = R, info = "cpb relay alias v1" || 0x00 || RelayId || 0x01 || DeviceId, length 16)`
+- `LabelAlias = HKDF-SHA256(key = R, info = "cpb relay alias v1" || 0x00 || RelayId || 0x02 || ChannelLabel, length 16)`
+- `link_key`: the key pair generated from
+  `HKDF-SHA256(key = S, info = "cpb relay link v1" || 0x00 || RelayId, length 48)` with the algorithm of
+  the member's device key. For P-256 the private scalar is `(OS2IP(the 48 bytes) mod (n - 1)) + 1`, the
+  method with extra random bits of [FIPS186-5], Appendix A.2.1. An algorithm with seeded key generation
+  takes its seed from the first bytes of the output.
+- `period_key`: generated in the same way from
+  `HKDF-SHA256(key = P, info = "cpb relay period v1" || 0x00 || RelayId, length 48)`, with P-256.
+- `BusAlias = SHA-256(encode(period_key))[0..16]`
+- `wrap_key = HKDF-SHA256(key = R, info = "cpb relay wrap v1" || 0x00 || RelayId || salt, length 32)`,
+  where `salt` is the random 32-byte field of each `Relayed` message. Each key encrypts exactly one
+  message with nonce zero (R-KEY-9).
+- Members tree: the leaves are `SHA-256("cpb relay leaf v1" || 0x00 || DeviceAlias || SHA-256(encode(link_key)))`
+  for every valid member, sorted by `DeviceAlias`, followed by random 32-byte padding leaves up to
+  `2^depth` leaves, where `depth` is the smallest number from 2 to 15 with `2^depth` not less than the
+  number of members. An inner node is `SHA-256("cpb relay node v1" || 0x00 || left || right)`. A padding
+  leaf cannot be told apart from a real one.
+
+The relay knows neither `R`, nor `S`, nor `P`. For it, the aliases of different relays and different
+epochs are independent random strings, and a `BusAlias` is the hash of a key it cannot link to anything.
+Only the holder of `P`, the Root, can sign a ticket for a bus alias, so a member that knows `R` cannot
+register the alias first.
+
+### Relay Access (`RelayAccess`)
+
+A control-plane object, `t = 13`, issued by the Root to one member for one relay epoch. A triple
+`[header, sealed, sig]`, signed by the root key, label `cpb relay access v1`.
+
+Header:
 
 | No. | Field | Type | Size | Notes |
 | --- | --- | --- | --- | --- |
 | 1 | `bus` | bstr(32) | 35 | |
-| 2 | `gen` | uint | ≤ 6 | Generation of the Root that signed the ticket |
-| 3 | `no` | uint | ≤ 6 | Ticket number within the generation. A ticket with a greater pair (gen, no) replaces the previous one |
-| 4 | `relay_key` | Key | 70 | P-256 |
-| 5 | `bus_bytes` | uint | ≤ 10 | Data storage limit for the whole bus, in bytes |
-| 6 | `source_bytes` | uint | ≤ 10 | Data storage limit per source, at least 16384 and at most `bus_bytes` |
+| 2 | `gen` | uint | ≤ 6 | Root generation |
+| 3 | `epoch` | uint | ≤ 6 | Relay epoch |
+| 4 | `device` | bstr(16) | 18 | The member it is issued to |
+| 5 | `seal_epoch` | uint | ≤ 6 | The member's sealing key epoch to which `sealed` is sealed |
 
-Ticket size: 211 bytes with an ES256 signature, 8005 bytes with a post-quantum root signature. A ticket
-has no expiry time, like every other object of the bus.
+`sealed` is a byte string: the 1120-byte X-Wing ciphertext followed by the encrypted map below and its
+16-byte tag. HPKE info `cpb relay access seal v1`; associated data `SHA-256(encode(header))`.
+
+| No. | Field | Type | Size | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `secret` | bstr(32) | 35 | Relay epoch secret `R` |
+| 2 | `link_seed` | bstr(32) | 35 | The member's link seed `S` |
+| 3 | `relays` | array of `[bstr(16), bstr(16)]`, 1..128 items | ≤ 4483 | `[RelayId, BusAlias]` of each external relay of the checkpoint, in the order of its `relays` list |
+
+A member accepts a relay access object only of the current root generation, with an epoch greater than
+or equal to the one it holds, and with a valid root signature. Size: at most 5839 bytes (5.7 KiB), and
+13632 bytes (13.3 KiB) with a post-quantum root signature.
+
+### Ticket (`RelayTicket`)
+
+`t = 10`. An envelope `[body, sig]`, signed by the period key, label `cpb relay ticket v1`. A ticket
+belongs to one bus alias in one relay epoch at one relay.
+
+| No. | Field | Type | Size | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `period_key` | Key | 70 | P-256. The bus alias is `SHA-256(encode(period_key))[0..16]` |
+| 2 | `no` | uint | ≤ 6 | Ticket number within the bus alias. A greater number replaces a smaller one |
+| 3 | `bus_bytes` | uint | ≤ 10 | Data storage limit for the bus alias, in bytes |
+| 4 | `source_bytes` | uint | ≤ 10 | Data storage limit per uploader, at least 16384 and at most `bus_bytes` |
+| 5 | `members` | bstr(32) | 35 | Root of the members tree |
+| 6 | `depth` | uint, 2..15 | 2 | Depth of the members tree |
+| 7 | `root` | bstr(16) | 18 | `DeviceAlias` of the root device |
+| 8 | `closed` | uint, value 1 | 2 | Optional. Present on the last ticket of the bus alias (the closing ticket) |
+
+Ticket size: at most 227 bytes. A ticket has no expiry time, like every other object of the bus.
 
 Rules:
 
-1. A ticket is valid while its signature belongs to the Root of the current generation and its
-   `RelayId` is in the `relays` list of the latest checkpoint. A relay is revoked by a new checkpoint
-   without its identifier. There is no separate revocation object.
-2. Tickets are compared by the pair (gen, no): generation first, then number. A relay keeps the ticket
-   with the greatest pair and MUST NOT accept a ticket with a smaller or equal pair. Ticket numbers
-   restart for the Root of each generation (R-MEM-12), so a number alone cannot be compared without its
-   generation.
-3. After a root change, a relay continues to serve the bus under the previous limits until it receives
-   a ticket of the new generation, or a checkpoint of the new generation without its identifier. After
-   a root change it no longer accepts tickets of the old generation. Recovery of the bus therefore does
-   not interrupt delivery, and the old root key cannot change the limits.
-4. A relay that sees a valid checkpoint without its identifier deletes everything it stored for that
-   bus.
-5. The ticket contains no relay address. How a device finds a relay is decided by the transport and the
+1. A relay accepts a ticket for a bus alias only if `SHA-256(encode(period_key))[0..16]` equals the
+   alias and the signature verifies with `period_key`. It keeps the ticket with the greatest `no` and
+   MUST NOT accept one with a smaller or equal number.
+2. The Root signs a new ticket with a greater number when the limits change and when a member is
+   admitted during the epoch, which changes the members tree. A member leaves the tree only with a new
+   epoch.
+3. A closing ticket is final: the relay accepts no further ticket for that alias. It deletes everything
+   under the alias except bridges (relay access objects of the next epoch addressed to an alias of the
+   tree), serves each bridge only to its addressee after a relay hello under the closed alias, and
+   deletes each bridge once it has been served. Bridges count against the `bus_bytes` of the closed
+   alias. A closing ticket sent because the relay left the checkpoint's `relays` list is preceded by no
+   bridges.
+4. On an epoch change the root device, at each external relay that stays in the checkpoint, does three
+   things in this order: it uploads the bridges under the old alias; it registers the ticket of the new
+   alias and uploads the Root-signed control-plane objects under it; it sends the closing ticket of the
+   old alias. Sources then upload their retained publications and their latest grants again under the
+   new aliases, with new upload counters.
+5. After a root change, the new Root starts relay epoch 1 of its generation. If it holds the relay state
+   of the previous generation, it bridges and closes the old aliases by rule 4. Otherwise members reach
+   the new epoch through a member link or a member relay, as after any loss of the Root, and the old
+   aliases stay until the operator's retention ends. A relay access object of an older generation is
+   ignored.
+6. The ticket contains no relay address. How a device finds a relay is decided by the transport and the
    application.
-6. This specification defines no default values for `bus_bytes` and `source_bytes`. They are a matter
-   of agreement between the owner of the bus and the server operator, not a property of the protocol.
+7. This specification defines no default values for `bus_bytes` and `source_bytes`, and no retention
+   period for closed aliases. They are a matter of agreement between the owner of the bus and the server
+   operator, not a property of the protocol.
+8. The root device sends a ticket to the relay as a message of its own, in the open, on any link and
+   before any hello: the ticket proves itself by rule 1, and the first ticket of a bus alias must exist
+   before any device can open a link under that alias.
 
-### Relay in the Hello
+### Relay Hello (`RelayHello`)
 
-A relay sends the same `Hello` as a device, with its `RelayId` in the `device` field. It signs `Auth`
-with the relay key. Instead of a passport it presents its ticket: the device requests it with a `Get`
-with `what = 5` before the hello, like any other control-plane object. The device verifies the root
-signature on the ticket and the presence of the `RelayId` in its own checkpoint. A relay that fails
-these checks receives nothing from the device except control-plane objects.
+`t = 15`. An unsigned message that opens an external relay link in place of `Hello`. The device sends
+it first; the relay answers with its own.
+
+| No. | Field | Type | Sender | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `versions` | array of uint | Both | As in `Hello` |
+| 2 | `nonce` | bstr(16) | Both | |
+| 3 | `bus_alias` | bstr(16) | Both | The relay repeats the alias the device named |
+| 4 | `alias` | bstr(16) | Device | The device's `DeviceAlias` |
+| 5 | `link_key` | Key | Device | |
+| 6 | `index` | uint | Device | Position of the device's leaf in the members tree |
+| 7 | `path` | array of bstr(32), `depth` items | Device | The sibling hashes from the leaf to the root |
+| 8 | `relay_key` | Key | Relay | |
+
+`Auth` follows on both sides, as on a member link, with the signature computed over
+`cpb relay hello v1 || 0x00 || SHA-256(own hello) || SHA-256(peer's hello)`: by the device with its link
+key, by the relay with its relay key. The relay accepts the link only if the bus alias has a ticket, the
+leaf rebuilt from fields 4 and 5 and the path lead to the `members` root of the latest ticket, and the
+signature verifies; under a closed alias it then serves only the device's bridge. The device accepts the
+relay only if `SHA-256(encode(relay_key))[0..16]` is an external relay in its own checkpoint and the
+signature verifies. Size of the device's hello: at most 879 bytes.
+
+### Wrapped Object (`Relayed`)
+
+`t = 19`. Everything a member sends through an external relay, in both directions, is carried in this
+message. The relay reads only fields 1..8 and 11.
+
+| No. | Field | Type | Notes |
+| --- | --- | --- | --- |
+| 1 | `class` | uint | 1 control-plane object, stored; 2 key grant; 3 publication; 4 key request; 5 join request; 6 forwarded, not stored (nonce request, nonce, call, reply, refusal, stream chunk, halt proof, a control-plane object passed on); 7 blob segment |
+| 2 | `from` | bstr(16) | Alias of the uploader. It MUST equal the alias of the link on which the relay receives the message |
+| 3 | `to` | bstr(16) | Optional. Class 1: the subject of a passport or relay access object. Class 2: the reader. Class 4: the source. Class 6: the target; absent means every connected alias of the bus alias |
+| 4 | `label` | bstr(16) | Classes 2, 3, 4, 7: `LabelAlias` |
+| 5 | `kind` | uint | Class 1: the kind `t` of the inner object, one of 4, 5, 6, 7, 13 |
+| 6 | `seq` | uint | Classes 1..5: the upload counter (R-REL-17). Class 7: the counter of the publication the segment belongs to |
+| 7 | `depth` | uint | Class 3: the retention depth from the publication header |
+| 8 | `size` | uint | Class 3, optional: the blob size rounded up to the sender's padding bucket |
+| 9 | `salt` | bstr(32) | Random |
+| 10 | `body` | bstr | The inner frame, with its 2-byte length field, encrypted with ChaCha20-Poly1305 under `wrap_key` and nonce zero. Associated data: `SHA-256(encode(map of fields 1..9))` |
+| 11 | `segment` | uint | Class 7: the segment number |
+
+Rules:
+
+1. Class 1 objects of kinds 4, 5, 6, and 13 (passport, checkpoint, root change record, relay access) are
+   accepted only from the alias named in the `root` field of the ticket. The relay keeps the one with the
+   greatest `seq` of each kind, per `to` for passports and relay access objects. A sealing key claim
+   (kind 7) carries no `to`: the relay keeps the latest per uploader.
+2. The relay keeps grants, publications, key requests, and blob segments by the rules of R-REL-3, with
+   `(from, label, to)` in place of (source, label, reader) and `seq` in place of generations and
+   publication numbers. Join requests go to the join buffer and are delivered to the root device's alias.
+3. A forwarded object goes to its target if the target is connected, and is otherwise refused with
+   `RelayRefusal` code 5.
+4. The recipient rejects a `Relayed` whose `from` it cannot resolve to a member under its own derivation,
+   whose body does not decrypt, or whose inner object fails any check it applies on a member link. A
+   wrong `kind`, `to`, `label`, or `depth` against the inner object is a rejection too.
+5. The wrapping adds at most 120 bytes to the inner frame. A stream chunk or blob segment sent through an
+   external relay is therefore at most 16384 - 120 - 2 = 16262 bytes long, header included; the default
+   of 4096 bytes in Section 13.2 of the requirements specification is unaffected, and every map object
+   fits (Section B.9).
+
+### Requests on an External Relay Link (`RelayGet`)
+
+`t = 14`. An unsigned message, sent after a relay hello. A `Get` is not used on such a link.
+
+| No. | Field | Type | Notes |
+| --- | --- | --- | --- |
+| 1 | `what` | uint | 1 passport, 2 checkpoint, 3 latest root change record, 4 sealing key claim, 6 relay access, 7 blob segment |
+| 2 | `subject` | bstr(16) | Optional. The alias of the subject for 1, 4, and 6; the alias of the source for 7 |
+| 3 | `label` | bstr(16) | Optional. For 7 |
+| 4 | `seq` | uint | Optional. For 7: the counter of the publication |
+| 5 | `segment` | uint | Optional. For 7 |
+
+The relay answers with the stored `Relayed`. A relay access object is served only to its subject.
 
 ### Quota Accounting
 
-The unit of accounting is a byte of the encoded object as it appears in the frame. Blob segments are
-counted by the size in the publication header.
+The unit of accounting is a byte of the encoded object as it appears in the frame; at an external relay,
+of the `Relayed` message. Blob segments are counted by the size in the publication header, or by the
+`size` field at an external relay.
 
-There is one principle: whoever signed a stored object pays for it.
+There is one principle: whoever signed a stored object pays for it; at an external relay, whoever
+uploaded it.
 
 | What is stored | Charged to | Limit |
 | --- | --- | --- |
-| Ticket, latest checkpoint, latest root change record, passports of valid devices | The bus, outside `bus_bytes` | Bounded by the bitmap size in the checkpoint |
+| Ticket, latest checkpoint, latest root change record, passports of valid devices; at an external relay also relay access objects | The bus, outside `bus_bytes` | Bounded by the bitmap size in the checkpoint, or by `2^depth` at an external relay |
 | Latest sealing key claim of each device | The bus, outside `bus_bytes` | One per device |
 | Publications and blobs | The source | `source_bytes` |
 | Latest channel key grant per tuple (bus, source, label, reader) | The source | `source_bytes` |
-| Channel key request | The reader that signed it | One per pair (reader, label), counted against the reader's `source_bytes` |
+| Channel key request | The reader that signed or uploaded it | One per pair (reader, label), counted against the reader's `source_bytes` |
 | Join requests | A separate buffer | The number of join requests in Section 13.2 of the requirements specification |
-| Calls, replies, refusals, stream chunks | Not stored | |
+| Bridges under a closed alias | The closed alias | Its `bus_bytes` |
+| Calls, replies, refusals, stream chunks, forwarded objects | Not stored | |
 
 Control-plane objects are not counted in `bus_bytes` because their number is bounded by the Root, not
-by the sources: a relay sees the bitmap size and knows the maximum volume in advance. An operator who
-does not accept that volume does not serve the bus (limitation L3).
+by the sources: a relay sees the bitmap size, or the tree depth, and knows the maximum volume in advance.
+An operator who does not accept that volume does not serve the bus (limitation L3).
 
 Eviction rules:
 
@@ -651,17 +814,17 @@ Eviction rules:
    publication. If a source's grants alone do not fit in `source_bytes`, the new grant is rejected.
 3. An object that by itself exceeds `source_bytes` is rejected.
 4. The total over all sources has exceeded `bus_bytes`. The relay applies rule 1 to the source that
-   occupies the most. On a tie, the source with the smaller identifier is chosen. If that source has
-   only key grants left, the relay takes the next source by volume that has publications and occupies
-   more than the average. If there is none, the relay rejects the new object instead of evicting other
-   sources' data.
+   occupies the most. On a tie, the source with the smaller identifier, or the smaller alias, is chosen.
+   If that source has only key grants left, the relay takes the next source by volume that has
+   publications and occupies more than the average. If there is none, the relay rejects the new object
+   instead of evicting other sources' data.
 5. Arrival order is a local counter of the relay. No clock is needed for accounting.
 
 Fair share invariant (R-REL-4, property S14): a source that occupies no more than `bus_bytes` divided by
 the number of sources with stored data never loses data because of other sources' publications. It
 follows from rule 4: when the total exceeds `bus_bytes`, the source with the largest volume occupies
 more than the average. This is max-min fair allocation, as in fair queueing [DEMERS]. The invariant is
-verified in the relay model.
+verified in the relay models.
 
 ### Relay Refusal (`RelayRefusal`)
 
@@ -671,19 +834,39 @@ notice that a call target is unreachable: that is code 5 of this message.
 
 | No. | Field | Type | Notes |
 | --- | --- | --- | --- |
-| 1 | `bus` | bstr(32) | |
-| 2 | `ref` | bstr(32) | Identifier of the rejected object: SHA-256(encode(body)) for an envelope, SHA-256(encode(header)) for a publication and a grant, `call_id` for a call |
+| 1 | `bus` | bstr(32) | On a member link |
+| 2 | `ref` | bstr(32) | Identifier of the rejected object: SHA-256(encode(body)) for an envelope, SHA-256(encode(header)) for a publication and a grant, `call_id` for a call, SHA-256 of the encoded `Relayed` message at an external relay |
 | 3 | `code` | uint | 1 source quota exhausted, 2 object larger than the quota, 3 bus not served, 4 streams not served, 5 call target not connected (R-CALL-12) |
+| 4 | `bus_alias` | bstr(16) | On an external relay link, in place of field 1 |
+
+Exactly one of fields 1 and 4 is present.
 
 ### Decisions in This Section
 
-1. Quotas are signed by the Root, not assigned by the server. Every source therefore knows its limit in
-   advance, and the fair share invariant has an exact bound. Devices still cannot verify that a relay
-   is honest: that is a delivery property, not a security property (R-REL-11).
+1. Quotas are signed by the Root (at an external relay, with the period key), not assigned by the
+   server. Every source therefore knows its limit in advance, and the fair share invariant has an exact
+   bound. Devices still cannot verify that a relay is honest: that is a delivery property, not a
+   security property (R-REL-11).
 2. An external relay has one key for all buses. Only the relay itself can link buses through it, and it
-   already sees all of them (L5).
-3. A relay is revoked through the checkpoint; there is no separate mechanism.
-4. Control-plane objects are stored outside the data quota.
+   already sees all of them.
+3. A member relay is revoked through the checkpoint. An external relay is removed through the `relays`
+   list too, which starts a new relay epoch; its aliases end with a closing ticket. There is no separate
+   revocation mechanism.
+4. Aliases change per relay and per relay epoch, not only per relay: otherwise one operator could still
+   follow a bus for its whole life.
+5. Link keys are generated from a seed the Root issues, not by blinding one long-term key. Key blinding
+   exists only for elliptic-curve keys [TOR-V3]; a seed works with every signature algorithm of the bus,
+   including a future post-quantum one, and leaves the device key, the passport, and the join request
+   unchanged. The Root learns the link keys, which adds nothing: it already decides membership.
+6. The bus alias is the hash of the period key, so it is self-certifying, and a member cannot occupy it
+   before the Root (S14).
+7. Each wrapped message has its own key from a random salt. All members share `R`, so a counter nonce
+   would repeat between devices, and a nonce derived from the open fields repeats when two bodies share
+   them.
+8. Root-signed objects reach an external relay only from the root device, so the relay keeps one copy of
+   each instead of one per member, as at a member relay.
+9. The members tree, not a list: a bus may have 32768 members, and a list of aliases would not fit a
+   frame. The tree depth is the padding bucket of the member count.
 
 ## B.11. Pairing Step by Step
 

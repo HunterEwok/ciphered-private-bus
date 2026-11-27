@@ -24,6 +24,12 @@ cases = {
  "HaltProof kind 6 with one sig": ("HaltProof", halt(6, rc_head, [SIG])),
  "seg 1023": ("Publication", [{**common['Publication'][1][0], 10:[5000,B(32),1023]}, B(100), SIG]),
  "gen 0": ("SealClaim", [{1:B(32),2:B(16),3:0,4:XWING}, SIG]),
+ "RelayTicket depth 16": ("RelayTicket", [{**common["RelayTicket"][1][0], 6: 16}, SIG]),
+ "RelayRefusal with bus and alias": ("RelayRefusal", {0:11,1:B(32),2:B(32),3:1,4:B(16)}),
+ "RelayHello with both sides": ("RelayHello", {**plain_msgs["RelayHello(device)"], 8:P256}),
+ "Relayed control of kind 17": ("Relayed", {0:19,1:1,2:B(16),5:17,6:1,9:B(32),10:B(100)}),
+ "Relayed publication without depth": ("Relayed", {0:19,1:3,2:B(16),4:B(16),6:1,9:B(32),10:B(100)}),
+ "Relayed body 16281": ("Relayed", {0:19,1:6,2:B(16),9:B(32),10:B(16281)}),
  "Call enc 5249": ("Call", [{1:B(32),2:B(32),3:B(16),4:B(16),5:B(16),6:1,7:1,8:1,9:B(5249)}, SIG]),
 }
 for n,(rule,v) in cases.items():

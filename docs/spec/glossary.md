@@ -35,6 +35,8 @@ not know about them.
 | --- | --- | --- | --- |
 | Owner | `Owner` (documentation only) | The person or organization with authority over the bus, exercised through the Root | Section 2 |
 | Relay | `Relay` | Untrusted storage and forwarding | Section 11 |
+| Member relay | `MemberRelay` | A node with the relay right acting as a relay | Section 11 |
+| External relay | `ExternalRelay` | A relay server that is not a member and sees the bus only under aliases | Section 11.1 |
 | Application | `App` | A program that uses the bus. One application is one bus | R-ARC-4 |
 | Host | `Host` | The program in which the core is embedded: transport, storage, randomness, time events, keys | R-ARC-8..10 |
 | Link | `Link` | One transport connection over which frames travel | R-ARC-6 |
@@ -46,6 +48,12 @@ not know about them.
 | Bus identifier | `BusId` | 32 bytes | R-FMT-9 |
 | Device identifier | `DeviceId` | 16 bytes | R-FMT-9, B.8 |
 | Relay identifier | `RelayId` | 16 bytes | B.10 |
+| Relay epoch | `RelayEpoch` | 1..2^31 - 1, within a root generation | R-REL-13 |
+| Bus alias | `BusAlias` | 16 bytes, hash of the period key | R-REL-14, B.10 |
+| Device alias | `DeviceAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |
+| Label alias | `LabelAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |
+| Upload counter | `seq` | 1..2^31 - 1, per uploader, relay, and relay epoch | R-REL-17, B.10 |
+| Members tree depth | `depth` | 2..15 | B.10 |
 | Signed object identifier | `ObjectId` | 32 bytes | R-FMT-7 |
 | Channel number | `ChannelNo` | 0..65535 | Section 13.1 |
 | Channel label | `ChannelLabel` | 16 bytes | Section 9.1, B.8 |
@@ -69,7 +77,7 @@ not know about them.
 
 | Term | Identifier | Definition | Defined in |
 | --- | --- | --- | --- |
-| Root key | `RootKey` | Signs passports, checkpoints, and relay tickets. Held by the host | R-KEY-1 |
+| Root key | `RootKey` | Signs passports, checkpoints, root-issued relay access objects. Held by the host | R-KEY-1 |
 | Device key | `DeviceKey` | Signs everything a node creates. Held by the host | R-KEY-1 |
 | User-presence key | `PresenceKey` | Signs actions that require user confirmation | R-CALL-4 |
 | K1 | `RecoveryKeyClassic` | Classical half of the recovery key (P-256) | Section 2 |
@@ -81,6 +89,12 @@ not know about them.
 | Blob key | `blob_key` | Derived the same way, with a different label | R-CH-3, B.8 |
 | Reply key | `reply_key` | Exported from the HPKE context of the call | R-CALL-9, B.8 |
 | Stream keys | `stream_key_out`, `stream_key_in` | One per direction, exported from the HPKE context of the call | R-STR-1, B.8 |
+| Relay epoch secret | `relay_secret` | 32 bytes per relay epoch, known to members only | R-REL-13, B.10 |
+| Link seed | `link_seed` | 32 bytes per member and relay epoch, issued by the Root | R-REL-13, B.10 |
+| Link key | `LinkKey` | Authenticates a member to one external relay in one relay epoch. Held by the core | R-KEY-11, B.10 |
+| Period secret and period key | `period_secret`, `PeriodKey` | The Root's secret per relay epoch and the key derived from it per external relay; the period key signs tickets | R-REL-13, B.10 |
+| Wrapping key | `wrap_key` | Single-use key of one `Relayed` message | R-REL-16, B.10 |
+| Relay key | `RelayKey` | An external relay's signing key, one for all buses | B.10 |
 | Key encoding | `Key { alg, bytes }` | The pair (algorithm, bytes) | R-FMT-11 |
 | ECDSA P-256 algorithm identifier | `ALG_ES256 = 1` | | R-FMT-11 |
 | X-Wing algorithm identifier | `ALG_XWING = 2` | | R-FMT-11 |
@@ -89,7 +103,7 @@ not know about them.
 
 ## 5. Control-Plane Objects
 
-Public signed objects. Every member and relay verifies and stores them.
+Public signed objects. Every member and member relay verifies and stores them; an external relay stores them only wrapped.
 
 | Term | Identifier | Signed by | Defined in |
 | --- | --- | --- | --- |
@@ -101,7 +115,11 @@ Public signed objects. Every member and relay verifies and stores them.
 | Join request | `JoinRequest` | Acceptor | R-JOIN-4, B.3 |
 | Channel key request | `KeyRequest` | Reader | R-CH-18, B.3 |
 | Halt proof | `HaltProof` | Contains two root-signed records | R-MEM-10, B.3 |
-| Relay ticket | `RelayTicket` | Root | Section 11, B.10 |
+| Relay access | `RelayAccess` | Root; sealed to one member | R-REL-13, B.10 |
+| Relay ticket | `RelayTicket` | Period key | R-REL-15, B.10 |
+| Closing ticket | field `closed` | The last ticket of a bus alias | R-REL-19, B.10 |
+| Bridge | `Bridge` (documentation only) | A relay access object of the next epoch kept under a closed alias | R-REL-19, B.10 |
+| Members tree | `members`, `depth` | Ticket fields: root and depth of the tree of (alias, link key) pairs | B.10 |
 | Relay storage limits | `bus_bytes`, `source_bytes` | Fields of the relay ticket | B.10 |
 | Control-plane object request | `Get` | Unsigned | B.3 |
 | Read right | `RIGHT_READ` | | Section 6.1 |
@@ -178,6 +196,10 @@ Public signed objects. Every member and relay verifies and stores them.
 | Message kind | field `t` | Kind number in the message map | R-FMT-12, B.2 |
 | Hello | `Hello` | The first message on a link | R-REL-1, B.4 |
 | Hello authentication | `Auth` | Signature over both hellos | B.4 |
+| Relay hello | `RelayHello` | The first message on an external relay link | R-REL-15, B.10 |
+| Wrapped object | `Relayed` | Everything a member sends through an external relay | R-REL-16, B.10 |
+| Wrapped object class | `class` | 1 control, 2 key grant, 3 publication, 4 key request, 5 join request, 6 forwarded, 7 blob segment | B.10 |
+| Request on an external relay link | `RelayGet` | Unsigned | B.10 |
 | Critical field range | `0..=255` | An unknown field rejects the object | R-FMT-14 |
 | Extension field range | `256..=65535` | An unknown field is preserved | R-FMT-14 |
 | Protocol version | `version` | Announced in the hello and covered by the signature | R-FMT-15 |

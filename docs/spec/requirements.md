@@ -106,7 +106,7 @@ A bus has exactly three kinds of authority keys and one kind of device.
 | Root | The only authority that admits and revokes devices and grants rights. | The root key. The bus does not know where it is kept: the core asks the host for a signature. Where the key lives is the application's decision. Recommended: hardware-backed storage gated by user presence. |
 | Recovery key | The only authority that replaces the Root. Kept offline. | The pair K1 (classical signature) and K2 (post-quantum signature). This is a hybrid: both signatures are required, so a break of one scheme does not open the bus. The target state is a single post-quantum signature, introduced as a new algorithm identifier once a post-quantum scheme is considered mature. |
 | Node | Any device of the bus: phone, computer, server, microcontroller. The root device is also a node that additionally holds the root key. | Device key, optional user-presence key, rotating sealing key. |
-| Relay | A role of a node or of an external server: stores and forwards what it cannot read. | A relay node holds a passport with the relay right. An external relay holds a ticket issued by the Root. |
+| Relay | A role of a node or of an external server: stores and forwards what it cannot read. | A member relay is a node that holds a passport with the relay right. An external relay is a server that is not a member: for each relay epoch it holds a ticket signed by a period key of the Root, and it sees the bus only under aliases (Section 11.1). |
 | Application | A program that uses the bus. The bus knows nothing about the application; one application is one bus. | None. |
 | Host | The program in which the core is embedded. Provides the transport, storage, randomness, and time events. | None. |
 
@@ -124,6 +124,11 @@ Further terms:
 - **Stream.** A bidirectional byte sequence between two nodes, opened by a call.
 - **Halt.** A state in which a node stops executing calls and accepting membership changes because it
   has observed two conflicting histories (a fork).
+- **Relay epoch.** A period, numbered within a root generation, during which the members address each
+  external relay under one set of aliases. Every revocation starts a new relay epoch.
+- **Alias.** A 16-byte pseudonym of the bus, a device, or a channel label, valid for one external relay
+  in one relay epoch. Aliases of different relays and different epochs are unrelated for anyone who is
+  not a member.
 
 The full list of terms and their code identifiers is in the [Glossary](glossary.md).
 
@@ -158,6 +163,7 @@ not defined by the bus; it is an assumption for which the application is respons
 | S15 | Untrusted relay | A relay cannot read, forge, or modify content. It learns only what L5 lists. |
 | S16 | Instance isolation | Bus instances in one process share no state. An application cannot act on the bus's system channels and never receives private keys. |
 | S17 | Parser robustness | On any input bytes the core does not crash and does not exceed its memory budget. An accepted message has exactly one byte representation. |
+| S18 | Relay unlinkability | An external relay, and any set of colluding external relays that holds no key or secret of a member, learns no identifier, key, right, permit, or name of the bus or of its devices. Except through timing and network addresses, it cannot link what it sees in one relay epoch to what it sees in another, nor its view of a bus to another external relay's view of the same bus. It learns the number of valid members only rounded up to a power of two. |
 
 ### 3.3. Limitations
 
@@ -169,7 +175,7 @@ These limitations are accepted as part of this specification. An implementation 
 | L2 | Version 1 signatures are classical. An adversary with a working quantum computer can forge a root signature until the bus is moved to a post-quantum signature through the recovery key. |
 | L3 | The network and relays can deny service. The bus guarantees safety, not delivery. |
 | L4 | A compromised root key gives full control over the bus until the Root is changed. |
-| L5 | A relay sees: the bus identifier, the source device, the opaque channel label, the devices to which a channel key was granted, the retention depth, the padding bucket, the arrival time, and the control-plane objects: passports (keys, rights, permits), checkpoints, sealing key claims, and who submitted a join request. The device name is not in the passport: it travels in the sealed join request and in the node info. A network observer behind an encrypting transport sees only volume and timing. |
+| L5 | A member relay sees: the bus identifier, the source device, the opaque channel label, the devices to which a channel key was granted, the retention depth, the padding bucket, the arrival time, and the control-plane objects: passports (keys, rights, permits), checkpoints, sealing key claims, and who submitted a join request. An external relay sees, separately in each relay epoch: one bus alias; the aliases of the devices that connect and of the channel labels; which alias granted a key for which label alias to which alias, which alias calls which, and which alias submitted a join request; the upload counters, the retention depth, the padding bucket, the arrival time, and the network address; and the depth of the members tree, that is, the number of valid members rounded up to a power of two. It sees no control-plane object in the open. It can link two consecutive epochs of a bus by timing, because the root device and the sources upload under both aliases at the change. The device name is not in the passport: it travels in the sealed join request and in the node info. A network observer behind an encrypting transport sees only volume and timing. |
 | L6 | Two different root change records with the same generation halt the bus permanently. The owner creates a new bus. |
 | L7 | A call is executed at most once, but a commander that received no reply does not know whether it was executed. |
 | L8 | A reader that receives a channel for the first time or anew, and only through a relay, may receive a state of the channel that is not the newest. It converges with the first message from the source or an honest relay. The source's answer to a key request (R-CH-18) provides freshness immediately. |
@@ -239,9 +245,10 @@ Layers from bottom to top: transport and adapters (outside the standard), wire f
 communication (channels, calls, streams), local interface, application profiles (outside the standard).
 
 Bus objects belong to two planes. The **control plane** consists of open signed objects: passport,
-checkpoint, root change record, sealing key claim, join request, key request, and halt proof. Any
-participant and any relay verifies and stores them; a relay distinguishes them by object kind, and no
-"publish" right is needed for them. The **data plane** consists of encrypted channels, calls, and
+checkpoint, root change record, sealing key claim, join request, key request, relay access, and halt
+proof. Any participant and any member relay verifies and stores them; a member relay distinguishes them
+by object kind, and no "publish" right is needed for them. An external relay stores and forwards them
+only wrapped, without reading them (Section 11.1). The **data plane** consists of encrypted channels, calls, and
 streams. A control-plane object never travels as a channel publication.
 
 ### 4.1. Selection Principles and Comparison with Established Systems
@@ -595,6 +602,13 @@ in.
 > the previous Root, so the migration requires all nodes to be updated in advance.
 > *Serves:* L2. *Verified by:* scenario test.
 
+> **R-KEY-11.** A link key, which authenticates a member to one external relay in one relay epoch, is
+> generated by the core from the link seed that the Root issued to the member (R-REL-13), with the
+> signature algorithm of the device key, and is kept in the core's storage like a sealing key. It signs
+> nothing but the hello on an external relay link. The relay epoch secret, the link seed, and the period
+> secret of the Root are erased when the epoch they belong to has been closed at every external relay.
+> *Serves:* S14, S18. *Verified by:* Tamarin, code review.
+
 ## 9. Channels and Publications
 
 A node publishes data to a channel, and the channel itself determines how many publications are
@@ -910,10 +924,14 @@ has not yet consumed.
 A relay stores and forwards what it cannot read; its honesty is needed only for delivery, not for
 security.
 
-A relay is either a node of the bus with the relay right or an external server that serves many
-unrelated buses at once. An external server receives a ticket from the Root: bus, server key, quota.
+A relay is either a **member relay**, a node of the bus with the relay right, or an **external relay**,
+a server that is not a member and serves many unrelated buses at once. A member relay sees the bus as a
+member does (L5). An external relay sees it only under aliases that change with every relay epoch and
+differ between relays (S18); the rules for it are in Section 11.1 and its formats in Appendix B,
+Section B.10. R-REL-3, R-REL-4, R-REL-8, R-REL-11, and R-REL-12 apply to both kinds of relay; the other
+requirements of this list apply to a member relay unless they name an external relay.
 
-> **R-REL-1.** A relay accepts a device connection after a hello in which the device presents its
+> **R-REL-1.** A member relay accepts a device connection after a hello in which the device presents its
 > passport, its checkpoint, and a device key signature over the nonces of both sides and the list of
 > versions. Before the hello, and when root generations differ, the sides exchange control-plane
 > objects: the latest root change record, the checkpoint, and the device's passport. These objects are
@@ -921,8 +939,9 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 > serves them to anyone who presents a passport of any generation of this bus.
 > *Serves:* S14. *Verified by:* Tamarin, model.
 
-> **R-REL-2.** A relay MUST verify the Root signature on passports and checkpoints and the source
-> signature on publications. It MUST NOT store or forward anything unverified.
+> **R-REL-2.** A member relay MUST verify the Root signature on passports and checkpoints and the source
+> signature on publications. It MUST NOT store or forward anything unverified. An external relay
+> verifies what R-REL-15 lists instead.
 > *Serves:* S14, S15. *Verified by:* relay model.
 
 > **R-REL-3.** A relay retains publications keyed by (bus, source, channel label) according to the
@@ -932,34 +951,41 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 > with a generation not less than the held one replaces it: at equal generation it carries the same key
 > and may carry the nonce of a key request (R-CH-18). A key request (R-CH-18) is deleted once the relay
 > has forwarded to the reader a grant with the same nonce or has received a new request from the reader.
-> *Serves:* delivery. *Verified by:* relay model, simulator.
+> An external relay applies the same rules to aliases, and compares by upload counter where this
+> requirement compares generations and publication numbers (R-REL-17).
+> *Serves:* delivery. *Verified by:* relay model, external relay model, simulator.
 
 > **R-REL-4.** Relay memory is divided into quotas: per bus and per source within a bus. A source that
-> exhausted its quota evicts only its own publications. The Root signs the limits in the ticket; the
-> eviction order and the invariant are specified in Appendix B, Section B.10.
+> exhausted its quota evicts only its own publications. For an external relay, the bus is a bus alias and
+> the source is the alias that uploaded; the Root signs the limits in the ticket. The eviction order and
+> the invariant are specified in Appendix B, Section B.10.
 > *Serves:* S14. *Verified by:* model (fair-share invariant).
 
 > **R-REL-5.** A relay serves a publication only to devices for which it has seen a key grant of this
-> channel, and to the source itself.
+> channel, and to the source itself. An external relay applies this rule to aliases.
 > *Serves:* L5. *Verified by:* relay model.
 
-> **R-REL-6.** A relay deletes what it stores for a device that is revoked under its checkpoint, and
-> accepts nothing more for or from it.
+> **R-REL-6.** A member relay deletes what it stores for a device that is revoked under its checkpoint,
+> and accepts nothing more for or from it. An external relay deletes by the closing ticket instead
+> (R-REL-19).
 > *Serves:* S5. *Verified by:* model.
 
-> **R-REL-7.** A relay stores and serves on request the latest checkpoint it knows, passports, sealing key
-> claims, and the latest root change record. These are public bus data.
+> **R-REL-7.** A member relay stores and serves on request the latest checkpoint it knows, passports,
+> sealing key claims, and the latest root change record. These are public bus data. An external relay
+> stores them wrapped, as R-REL-18 states.
 > *Serves:* S5, L1. *Verified by:* model.
 
 > **R-REL-8.** A relay forwards calls, replies, and stream chunks to connected devices and does not store
 > them.
 > *Serves:* S15. *Verified by:* relay model.
 
-> **R-REL-9.** A relay holds join requests for the Root (R-JOIN-8).
+> **R-REL-9.** A relay holds join requests for the Root (R-JOIN-8). An external relay holds them under the
+> bus alias, wrapped (R-REL-18).
 > *Serves:* L5. *Verified by:* adapter test.
 
 > **R-REL-10.** An external relay does not distinguish buses by content and requires no owner account.
-> Everything it needs to know about a bus is in the ticket.
+> Everything it needs to know about a bus alias is in the ticket of that alias, and it never learns which
+> bus an alias belongs to.
 > *Serves:* scope. *Verified by:* test: one relay, 1000 buses.
 
 > **R-REL-11.** Every property S1–S14 holds when the relay behaves arbitrarily. The delivery properties
@@ -968,8 +994,90 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 
 > **R-REL-12.** A node MAY be connected to several relays at once. The same publication arriving over
 > different paths is accepted once (R-CH-9). A node passes a newer checkpoint and a newer root change
-> record from one relay to another (R-MEM-6), so a lagging relay catches up without the Root.
+> record from one member relay to another (R-MEM-6), so a lagging member relay catches up without the
+> Root. An external relay takes Root-signed objects only from the root device (R-REL-18) and catches up
+> when the root device next connects; through it, members still pass newer records to each other as
+> forwarded objects.
 > *Serves:* S12. *Verified by:* simulator.
+
+### 11.1. External Relays
+
+An external relay sees a bus only through pseudonyms. The Root starts a new relay epoch after every
+revocation; in each epoch every member receives a secret that names everything on external relay links
+and a seed from which it generates its link keys. The relay never learns the secret, so for it the
+aliases of different relays and different epochs are unrelated random strings. This is the approach of
+directory blinding in onion services [TOR-V3], applied to storage and quotas. The formats are in
+Appendix B, Section B.10.
+
+> **R-REL-13.** The Root keeps a relay epoch number, counted from 1 within each root generation, and for
+> each epoch a fresh random 32-byte relay epoch secret and a fresh random period secret, which it never
+> discloses. It MUST start a new epoch with every checkpoint that clears a passport bit or changes the
+> `relays` list, and MAY start one on the "rotate key epoch" time event on the root device (R-CORE-3) or
+> at the owner's request. For each epoch the Root issues to every valid member a relay access object,
+> signed by the root key and sealed to the member's latest sealing key claim: the relay epoch secret, a
+> fresh random link seed for that member, and the bus alias of each external relay of the checkpoint. It
+> issues one to a member admitted during the epoch, and issues the current one again, sealed to the new
+> key, when it receives a newer sealing key claim of a member. A member never sends the relay epoch
+> secret, its link seed, or anything derived from them in the open.
+> *Serves:* S5, S18. *Verified by:* membership model (a new epoch follows every cleared bit), Tamarin.
+
+> **R-REL-14.** For an external relay with identifier `RelayId`, the device aliases, the label aliases,
+> and the wrapping keys are derived from the relay epoch secret and `RelayId`; a member's link key is
+> generated from its link seed and `RelayId` (R-KEY-11); the bus alias is the hash of the period key,
+> which the Root derives from its period secret and `RelayId`. Every member computes the alias of every
+> other member and of every label it uses without asking anyone. The derivations are in Appendix B,
+> Section B.10.
+> *Serves:* S18. *Verified by:* vectors, Tamarin.
+
+> **R-REL-15.** An external relay keeps, for each bus alias, the ticket with the greatest number whose
+> period key hashes to that alias. It accepts a device link only after a relay hello that presents a
+> device alias and a link key with a proof that the pair is a leaf of the ticket's members tree, and an
+> authentication signed by that link key. It verifies no other signature and stores or forwards nothing
+> but wrapped objects from admitted aliases.
+> *Serves:* S14, S18. *Verified by:* Tamarin, external relay model.
+
+> **R-REL-16.** A member sends everything through an external relay inside a wrapped object. The relay
+> sees only its open fields: class, sender alias, target or reader alias, label alias, object kind,
+> upload counter, retention depth, and size. The body is the frame the member would send on a member
+> link, encrypted with ChaCha20-Poly1305 under a single-use key derived from the relay epoch secret,
+> `RelayId`, and a random 32-byte salt. The recipient decrypts the body and applies to the inner object
+> every check it applies on a member link; anything that fails is dropped.
+> *Serves:* S15, S18. *Verified by:* Tamarin, vectors, fuzzing.
+
+> **R-REL-17.** No open field of a wrapped object carries a number that is the same on two relays or in
+> two epochs. The upload counter starts at 1 for each uploader in each relay epoch at each relay and
+> grows by one with every stored object; it is the only order an external relay knows. A blob size is
+> rounded up to the sender's padding bucket (R-CH-14).
+> *Serves:* S18. *Verified by:* Tamarin probe, vectors.
+
+> **R-REL-18.** Checkpoints, passports, root change records, and relay access objects are signed by the
+> Root. An external relay accepts them only from the alias of the root device named in the ticket, and
+> keeps the latest of each kind, per subject alias for passports and relay access objects. A sealing key
+> claim and a key request are kept in the slot of the alias that uploaded them, as Appendix B,
+> Section B.10 counts them. A join request from any admitted alias goes to the join buffer of the bus
+> alias and is delivered to the root device's alias. A halt proof, and any other control-plane object a
+> member passes on, travels as a forwarded object and is not stored; a forwarded object without a target
+> goes to every connected alias of the bus alias.
+> *Serves:* S7, S14, S18. *Verified by:* external relay model.
+
+> **R-REL-19.** When a new relay epoch begins, the root device, at each external relay that remains in
+> the checkpoint: uploads under the old bus alias, for each member that stays valid, the member's new
+> relay access object addressed to the member's old alias (a bridge); registers the ticket of the new
+> alias and uploads the control-plane objects under it; and only then sends the closing ticket of the old
+> alias. Sources upload their retained publications and latest grants again under the new aliases. On a
+> closing ticket the relay deletes everything under the old alias except the bridges, accepts nothing
+> more there except a relay hello of a listed alias that fetches its bridge, and deletes each bridge
+> once its addressee has fetched it. A revoked device receives no bridge. A device that slept through
+> several epochs follows the bridges from alias to alias. At a relay removed from the checkpoint, the
+> closing ticket carries no bridges.
+> *Serves:* S5, S18, delivery. *Verified by:* external relay model, simulator.
+
+> **R-REL-20.** Bridges under a closed alias count against that alias's `bus_bytes`. How long an operator
+> keeps a closed alias whose bridges have not all been fetched is a matter of agreement between the
+> owner and the operator, like the limits of the ticket (Appendix B, Section B.10). A member that finds
+> no bridge rejoins through a member link or a member relay, where it receives its current relay access
+> object as a newcomer does after admission.
+> *Serves:* delivery (L3). *Verified by:* relay test.
 
 ## 12. Core State Machine, Interfaces, and Errors
 
@@ -1100,8 +1208,11 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Wrapped channel key | 1168 bytes | 1120 (X-Wing ciphertext) + 32 (channel key) + 16 (authentication tag). | Derived |
 | K2 signature (SLH-DSA-SHA2-128s) | 7856 bytes | Fixed by FIPS 205. The "s" variant was chosen because its signature is half the size of the "f" variant, and slow signing during recovery does no harm. | Derived |
 | Integer in the format | up to 2^53 - 1 | Exactly representable in all widespread languages, including JavaScript. No field needs more. | Computed |
-| Numbers: passport, checkpoint, root generation, key epoch, channel key generation, relay ticket, stream, chunk; number of blob segments | 1 .. 2^31 - 1 | Fits a signed 32-bit integer on any platform. Unreachable: one checkpoint per second exhausts the number in 68 years, a stream of 4 KiB chunks after 8 TiB, after which the stream is reopened. | Computed |
+| Numbers: passport, checkpoint, root generation, key epoch, channel key generation, relay ticket, relay epoch, upload counter, stream, chunk; number of blob segments | 1 .. 2^31 - 1 | Fits a signed 32-bit integer on any platform. Unreachable: one checkpoint per second exhausts the number in 68 years, a stream of 4 KiB chunks after 8 TiB, after which the stream is reopened. | Computed |
 | Source publication counter | 1 .. 2^53 - 1 | Exhaustion costs a new passport, that is, owner confirmation. At 10 publications per second 2^31 runs out in 6.8 years, less than a device lifetime. 2^53 does not run out. | Computed |
+| Alias | 16 bytes | As a channel label: a collision between two aliases at one relay mixes storage but enables no forgery, because every inner object is verified by its recipient and every link key by the members tree. 16 bytes make an accidental collision unreachable. | Computed |
+| Relay epoch secret, link seed, period secret, wrapping salt | 32 bytes | The output size of SHA-256 and the key size of ChaCha20: 128 bits of security also against quantum search. A random salt repeats by chance only after 2^128 objects, so the single-use wrapping key never repeats (R-KEY-9). | Derived |
+| Members tree depth | 2 .. 15 | 2^15 = 32768 leaves, the largest checkpoint bitmap (Section 13.2). The minimum of 4 leaves hides whether a bus has one member or four. Each level is one 32-byte hash in the relay hello: at most 480 bytes. | Computed |
 | Nesting depth | 4 | The deepest object: envelope, body, list, list item. An embedded signed object travels as a byte string. Confirmed by Appendix B. | Computed |
 | Items per container | 128 | Equal to the longest legitimate list of the format: the permits in a passport. | Computed |
 | Map keys | 0 .. 65535, critical 0 .. 255 | Keys up to 255 encode in one or two bytes and are given to mandatory fields. Above that keys take three bytes; optional fields go there. | Computed |
@@ -1110,7 +1221,7 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Device name | up to 64 bytes of UTF-8 | The owner sees the name when confirming; it must fit one line on screen. 64 bytes are 64 Latin letters, 32 Cyrillic letters, or 21 CJK characters. | Chosen |
 | Bus system channels | 0 .. 15 | One is in use: channel 0 for node info. The other 15 are reserved for future needs of the bus; the number occupies one byte in any case. | Chosen |
 | Application channel number | 0 .. 65535 | The number is not visible outside, only its hash in the label, so its size costs nothing. Every retained channel occupies recipient memory; an application needs no more than 65 thousand. | Chosen |
-| Frame | body up to 16384 bytes, 2-byte big-endian length | Every participant must accept a root change record (8046 bytes, about 7.9 KiB, because of the K2 signature) and a checkpoint with the largest bitmap (6432 bytes, about 6.3 KiB, today, and 14225 bytes, about 13.9 KiB, with a post-quantum root signature; computed in Appendix B, Section B.9). The nearest power of two is 16384. No object needs more: a publication takes up to 4.3 KiB, a key grant 1.4 KiB, and streams and blobs are cut into chunks. The limit is therefore the same for everyone and not part of the passport. A TLS record has the same size. A length up to 16384 fits in 2 bytes. | Computed |
+| Frame | body up to 16384 bytes, 2-byte big-endian length | Every participant must accept a root change record (8046 bytes, about 7.9 KiB, because of the K2 signature) and a checkpoint with the largest bitmap (6432 bytes, about 6.3 KiB, today, and 14225 bytes, about 13.9 KiB, with a post-quantum root signature; computed in Appendix B, Section B.9). The nearest power of two is 16384. No object needs more: a publication takes up to 4.3 KiB, a key grant 1.4 KiB, and streams and blobs are cut into chunks. The limit is therefore the same for everyone and not part of the passport. A TLS record has the same size. A length up to 16384 fits in 2 bytes. On an external relay link every frame travels inside a wrapped object, so the largest stream chunk or blob segment there is shorter by the wrapping overhead (Appendix B, Section B.10); every map object fits with room to spare. | Computed |
 | Pairing short code | 6 decimal digits | CPace allows one guess per attempt. The probability of guessing is the number of attempts divided by 10^6: 3 in a million with three attempts. This matches Bluetooth numeric comparison. After the attempts are exhausted the code changes. | Computed |
 | QR secret | 16 bytes | 128 bits; brute force is impossible, no attempt limit is needed. | Computed |
 | Device key fingerprint for human comparison | 64 bits, 20 decimal digits | Before the owner confirms the request, a compromised acceptor would have to find its own key with the same fingerprint as the joiner's. P-256 key search is estimated at 10^7 keys per second per core. 40 bits (12 digits) fall to one core in a day. 64 bits need about 58 thousand core-years. The search rate is an estimate, to be refined by measurement. | Computed |
@@ -1182,7 +1293,7 @@ seem.
 > commit, the bounds, and the result.
 > *Serves:* traceability. *Verified by:* the build fails if a requirement has no record.
 
-> **R-VER-2.** Every property S1–S17 MUST have at least one lemma or invariant and at least one probe: a
+> **R-VER-2.** Every property S1–S18 MUST have at least one lemma or invariant and at least one probe: a
 > deliberately broken model on which the verification is required to fail.
 > *Serves:* non-vacuous verification. *Verified by:* probes run in CI; a probe that does not fire is a
 > defect.
@@ -1277,10 +1388,11 @@ authenticity (S1, S2, S3) and the untrusted-relay property (S15) do not depend o
 Transport encryption between a node and a relay is still recommended: without it a network observer
 sees everything that L5 lists for a relay, not only volume and timing.
 
-A relay learns the metadata listed in L5: who publishes, to whom channel keys were granted, sizes by
-padding bucket, and timing. Padding buckets (Section 13.2) reduce, but do not remove, what sizes reveal.
-Applications for which the communication pattern itself is sensitive are advised to run their own
-relay or to add cover traffic in a profile.
+A relay learns the metadata listed in L5. A member relay learns who publishes, to whom channel keys
+were granted, sizes by padding bucket, and timing. An external relay learns the same pattern only under
+aliases that change with every relay epoch (S18, Section 15.9). Padding buckets (Section 13.2) reduce,
+but do not remove, what sizes reveal. Applications for which the communication pattern within an epoch
+is itself sensitive are advised to run their own relay or to add cover traffic in a profile.
 
 The bus guarantees safety, not delivery (L3). A relay or the network can withhold messages
 indefinitely. In particular, a node cut off from every device that knows a newer checkpoint continues to
@@ -1351,6 +1463,25 @@ message exactly one byte representation, which prevents signature malleability a
 implementations (S17). Implementations are verified against this by bounded model checking, fuzzing,
 and a second independent decoder (R-VER-6).
 
+### 15.9. External Relays and Unlinkability
+
+S18 rests on two assumptions: HKDF-SHA256 keyed with a secret is a pseudorandom function, and a relay
+holds no member secret. A member, or a revoked device for the epochs it was valid in, knows the relay
+epoch secret and can read the open fields and the wrapped bodies; collusion of a relay with such a
+device removes S18 for those epochs and nothing else, because the inner objects are sealed and signed
+as on a member link. Timing and network addresses are outside S18 (L5): a device with a fixed address
+is linkable across epochs by that address, and the change of epoch is visible through the uploads of
+the root device under both aliases.
+
+The bus alias is the hash of a period key that only the Root can derive. A member that knows the relay
+epoch secret therefore cannot register a bus alias before the Root and lock the bus out of the relay
+(S14). For the same reason the Root signs relay access objects with the root key: a link seed from
+anyone else would let one member cut another off.
+
+Between a revocation and the closing ticket of the old alias, a revoked device can still fetch wrapped
+objects under the old alias. It learns nothing new from them: channel keys and sealing keys rotate as
+on member links, and the new epoch secret is never sealed to it.
+
 ## 16. References
 
 ### 16.1. Normative References
@@ -1416,6 +1547,8 @@ moving to a later revision or to the resulting RFC is a format change recorded i
   Analysis of Security Protocols", CAV 2013.
 - **[TLA]** Lamport, L., "Specifying Systems: The TLA+ Language and Tools for Hardware and Software
   Engineers", Addison-Wesley, 2002.
+- **[TOR-V3]** The Tor Project, "Tor Rendezvous Specification - Version 3", Section 2.2, "Key
+  blinding", https://spec.torproject.org/rend-spec/.
 - **[TUF]** Samuel, J., Mathewson, N., Cappos, J., and R. Dingledine, "Survivable Key Compromise in
   Software Update Systems", ACM CCS, 2010.
 
@@ -1448,6 +1581,7 @@ Section 4.1:
 | D12 | Frame padding on the link and link liveness checks are left to the transport. | End-to-end argument and the hourglass model: the core is narrow; the transport knows the properties of the link. | A padding field appears in the frame and a timer event appears in the core. |
 | D13 | The protocol is proven with one tool, Tamarin. | Economy of mechanism: a second model of the same protocol doubles maintenance and adds no properties. | A ProVerif model appears, together with the obligation to keep two models consistent. |
 | D14 | A channel key is constant within a generation; there is no per-publication ratchet. | Economy of mechanism. The transport may reorder frames, so a ratchet would require storing skipped keys and a window for depth-N history: state on every reader and separate lemmas. The disclosure window is bounded by channel key rotation on a host event. | The key of the next publication is derived from the previous one, and a reader compromise no longer discloses publications already read. The publication format does not change. |
+| D15 | An external relay sees the bus only under aliases per relay and per relay epoch, and admits devices by a members tree signed with a period key. | A bus open to millions of projects runs mostly through third-party relays; a permanent identifier would let each operator profile a bus for its whole life, and two operators join their logs (S18). Delivery and quotas need only aliases and counters. | The relay hello, the wrapped object, relay access objects, and relay epochs disappear; an external relay sees what a member relay sees (L5). |
 
 ### A.2. Open Items
 

@@ -37,6 +37,9 @@ are covered by the test vectors of gate G2:
 - the length of `data` plus `pad` in a publication is at most 4096, and every byte of `pad` is zero;
 - the relation between `size` and `seg` in a blob reference (Appendix B, Section B.5);
 - `source_bytes ≤ bus_bytes` in a relay ticket;
+- the `path` of a `RelayHello` has exactly `depth` items of the ticket, and `index` is below `2^depth`;
+- the open fields of a `Relayed` message agree with the inner object they carry (Appendix B,
+  Section B.10, rule 4 of the wrapped object), and `from` equals the alias of the link;
 - the unused bits of `Passport.rights`, `StreamChunk.flags`, and `BlobSegment.flags` are zero.
 
 Schema conventions:
@@ -66,8 +69,9 @@ headroom shows how much room they have.
 | `Call`, signed by a post-quantum root key | 13263 | 2 | 9 | 3121 |
 | `Passport`, post-quantum root signature | 12670 | 4 | 128 | 3714 |
 | `RootChange` | 8046 | 3 | 4 | 8338 |
-| `RelayTicket`, post-quantum root signature | 8005 | 3 | 6 | 8379 |
+| `RelayAccess`, post-quantum root signature | 13632 | 2 | 5 | 2752 |
 | `Checkpoint` | 6432 | 3 | 128 | 9952 |
+| `RelayAccess` | 5839 | 2 | 5 | 10545 |
 | `Call` | 5470 | 2 | 9 | 10914 |
 | `Passport` | 4877 | 4 | 128 | 11507 |
 | `Reply` | 4525 | 1 | 6 | 11859 |
@@ -76,20 +80,28 @@ headroom shows how much room they have.
 | `Refusal` with a sealing key claim | 1465 | 1 | 7 | 14919 |
 | `KeyGrant` | 1412 | 2 | 10 | 14972 |
 | `SealClaim` | 1356 | 3 | 4 | 15028 |
+| `RelayHello`, device side | 879 | 2 | 128 | 15505 |
+| `RelayHello`, relay side | 345 | 2 | 128 | 16039 |
 | `Hello` | 322 | 2 | 128 | 16062 |
 | `HaltProof`, two passports, ES256 | 262 | 2 | 7 | 16122 |
 | `PairInit` | 258 | 2 | 128 | 16126 |
 | `PairSealed` with `PairBus` | 242 | 1 | 2 | 16142 |
-| `RelayTicket` | 211 | 3 | 6 | 16173 |
+| `RelayTicket` | 227 | 3 | 8 | 16157 |
 | `KeyRequest` | 187 | 2 | 6 | 16197 |
-| Other unsigned messages: `Nonce`, `BlobGet`, `RelayRefusal`, `NonceRequest`, `PairConfirm`, `Auth`, `PairReply`, `Get`, `PairDone`, `PairAbort` | 6 to 93 | 1 | ≤ 5 | > 16290 |
+| Other unsigned messages: `Nonce`, `BlobGet`, `RelayRefusal`, `NonceRequest`, `PairConfirm`, `Auth`, `PairReply`, `Get`, `RelayGet`, `PairDone`, `PairAbort` | 6 to 93 | 1 | ≤ 6 | > 16290 |
 
-Sealed bodies are decoded separately, with their own depth count: reply plaintext 4395 bytes, command
-4112, publication content 4109, join request body 310, `PairDevice` 275, `PairBus` 219, `NodeInfo` 68;
-depth at most 2 in every case. The deepest structure of the format is the passport: triple, `rest`,
+Sealed bodies are decoded separately, with their own depth count: relay access plaintext 4554 bytes
+(depth 3, a list of pairs), reply plaintext 4395, command 4112, publication content 4109, join request
+body 310, `PairDevice` 275, `PairBus` 219, `NodeInfo` 68; depth at most 2 in every other case. The deepest structure of the format is the passport: triple, `rest`,
 permit list, permit, depth 4. The longest lists hold 128 items: permits, the relays of a checkpoint, and
 the version lists of `Hello` and `PairInit`. A signed object is currently nested inside another object
 at most one level deep (a sealing key claim in `Refusal`, a head in `HaltProof`); R-FMT-4 permits two.
+
+A `Relayed` message adds at most 120 bytes to the frame it carries: the open fields of the publication
+class at their largest, the 32-byte salt, the byte string header, and the 16-byte tag. Every object in
+the table above, as the inner frame of a `Relayed` message, fits in the 16384-byte frame; the script
+checks this for each of them. The largest inner frame is 16264 bytes, so a stream chunk or blob segment
+sent through an external relay is at most 16262 bytes, header included.
 
 The complete script output is in
 [`tools/cddl/maxsize-output.txt`](../../tools/cddl/maxsize-output.txt).
@@ -168,7 +180,10 @@ Negative examples show that the schema actually rejects something. The schema re
 root change record with an extra field; a lossy-mode command with credit; a code 1 refusal carrying a
 nonce; an unknown critical field; a root change halt proof with one signature; `seg = 1023`;
 generation 0; a call `enc` one byte longer than the bound; version 0; an SLH-DSA signature in a join
-request body and in a publication; a 36-byte reply ciphertext; a 292-byte pairing ciphertext; and a
+request body and in a publication; a 36-byte reply ciphertext; a 292-byte pairing ciphertext; a ticket with tree depth 16; a relay
+refusal naming both a bus and a bus alias; a relay hello carrying the fields of both sides; a wrapped
+control object of a kind that is not a control-plane object; a wrapped publication without its depth;
+a wrapped body one byte longer than the bound; and a
 float, a negative integer, a boolean, and 2^53 in an extension field. It accepts extension field 300, as
 it must. A passport with 129 permits is refused by the encoder itself.
 

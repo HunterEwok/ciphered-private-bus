@@ -12,6 +12,12 @@ Extension field 300 in Hello             accepted
 HaltProof kind 6 with one sig            rejected
 seg 1023                                 rejected
 gen 0                                    rejected
+RelayTicket depth 16                     rejected
+RelayRefusal with bus and alias          rejected
+RelayHello with both sides               rejected
+Relayed control of kind 17               rejected
+Relayed publication without depth        rejected
+Relayed body 16281                       rejected
 Call enc 5249                            rejected
 float in extension field                 rejected
 negative int in extension                rejected

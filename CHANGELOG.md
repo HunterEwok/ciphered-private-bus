@@ -55,6 +55,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 
 ### Changed
+- Specification: an external relay sees a bus only under aliases that differ per relay and per relay
+  epoch (new property S18, R-REL-13..R-REL-20, R-KEY-11, Section 15.9, decision D15, Appendix B,
+  Section B.10, Appendix C). The Root starts a new relay epoch with every revocation and issues each
+  member a sealed relay access object with the epoch secret and a link seed; tickets are signed by a
+  period key whose hash is the bus alias and carry the root of a tree of (alias, link key) pairs;
+  everything a member sends through an external relay is wrapped in `Relayed` with a single-use key;
+  a closed alias keeps only the bridges to the next epoch. A member relay is unchanged. Reason: a
+  third-party relay learned the bus identifier, every device identifier, and every passport for the
+  life of the bus, and two relays of one bus could join their logs, although delivery and quotas need
+  none of it.
 - Specification: a halted node ranks its (generation, checkpoint) pair above every checkpoint of its
   generation and answers every sender of that generation with its halt proof (R-MEM-6, R-MEM-10,
   Appendix B, Section B.3, rule 3). Reason: the membership model showed that a proof of a generation

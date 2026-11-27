@@ -32,6 +32,8 @@ jobs:
           persist-credentials: false
       - name: Compare checks.json with the step actions of every proof file
         run: python3 models/check_steps.py
+      - name: Check that every inductive invariant bounds what its proof draws
+        run: python3 models/check_draws.py
 
   membership:
     name: membership (simulator)

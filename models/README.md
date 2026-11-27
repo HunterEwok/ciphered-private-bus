@@ -46,6 +46,10 @@ checked to have no transition. Together they prove that `safety` holds in every 
 instance, at every depth, not only within a bounded number of steps. The branches come from
 `checks.json`, which the recorded hashes do not cover, so CI (`check_steps.py`) checks that they are
 exactly the step actions of the proof file and that these use every action of the model's step.
+The step obligations start from every state that `indInit` draws, so `IndInv` must bound every value
+`indInit` draws from a range; otherwise a step could leave the range while `IndInv` still holds, and
+the proof would not cover the state it reached. CI (`check_draws.py`) checks that every field drawn
+from a range, a set of subsets, a map or a set of choices is bounded by the invariant of its file.
 
 **Probes and witnesses.** Each probe is the model with one deliberate defect; `safety` must fail on it
 (R-VER-2). Each witness is a property expected to fail on the correct model, showing that a behaviour

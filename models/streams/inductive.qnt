@@ -71,6 +71,14 @@ module inductive {
 
   def sideOk(p: str, sid: int, s: Side, n: Node, ns: str -> Node, rs: Set[Reply], cs: Set[Call],
              pl: Set[Chunk]): bool = and {
+    // the ranges indInit draws every field from
+    KS.contains(s.k), MODES.contains(s.mode), 1 <= s.next, s.next <= MAX_NO + 1, 0 <= s.high, s.high <= MAX_NO,
+    0 <= s.sendCredit, s.sendCredit <= GMAX, 0 <= s.recvCredit, s.recvCredit <= MAX_CREDIT,
+    0 <= s.got, s.got <= GMAX, 0 <= s.granted, s.granted <= GMAX,
+    0 <= s.sent, s.sent <= MAX_NO, 0 <= s.recvd, s.recvd <= MAX_NO,
+    // every data chunk sent took a number, and every data chunk taken raised
+    // the highest number taken
+    s.sent <= s.next - 1, s.recvd <= s.high,
     opened(rs, cs, sid, s),
     // R-KEY-9: every chunk this side sent has a number below its next one
     pl.forall(c => (c.dir == dirOf(p) and c.k == s.k) implies c.no < s.next),

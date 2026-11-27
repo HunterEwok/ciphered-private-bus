@@ -7,7 +7,7 @@ A Quint [model](enrollment.qnt) of device enrollment (verification level V2 of t
 with the Root by a code, with attempts counted on both sides; the joiner's signed payload; join
 requests; a compromised acceptor and a network adversary that pairs by guessing the code and relays
 payloads between sessions; and admission by the Root after the owner compares the key fingerprint.
-CPace, signatures, and sealing are perfect here; Tamarin covers them. The header of `enrollment.qnt`
+CPace, signatures, and sealing are perfect here; Tamarin covers them. [Abstractions](#abstractions)
 lists every abstraction.
 
 ## Instances
@@ -51,6 +51,50 @@ attempt limit.
 The model made one point of the specification explicit: the join request carries the transcript hash
 of the acceptor's own session, and the acceptor checks the joiner's signature before sending it, so a
 payload relayed from another session is refused (R-JOIN-4).
+
+## Abstractions
+
+What a green run of this model does and does not show:
+
+- CPace, signatures, and sealing are perfect; Tamarin covers them. A pairing session is named by its
+  transcript (`tid`), and only its two ends know what was sent in it. A run against a side that does
+  not know the code is one password guess, and any guess may succeed: the model bounds the number of
+  guesses, not their probability.
+- The fingerprint is 64 bits of the key hash (R-JOIN-5); equal fingerprints are taken as equal keys.
+- The owner enrolls the honest joiner in front of them and confirms only after comparing the
+  fingerprint the Root shows with the one the joiner shows (R-JOIN-7). This holds for every
+  admission, also when the Root pairs the joiner itself (R-JOIN-9): `rootAdmit` has the comparison as
+  a guard on every path, and the probe `no_fingerprint_compare` removes it.
+- When the Root pairs directly it is the acceptor `root`: the payload it receives in its own session
+  becomes a request in its own inbox. R-JOIN-9 prepares no join request there; the model's request
+  carries exactly what the Root holds at that point, so the checks are the same.
+- The joiner's check of the bus fingerprint after admission is not modelled.
+- The compromised acceptor `c` is a member. With the adversary it knows every payload sent to either of
+  them and may put anything in a request. The Root itself is honest.
+- The bus identity and the root key the joiner learns (R-JOIN-2) belong to Tamarin and the membership
+  model. The sealing of a request to the root device and its open header (R-JOIN-4, last sentences)
+  belong to Tamarin; the relay's buffer of requests (R-JOIN-8) to the relay model.
+
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction.
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-JOIN-3 | a failed attempt lets the adversary test at most one password guess | abstraction: a run against a side without the code is one guess (above); CPace in Tamarin |
+| R-JOIN-3 | the number of attempts per code is bounded | `guessLimit`; probes `joiner_no_count`, `acceptor_no_count`; scenario `limitTest` |
+| R-JOIN-4 | the request holds the joiner's key, presence key, name, transcript hash, the joiner's signature over them, and the acceptor's signature | the record `Request`; `asSigned`; probe `sig_key_only`; scenario `tamperTest` |
+| R-JOIN-4 | the transcript hash is the acceptor's own session's, and the acceptor checks the joiner's signature before sending | guard in `acceptorRequest`; `bound`; probe `no_transcript_binding`; scenario `relayTest` |
+| R-JOIN-4 | the Root verifies the joiner's signature, so the acceptor substitutes neither the presence key nor the name | guards in `badRequest` and `rootAdmit`; `asSigned`; probe `sig_key_only`; witness `witnessTampered` |
+| R-JOIN-4 | a request is a control-plane object with an open header and a body sealed to the root device | abstraction: sealing is perfect (above) |
+| R-JOIN-5 | the Root shows the name, the acceptor, and the fingerprint of the joiner's key | the fields of `Request` that `rootAdmit` reads |
+| R-JOIN-5 | the passport is issued only after the owner confirms on the root device | `rootOnly`; probe `acceptor_issues` |
+| R-JOIN-6 | no sequence of messages without a Root signature makes a device a member; an acceptor cannot issue a passport | `rootOnly`; probe `acceptor_issues` |
+| R-JOIN-7 | the joiner shows its fingerprint; the owner compares both before confirming | `intended`; probe `no_fingerprint_compare`; scenario `admitTest` |
+| R-JOIN-7 | after admission the joiner shows the bus fingerprint | abstraction: not modelled (above) |
+| R-JOIN-9 | the Root may pair a joiner itself, with the same exchange and no join request | the acceptor `root` (above); witness `witnessDirect` |
+| R-JOIN-9 | the owner compares the fingerprint here too | `intended` (the comparison guards every admission); probe `no_fingerprint_compare` |
 
 ## Inductive invariant
 

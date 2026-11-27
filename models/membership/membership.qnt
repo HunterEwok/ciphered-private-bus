@@ -19,7 +19,12 @@
 //   models a Root restored from an old backup (R-MEM-15 violated) or a stolen
 //   root key (L4); the bus must detect it, not prevent it.
 // - The recovery key may equivocate (two root change records of one
-//   generation, L6).
+//   generation, L6). The Root of a generation signs with the key of the
+//   first root change record (key 0); the holder of the second key issues no
+//   passport or checkpoint. A node that installed the second key therefore
+//   verifies none of the generation's records, nor a proof built from them,
+//   and stays at the genesis checkpoint until the other root change record
+//   or a root change proof halts it for good.
 // - A checkpoint carries its window start and the set of valid passport
 //   numbers in the window [start, nextNo) (R-MEM-14); a number below the
 //   start has no bit and is not valid. The Root moves the start as far as
@@ -133,6 +138,15 @@ module membership {
   // why the second one matters.
   pure def validIn(p: Passport, c: Checkpoint): bool =
     p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
+
+  // The root key that signs the passports and checkpoints of generation g:
+  // the first Root's key in generation 1 (rc -1), and in a later generation
+  // the key that the honest root change record names (key 0). A node
+  // verifies such a record, and a halt proof built from two of them, with
+  // the key it installed for that generation (Appendix B, Section B.3,
+  // rule 1). Mutant "ignore_signer" skips that check.
+  pure def signer(g: int): int = if (g == 1) -1 else 0
+  pure def verifies(n: Node, g: int): bool = n.rc == signer(g) or MUTANT == "ignore_signer"
 
   // The check the nodes run; a probe may break it. Invariants use validIn.
   // Mutant "below_window_valid": a number below the window start, which has
@@ -344,10 +358,10 @@ module membership {
   action nodeRecvCp(d: str, c: Checkpoint): bool = {
     val n0 = nodes.get(d)
     val acceptOld = MUTANT == "accept_old_gen" and c.gen < n0.gen
-    val n = if (TRACK_RECV and (c.gen == n0.gen or acceptOld)) { ...n0, recvCp: n0.recvCp.union(Set(c)) } else n0
+    val n = if (TRACK_RECV and ((c.gen == n0.gen and verifies(n0, c.gen)) or acceptOld)) { ...n0, recvCp: n0.recvCp.union(Set(c)) } else n0
     if (n.forever or (n.halted and MUTANT != "halted_accepts"))
       setNode(d, n, pool)
-    else if (c.gen != n.gen and not(acceptOld))
+    else if ((c.gen != n.gen or not(verifies(n, c.gen))) and not(acceptOld))
       setNode(d, n, pool)
     else if (cpConflict(c, n.cp) and MUTANT != "no_halt")
       setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "cp", gen: c.gen, no: c.no })) })
@@ -364,8 +378,8 @@ module membership {
   // Receive a passport (R-MEM-2, R-MEM-3, R-MEM-8).
   action nodeRecvPp(d: str, p: Passport): bool = {
     val n0 = nodes.get(d)
-    val n = if (TRACK_RECV and p.gen == n0.gen) { ...n0, recvPp: n0.recvPp.union(Set(p)) } else n0
-    if (n.halted or n.forever)
+    val n = if (TRACK_RECV and p.gen == n0.gen and verifies(n0, p.gen)) { ...n0, recvPp: n0.recvPp.union(Set(p)) } else n0
+    if (n.halted or n.forever or not(verifies(n, p.gen)))
       setNode(d, n, pool)
     else if (n.pps.exists(q => ppConflict(p, q)) and MUTANT != "no_halt")
       setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "pp", gen: p.gen, no: p.no })) })
@@ -394,8 +408,9 @@ module membership {
   // Receive a halt proof (R-MEM-10; Appendix B, Section B.3, rules 2 and 3).
   action nodeRecvHp(d: str, h: HaltProof): bool = {
     val n0 = nodes.get(d)
-    val n = if (h.kind == "rc" or h.gen == n0.gen) { ...n0, recvHp: n0.recvHp.union(Set(h)) } else n0
-    val sameGen = h.gen == n.gen and (MUTANT != "proof_needs_cp" or h.no >= n.cp.no)
+    val ok = h.kind == "rc" or (h.gen == n0.gen and verifies(n0, h.gen))
+    val n = if (ok) { ...n0, recvHp: n0.recvHp.union(Set(h)) } else n0
+    val sameGen = ok and h.gen == n.gen and (MUTANT != "proof_needs_cp" or h.no >= n.cp.no)
     if (n.forever)
       setNode(d, n, pool)
     else if (h.kind == "rc")
@@ -577,7 +592,13 @@ module membership {
           and (x.halted or y.halted or x.cp == y.cp)
           and (x.halted == y.halted or x.recvHp.forall(h => h.gen != x.gen)))))))
 
-  val safety = noRollback and currentGeneration and haltIsSticky and haltedIsInert
+  // Appendix B, Section B.3, rule 1: a node holds a checkpoint or a passport
+  // of its generation only if the key it installed signed it.
+  val installedKeyOnly = DEVICES.forall(d =>
+    val n = nodes.get(d)
+    n.rc == signer(n.gen) or (n.cp == genesis(n.gen) and n.pps == Set()))
+
+  val safety = noRollback and currentGeneration and installedKeyOnly and haltIsSticky and haltedIsInert
     and proofIsObeyed and rootHonorsRevocation and cacheConsistent
     and revokedIsRejected and grantsNeedRead and dataNeedsPublish
     and windowBounded and windowKeepsValid and convergence
@@ -587,12 +608,16 @@ module membership {
   // eventually halts too, or leaves that generation; and once a peer is
   // permanently halted, every node eventually is (R-MEM-13). It assumes only that a
   // node that keeps talking to a halted peer is eventually answered (weak
-  // fairness of nodeHearsHalted).
+  // fairness of nodeHearsHalted). A node that installed the second root key
+  // of its generation cannot verify a proof built from records of the first
+  // one, so the first property is stated for nodes on the key that signs
+  // their generation's records. A node on the other key is covered by the
+  // second property once a peer halts for good.
   temporal fairHearing = DEVICES.forall(d =>
     weakFair(nodeHearsHalted(d), (nodes, root, pool, history, broken, seen)))
 
   temporal haltReachesPeers = DEVICES.forall(d => 1.to(MAX_GEN).forall(g =>
-    always((nodes.get(d).gen == g and haltedPeer(d, g)) implies
+    always((nodes.get(d).gen == g and nodes.get(d).rc == signer(g) and haltedPeer(d, g)) implies
       eventually(nodes.get(d).halted or nodes.get(d).gen != g or not(haltedPeer(d, g))))))
 
   temporal foreverReachesPeers = DEVICES.forall(d =>

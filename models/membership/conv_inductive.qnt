@@ -86,6 +86,8 @@ module conv_inductive {
     n.cp.gen == n.gen, n.pps.forall(p => p.gen == n.gen),
     // proofIsObeyed
     n.recvHp.exists(h => h.gen == n.gen or h.kind == "rc") implies n.halted,
+    // installedKeyOnly
+    n.rc == signer(n.gen) or (n.cp == genesis(n.gen) and n.pps == Set()),
     // cacheConsistent
     n.halted or n.pps.forall(p => validIn(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))),
     nodeConv(n),

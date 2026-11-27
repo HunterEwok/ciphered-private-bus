@@ -26,6 +26,30 @@ module scenarios {
       .then(nodeAcceptData("a", oldData))
       .fail()
 
+  // A passport and a checkpoint are verified with the root key of their
+  // generation that the node installed (Appendix B, Section B.3, rule 1).
+  // After a second root change record of generation 2 (a stolen recovery
+  // key), a node that installed its key takes none of the records the Root
+  // signs with the key of the first one, and no proof built from them.
+  val cp21 = { gen: 2, no: 1, start: 1, valid: Set(1), nextNo: 2 }
+  val pp21 = { gen: 2, no: 1, dev: "b", rights: 3 }
+
+  run otherKeyRecordsAreDroppedTest =
+    init
+      .then(recoveryChange)
+      .then(recoveryEquivocate)
+      .then(rootIssue("b", 3, Set()))
+      .then(rootEquivocatePp)
+      .then(nodeRecvRc("a", { gen: 2, key: 1 }))
+      .expect(nodes.get("a").gen == 2 and nodes.get("a").rc == 1)
+      .then(nodeRecvCp("a", cp21))
+      .then(nodeRecvPp("a", pp21))
+      .then(nodeRecvHp("a", { kind: "pp", gen: 2, no: 1 }))
+      .expect(nodes.get("a").cp == genesis(2) and nodes.get("a").pps == Set()
+              and not(nodes.get("a").halted) and nodes.get("a").recvCp == Set() and safety)
+      .then(nodeRecvRc("a", { gen: 2, key: 0 }))
+      .expect(nodes.get("a").forever and safety)
+
   // The case the model found (R-MEM-6, R-MEM-10): a proof of generation 2
   // reaches b while b is still in generation 1 and is dropped; after the root
   // change b talks to the halted peer a and gets the proof again.
@@ -64,6 +88,21 @@ module scenarios_probe_accept_old_data_gen {
       .then(nodeRecvCp("a", { gen: 2, no: 1, start: 1, valid: Set(1), nextNo: 2 }))
       .then(nodeRecvPp("a", { gen: 2, no: 1, dev: "b", rights: 3 }))
       .then(nodeAcceptData("a", oldData))
+      .expect(not(safety))
+}
+
+// Without the key check a node that installed the second root key takes a
+// checkpoint signed with the first one.
+module scenarios_probe_ignore_signer {
+  import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, WINDOW = 2, MUTANT = "ignore_signer", TRACK_RECV = true).* from "./membership"
+
+  run otherKeyCheckpointIsTakenTest =
+    init
+      .then(recoveryChange)
+      .then(recoveryEquivocate)
+      .then(rootIssue("b", 3, Set()))
+      .then(nodeRecvRc("a", { gen: 2, key: 1 }))
+      .then(nodeRecvCp("a", { gen: 2, no: 1, start: 1, valid: Set(1), nextNo: 2 }))
       .expect(not(safety))
 }
 

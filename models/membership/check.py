@@ -73,6 +73,7 @@ PROBES = [
     "window_past_set_bit",
     "unbounded_window",
     "need_next",
+    "ignore_signer",
 ]
 # Probes that random simulation rarely reaches are checked by a fixed scenario
 # in SCENARIOS instead: accept_old_data_gen, halted_silent.
@@ -95,6 +96,7 @@ SCENARIOS = [
     "scenarios_probe_need_next",
     "scenarios_window",
     "scenarios_probe_below_window_valid",
+    "scenarios_probe_ignore_signer",
 ]
 
 

@@ -18,7 +18,8 @@
     "below_window_valid",
     "window_past_set_bit",
     "unbounded_window",
-    "need_next"
+    "need_next",
+    "ignore_signer"
   ],
   "witnesses": [
     "witnessHalt",

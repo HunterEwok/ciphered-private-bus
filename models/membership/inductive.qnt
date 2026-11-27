@@ -77,6 +77,8 @@ module inductive {
     n.cp.gen == n.gen, n.pps.forall(p => p.gen == n.gen),
     // proofIsObeyed
     n.recvHp.exists(h => h.gen == n.gen or h.kind == "rc") implies n.halted,
+    // installedKeyOnly
+    n.rc == signer(n.gen) or (n.cp == genesis(n.gen) and n.pps == Set()),
     // cacheConsistent
     n.halted or n.pps.forall(p => validIn(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))),
   }
@@ -136,8 +138,9 @@ module inductive {
 
   val IndInv = indInvOf(nodes, root, pool, history, broken, seen)
 
-  // Liveness (haltPropagates, S8, R-MEM-10, R-MEM-13). While a node has a
-  // halted peer of its generation and is not halted itself, or has a
+  // Liveness (haltPropagates, S8, R-MEM-10, R-MEM-13). While a node on the
+  // key that signs its generation's records has a halted peer of its
+  // generation and is not halted itself, or has a
   // permanently halted peer and is not permanently halted itself,
   // nodeHearsHalted is enabled for it: its guard, written out here, holds.
   // Every such step changes the node: it halts it, or makes its halt
@@ -147,7 +150,7 @@ module inductive {
   // ends first, and either way the property's "eventually" holds.
   val HearingEnabled = DEVICES.forall(d => {
     val n = nodes.get(d)
-    ((haltedPeer(d, n.gen) and not(n.halted)) or (foreverPeer(d) and not(n.forever))) implies and {
+    ((haltedPeer(d, n.gen) and n.rc == signer(n.gen) and not(n.halted)) or (foreverPeer(d) and not(n.forever))) implies and {
       MUTANT != "halted_silent",
       pool.hp.exists(h => (h.kind != "rc" and h.gen == n.gen and haltedPeer(d, n.gen))
                           or (h.kind == "rc" and foreverPeer(d))),

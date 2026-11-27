@@ -42,8 +42,6 @@
 //   records can be issued in `g`, `start`/`nextNo` and non-equivocated bits
 //   are never read, and a conflict halt at `cp.no >= 1` is enabled iff
 //   `(g, cp.no)` is in `oldCpConfl`;
-// - `n.rc` (`0` vs `1`) collapses to `0` once `pool.rc` contains both keys
-//   `{0, 1}` for `n.gen` (`rcBoth`), since either key conflicts with the other;
 // - `pool.cp` and `pool.pp` for any generation `g` where `hpGens.contains(g)`,
 //   or `g` is old and conflict-free, or neither `root` nor any unhalted node
 //   is in `g` (keeping only `poolPp` presence `0|1` when `root.gen == g` for
@@ -102,6 +100,7 @@ module viewdefs {
     proofObeyedOk: bool,
     curGenOk: bool,
     cacheOk: bool,
+    keyOk: bool,
   }
   type RootView = {
     gen: int,
@@ -143,6 +142,9 @@ module viewdefs {
     p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
   pure def curGenOk(n: VNode): bool = n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen)
   pure def cacheOk(n: VNode): bool = n.pps.forall(p => vValidIn(p, n.cp))
+  // The node's part of installedKeyOnly (signer in membership.qnt).
+  pure def keyOkOf(n: VNode): bool =
+    n.rc == (if (n.gen == 1) -1 else 0) or (n.cp == vGenesis(n.gen) and n.pps == Set())
   pure val FOREVER_NODE: NodeView = {
     tag: "forever",
     gen: 0,
@@ -155,75 +157,80 @@ module viewdefs {
     proofObeyedOk: true,
     curGenOk: true,
     cacheOk: true,
+    keyOk: true,
   }
   pure val ZERO_ROOT: RootView = { gen: 0, cpNo: 0, nextNo: 0, valid: Set(), revOk: true }
 
   pure def nodeViewOf(n: VNode, rGen: int, hpGens: Set[int], cleanOld: Set[int],
-                      oldConflict: Set[int], equivPp: Set[(int, int)], rcBoth: Set[int]): NodeView = {
+                      oldConflict: Set[int], equivPp: Set[(int, int)]): NodeView = {
     val hasRcHp = n.recvHp.exists(x => x.kind == "rc")
     val proofObeyedOk = n.recvHp.exists(x => x.gen == n.gen or x.kind == "rc") implies n.halted
     val cg = curGenOk(n)
     val co = cacheOk(n)
-    val effRc = if (n.rc >= 0 and rcBoth.contains(n.gen)) 0 else n.rc
-    if (n.forever and n.halted and cg) FOREVER_NODE
-    else if (n.halted and not(n.forever) and cg) {
+    val ko = keyOkOf(n)
+    if (n.forever and n.halted and cg and ko) FOREVER_NODE
+    else if (n.halted and not(n.forever) and cg and ko) {
       tag: "halted",
       gen: n.gen,
       cp: vGenesis(n.gen),
       pps: Set(),
-      rc: effRc,
+      rc: n.rc,
       halted: true,
       forever: false,
       hasRcHp: hasRcHp,
       proofObeyedOk: true,
       curGenOk: true,
       cacheOk: true,
-    } else if (not(n.halted) and not(n.forever) and (hpGens.contains(n.gen) or cleanOld.contains(n.gen)) and cg and co) {
+      keyOk: true,
+    } else if (not(n.halted) and not(n.forever) and (hpGens.contains(n.gen) or cleanOld.contains(n.gen)) and cg and co and ko) {
       tag: if (hpGens.contains(n.gen)) "live_hp" else "live_clean",
       gen: n.gen,
       cp: vGenesis(n.gen),
       pps: Set(),
-      rc: effRc,
+      rc: n.rc,
       halted: false,
       forever: false,
       hasRcHp: hasRcHp,
       proofObeyedOk: proofObeyedOk,
       curGenOk: true,
       cacheOk: true,
-    } else if (not(n.halted) and not(n.forever) and oldConflict.contains(n.gen) and cg and co) {
+      keyOk: true,
+    } else if (not(n.halted) and not(n.forever) and oldConflict.contains(n.gen) and cg and co and ko) {
       val eNos = V_NOS.filter(k => equivPp.contains((n.gen, k)))
       {
         tag: "live_old",
         gen: n.gen,
         cp: oldCpProj(n.cp, eNos),
         pps: n.pps.filter(x => equivPp.contains((x.gen, x.no))).map(x => (x.gen, x.no)),
-        rc: effRc,
+        rc: n.rc,
         halted: false,
         forever: false,
         hasRcHp: hasRcHp,
         proofObeyedOk: proofObeyedOk,
         curGenOk: true,
         cacheOk: true,
+        keyOk: true,
       }
     } else {
       tag: "live",
       gen: n.gen,
       cp: n.cp,
       pps: n.pps.filter(x => x.gen == rGen or equivPp.contains((x.gen, x.no))).map(x => (x.gen, x.no)),
-      rc: effRc,
+      rc: n.rc,
       halted: n.halted,
       forever: n.forever,
       hasRcHp: hasRcHp,
       proofObeyedOk: proofObeyedOk,
       curGenOk: cg,
       cacheOk: co,
+      keyOk: ko,
     }
   }
 
   pure def viewOf(ns: str -> VNode, r: VRoot, p: VPool, h: Set[VCheckpoint], b: Set[str]): View = {
     val isForever = V_DEVICES.mapBy(d => {
       val n = ns.get(d)
-      n.forever and n.halted and curGenOk(n)
+      n.forever and n.halted and curGenOk(n) and keyOkOf(n)
     })
     val rootRevOk = r.valid.intersect(r.revoked) == Set()
     val windowBoundedOk = h.forall(c => c.nextNo - c.start <= V_WINDOW)
@@ -267,10 +274,9 @@ module viewdefs {
       val canProveGens = V_GENS.filter(g =>
         g >= minGen and not(hpGens.contains(g)) and not(cpNeeded.contains(g)) and not(oldConflict.contains(g))
         and hasConflict.get(g))
-      val rcBoth = V_GENS.filter(g => p.rc.contains({ gen: g, key: 0 }) and p.rc.contains({ gen: g, key: 1 }))
       {
         allForever: false,
-        nodes: V_DEVICES.mapBy(d => nodeViewOf(ns.get(d), r.gen, hpGens, cleanOld, oldConflict, equivPp, rcBoth)),
+        nodes: V_DEVICES.mapBy(d => nodeViewOf(ns.get(d), r.gen, hpGens, cleanOld, oldConflict, equivPp)),
         root: {
           gen: r.gen,
           cpNo: r.cpNo,
@@ -459,7 +465,7 @@ module bisim {
   pure def hpGensOf(ns: str -> VNode, r: VRoot, p: VPool): Set[int] = {
     val liveGens = V_DEVICES.filter(d => {
       val n = ns.get(d)
-      not(n.forever and n.halted and curGenOk(n))
+      not(n.forever and n.halted and curGenOk(n) and keyOkOf(n))
     }).map(d => ns.get(d).gen).union(Set(r.gen))
     val minGen = liveGens.fold(V_MAX_GEN, (m, g) => if (g < m) g else m)
     V_GENS.filter(g => g >= minGen and p.hp.exists(x => x.kind != "rc" and x.gen == g))
@@ -695,34 +701,36 @@ module bisim {
   action stepRecvCpHalt = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.cp != Set(),
     nondet d = P_DEVICES.oneOf() nondet c = A::pool.cp.oneOf()
     val n = A::nodes.get(d)
-    all { not(n.forever or n.halted), c.gen == n.gen, A::cpConflict(c, n.cp),
+    all { not(n.forever or n.halted), c.gen == n.gen, A::verifies(n, c.gen), A::cpConflict(c, n.cp),
           A::nodeRecvCp(d, c), mv' = { ...NO_MOVE, d: d, c: c } } }
   action stepRecvCpAdv = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.cp != Set(),
     nondet d = P_DEVICES.oneOf() nondet c = A::pool.cp.oneOf()
     val n = A::nodes.get(d)
-    all { not(n.forever or n.halted), c.gen == n.gen, not(A::cpConflict(c, n.cp)), c.no > n.cp.no,
+    all { not(n.forever or n.halted), c.gen == n.gen, A::verifies(n, c.gen), not(A::cpConflict(c, n.cp)), c.no > n.cp.no,
           A::nodeRecvCp(d, c), mv' = { ...NO_MOVE, d: d, c: c } } }
   action stepRecvCpNoop = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.cp != Set(),
     nondet d = P_DEVICES.oneOf() nondet c = A::pool.cp.oneOf()
     val n = A::nodes.get(d)
-    all { n.forever or n.halted or c.gen != n.gen or (not(A::cpConflict(c, n.cp)) and c.no <= n.cp.no),
+    all { n.forever or n.halted or c.gen != n.gen or not(A::verifies(n, c.gen))
+            or (not(A::cpConflict(c, n.cp)) and c.no <= n.cp.no),
           A::nodeRecvCp(d, c), mv' = NO_MOVE } }
 
   // Exhaustive 3-way split of nodeRecvPp (halt / add / noop).
   action stepRecvPpHalt = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.pp != Set(),
     nondet d = P_DEVICES.oneOf() nondet p = A::pool.pp.oneOf()
     val n = A::nodes.get(d)
-    all { not(n.halted or n.forever), n.pps.exists(q => A::ppConflict(p, q)),
+    all { not(n.halted or n.forever), A::verifies(n, p.gen), n.pps.exists(q => A::ppConflict(p, q)),
           A::nodeRecvPp(d, p), mv' = { ...NO_MOVE, d: d, p: p } } }
   action stepRecvPpAdd = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.pp != Set(),
     nondet d = P_DEVICES.oneOf() nondet p = A::pool.pp.oneOf()
     val n = A::nodes.get(d)
-    all { not(n.halted or n.forever), not(n.pps.exists(q => A::ppConflict(p, q))), A::validUnder(p, n.cp),
+    all { not(n.halted or n.forever), A::verifies(n, p.gen), not(n.pps.exists(q => A::ppConflict(p, q))), A::validUnder(p, n.cp),
           A::nodeRecvPp(d, p), mv' = { ...NO_MOVE, d: d, p: p } } }
   action stepRecvPpNoop = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.pp != Set(),
     nondet d = P_DEVICES.oneOf() nondet p = A::pool.pp.oneOf()
     val n = A::nodes.get(d)
-    all { n.halted or n.forever or (not(n.pps.exists(q => A::ppConflict(p, q))) and not(A::validUnder(p, n.cp))),
+    all { n.halted or n.forever or not(A::verifies(n, p.gen))
+            or (not(n.pps.exists(q => A::ppConflict(p, q))) and not(A::validUnder(p, n.cp))),
           A::nodeRecvPp(d, p), mv' = NO_MOVE } }
 
   // Exhaustive 3-way split of nodeRecvRc (forever / advance / noop).
@@ -751,12 +759,12 @@ module bisim {
   action stepRecvHpGen = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.hp != Set(),
     nondet d = P_DEVICES.oneOf() nondet h = A::pool.hp.oneOf()
     val n = A::nodes.get(d)
-    all { not(n.forever), h.kind != "rc", h.gen == n.gen,
+    all { not(n.forever), h.kind != "rc", h.gen == n.gen, A::verifies(n, h.gen),
           A::nodeRecvHp(d, h), mv' = { ...NO_MOVE, d: d, h: h } } }
   action stepRecvHpNoop = all { pre, bStay, stage' = 1, matchOk' = true, A::pool.hp != Set(),
     nondet d = P_DEVICES.oneOf() nondet h = A::pool.hp.oneOf()
     val n = A::nodes.get(d)
-    all { n.forever or (h.kind != "rc" and h.gen != n.gen),
+    all { n.forever or (h.kind != "rc" and (h.gen != n.gen or not(A::verifies(n, h.gen)))),
           A::nodeRecvHp(d, h), mv' = NO_MOVE } }
 
   // Exhaustive 2-way split of nodeHearsHalted (forever peer / halted same-gen peer).

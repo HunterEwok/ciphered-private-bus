@@ -37,6 +37,7 @@ the previous state nor a log of past acceptances, which would multiply the state
 | --- | --- | --- |
 | `noRollback` | R-MEM-5 | S6 |
 | `currentGeneration` | R-MEM-12 | S9 |
+| `installedKeyOnly` | R-MEM-2; Appendix B, Section B.3, rule 1 | a node holds a checkpoint or passports of its generation only if the root key it installed for that generation signed them |
 | `haltIsSticky` | R-MEM-9, R-MEM-13 | S8 |
 | `haltedIsInert` | R-MEM-9 | S8 |
 | `proofIsObeyed` | R-MEM-10 | S8 |
@@ -49,9 +50,19 @@ the previous state nor a log of past acceptances, which would multiply the state
 | `windowKeepsValid` | R-MEM-4, R-MEM-14 | the Root's latest checkpoint has the bit of every passport the Root holds valid: moving the window revokes nobody |
 | `convergence` | R-ARC-6 | S7 |
 
+The recovery key may sign two root change records of one generation (a stolen recovery key,
+L6). The model's Root signs the records of a generation with the key of the first one (key 0);
+the holder of the second key issues no passport or checkpoint, since a Root that the honest
+history does not follow has no revocations for `revokedIsRejected` to check. A node that
+installed the second key therefore verifies none of its generation's records, nor a proof built
+from them, and stays at the genesis checkpoint until the other root change record or a root
+change proof halts it for good. The scenario `otherKeyRecordsAreDroppedTest` drives a node
+there, and the probe `ignore_signer` drops the key check.
+
 `convergence` compares two nodes that processed the same records. A record of another
-generation is dropped unprocessed: the core has no wait buffer (R-MEM-6). That such a record
-comes back is part of the liveness property `haltPropagates` for halt proofs.
+generation, or one that fails the key check, is dropped unprocessed: the core has no wait buffer
+(R-MEM-6). That such a record comes back is part of the liveness property `haltPropagates` for
+halt proofs.
 
 Probes, each expected to violate `safety`:
 
@@ -73,6 +84,7 @@ Probes, each expected to violate `safety`:
 | `below_window_valid` | A passport number below the window start, which has no bit, is taken as valid, so a revoked passport comes back when the window moves past it; violates `revokedIsRejected` and `cacheConsistent` |
 | `window_past_set_bit` | The Root moves the window start past a set bit; violates `windowKeepsValid` |
 | `unbounded_window` | The Root issues a checkpoint whose window exceeds `WINDOW`; violates `windowBounded` |
+| `ignore_signer` | A node that installed the second root key of its generation takes records signed with the first; violates `installedKeyOnly` |
 | `need_next` | A node takes only the checkpoint right after its own, so its state depends on the order of arrival; violates `convergence` (S7) |
 | `halted_silent` | A halted node does not answer a sender of its generation with the proof; violates `haltPropagates`, not `safety` |
 
@@ -86,13 +98,14 @@ show two nodes that receive two checkpoints in opposite orders ending at the sam
 `need_next` leaving them apart), and a replaced passport leaving the cache when the window
 start moves past it (and `below_window_valid` keeping it).
 
-Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node
-eventually halts too or leaves that generation, and that once a peer is permanently halted, every
-node eventually is (S8, R-MEM-6, R-MEM-10, R-MEM-13). It assumes weak fairness
+Liveness: `haltPropagates` states that while a halted peer of its generation exists, a node on
+the key that signs its generation's records eventually halts too or leaves that generation, and
+that once a peer is permanently halted, every node eventually is (S8, R-MEM-6, R-MEM-10,
+R-MEM-13). It assumes weak fairness
 of `nodeHearsHalted` only: a node that keeps talking to a halted peer is eventually answered with
 the proof. It is proved from the inductive invariant, for every reachable state of `large_ind`
-(see below): `IndInv` implies `HearingEnabled`, which says that while a node has a halted peer of
-its generation and is not halted, or a permanently halted peer and is not permanently halted,
+(see below): `IndInv` implies `HearingEnabled`, which says that while a node on that key has a
+halted peer of its generation and is not halted, or a permanently halted peer and is not permanently halted,
 `nodeHearsHalted` is enabled for it. Weak fairness needs more than a true guard: it needs a step
 of the action that changes the state. While a node has a halted peer of its generation and is not
 halted, every proof the action can choose halts it (a proof of its generation halts it, a root
@@ -104,7 +117,9 @@ stutter when the proof is known, a new element of its finite set of received pro
 they change the state only finitely often. A permanent halt is never undone, so this condition
 holds until the goal is reached; the first one holds until the goal is reached or it ends (the
 node leaves the generation or the peer is no longer halted there), which the property also
-accepts. Either way the property holds. The probe
+accepts. Either way the property holds. A node that installed the second root key of its
+generation cannot verify a proof built from records signed with the first; the second part covers
+it once a peer halts for good. The probe
 `halted_silent` removes the answer: `safety` still holds, and `HearingEnabled` fails on
 `probe_halted_silent_ind`. A direct TLC check of the temporal formula is out of reach: even
 `live_tlc`, one number per generation and two devices, has more than 20 million states.

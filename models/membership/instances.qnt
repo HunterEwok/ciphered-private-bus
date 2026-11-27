@@ -32,6 +32,7 @@ module probe_accept_no_publish { import membership(DEVICES = Set("a", "b", "c"),
 module probe_below_window_valid { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "below_window_valid", TRACK_RECV = true).* from "./membership" }
 module probe_window_past_set_bit { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "window_past_set_bit", TRACK_RECV = true).* from "./membership" }
 module probe_unbounded_window { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "unbounded_window", TRACK_RECV = true).* from "./membership" }
+module probe_ignore_signer { import membership(DEVICES = Set("a", "b", "c"), MAX_GEN = 2, MAX_NO = 3, WINDOW = 2, MUTANT = "ignore_signer", TRACK_RECV = true).* from "./membership" }
 module probe_need_next { import membership(DEVICES = Set("a", "b"), MAX_GEN = 2, MAX_NO = 2, WINDOW = 2, MUTANT = "need_next", TRACK_RECV = true).* from "./membership" }
 
 // For exhaustive TLC runs: the same model without the processed-record sets,

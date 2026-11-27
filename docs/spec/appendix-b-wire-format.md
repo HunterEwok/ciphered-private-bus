@@ -661,8 +661,11 @@ Header:
 | 2 | `link_seed` | bstr(32) | 35 | The member's link seed `S` |
 | 3 | `relays` | array of `[bstr(16), bstr(16)]`, 1..128 items | ≤ 4483 | `[RelayId, BusAlias]` of each external relay of the checkpoint, in the order of its `relays` list |
 
-A member accepts a relay access object only of the current root generation, with an epoch greater than
-or equal to the one it holds, and with a valid signature of the root device of its checkpoint. Size: at
+A member accepts a relay access object only of the current root generation, with a valid signature of
+the root device of its checkpoint, and, from the same root device, with an epoch greater than or equal
+to the one it holds. When the member accepts a checkpoint that names another root device, it drops the
+relay access object it holds; the next one from the new root device is accepted whatever its epoch, and
+the new root device counts its epochs from 1. Size: at
 most 5839 bytes (5.7 KiB); with one external relay, 1393 bytes.
 
 ### Ticket (`RelayTicket`)
@@ -704,10 +707,11 @@ Rules:
    under the new alias the root device uploads relay access objects only when it issues one during the
    epoch. Sources then upload their retained publications and their latest grants again under the
    new aliases, with new upload counters.
-5. After a root change, the new Root starts relay epoch 1 of its generation. If it holds the relay state
-   of the previous generation, it bridges and closes the old aliases by rule 4. Otherwise members reach
-   the new epoch through a member link or a member relay, as after any loss of the Root, and the old
-   aliases stay until the operator's retention ends. A relay access object of an older generation is
+5. After a root change, or a checkpoint that names another root device (R-MEM-17), the new root device
+   starts relay epoch 1. If it holds the relay state of its predecessor, it bridges and closes the old
+   aliases by rule 4. Otherwise members reach the new epoch through a member link or a member relay, as
+   after any loss of the root device, and the old aliases stay until the operator's retention ends. A
+   relay access object of an older generation, or from a root device the checkpoint no longer names, is
    ignored.
 6. The ticket contains no relay address. How a device finds a relay is decided by the transport and the
    application.

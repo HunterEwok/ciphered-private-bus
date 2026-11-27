@@ -124,8 +124,8 @@ Further terms:
 - **Stream.** A bidirectional byte sequence between two nodes, opened by a call.
 - **Halt.** A state in which a node stops executing calls and accepting membership changes because it
   has observed two conflicting histories (a fork).
-- **Relay epoch.** A period, numbered within a root generation, during which the members address each
-  external relay under one set of aliases. Every revocation starts a new relay epoch.
+- **Relay epoch.** A period, numbered per root device within a root generation, during which the members
+  address each external relay under one set of aliases. Every revocation starts a new relay epoch.
 - **Alias.** A 16-byte pseudonym of the bus, a device, or a channel label, valid for one external relay
   in one relay epoch. Aliases of different relays and different epochs are unrelated for anyone who is
   not a member.
@@ -1009,7 +1009,8 @@ aliases of different relays and different epochs are unrelated random strings. T
 directory blinding in onion services [TOR-V3], applied to storage and quotas. The formats are in
 Appendix B, Section B.10.
 
-> **R-REL-13.** The Root keeps a relay epoch number, counted from 1 within each root generation, and for
+> **R-REL-13.** The root device keeps a relay epoch number, counted from 1 by each root device within a
+> root generation, and for
 > each epoch a fresh random 32-byte relay epoch secret and a fresh random period secret, which the root
 > device never discloses. It MUST start a new epoch with every checkpoint that clears a passport bit or changes the
 > `relays` list, and MAY start one on the "rotate key epoch" time event on the root device (R-CORE-3) or
@@ -1018,9 +1019,15 @@ Appendix B, Section B.10.
 > fresh random link seed for that member, and the bus alias of each external relay of the checkpoint. It
 > issues one to a member admitted during the epoch, and issues the current one again, sealed to the new
 > key, when it receives a newer sealing key claim of a member. A member accepts a relay access object
-> only if it is signed by the device key of the root device named in its checkpoint. A member never
+> only if it is signed by the device key of the root device named in its checkpoint, and orders relay
+> access objects by (root device, epoch): when it accepts a checkpoint that names another root device,
+> it drops the relay access object it holds and accepts the next one of the new root device whatever its
+> epoch. A relay access object signed by a root device that its checkpoint no longer names is rejected.
+> A member never
 > sends the relay epoch secret, its link seed, or anything derived from them in the open.
-> *Serves:* S5, S18. *Verified by:* membership model (a new epoch follows every cleared bit), Tamarin.
+> *Serves:* S5, S18. *Verified by:* membership model (a new epoch follows every cleared bit; probe: the
+> key of a replaced root device issues a far-ahead epoch, and members must still return to the relays of
+> the new root device), Tamarin.
 
 > **R-REL-14.** For an external relay with identifier `RelayId`, the device aliases, the label aliases,
 > and the wrapping keys are derived from the relay epoch secret and `RelayId`; a member's link key is
@@ -1492,8 +1499,13 @@ epoch secret therefore cannot register a bus alias before the Root and lock the 
 (S14). For the same reason relay access objects are signed by the root device: a link seed from anyone
 else would let one member cut another off. They are signed with the root device's device key, not the
 root key, because a new epoch needs one signature per member, and the root key may require the owner's
-confirmation of every signature (R-KEY-1). A stolen root device key lets the thief issue relay access
-objects, that is, deny relay service; it gives no power over membership.
+confirmation of every signature (R-KEY-1). A thief with the root device's key and its relay secrets can
+issue relay access objects with an epoch secret and link seeds of its own choosing, sign tickets for the
+current aliases, and so deny relay service and, together with a relay, read the open fields and wrapped
+headers of the bus (S18) for the epochs it issues. This lasts until the owner names a new root device in
+a checkpoint (R-MEM-17): members then drop the relay epoch they hold, whatever its number, and follow the
+new root device, which counts its epochs from 1 (R-REL-13). The thief gains no power over membership or
+content: inner objects stay sealed and signed, and only the root key signs checkpoints and passports.
 
 Every revocation costs a new epoch: one sealing and one signature per member on the root device, one
 bridge per member at each external relay, and every source uploading its retained publications and

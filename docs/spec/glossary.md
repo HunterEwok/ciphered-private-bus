@@ -48,7 +48,7 @@ not know about them.
 | Bus identifier | `BusId` | 32 bytes | R-FMT-9 |
 | Device identifier | `DeviceId` | 16 bytes | R-FMT-9, B.8 |
 | Relay identifier | `RelayId` | 16 bytes | B.10 |
-| Relay epoch | `RelayEpoch` | 1..2^31 - 1, within a root generation | R-REL-13 |
+| Relay epoch | `RelayEpoch` | 1..2^31 - 1, per root device within a root generation | R-REL-13 |
 | Bus alias | `BusAlias` | 16 bytes, hash of the period key | R-REL-14, B.10 |
 | Device alias | `DeviceAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |
 | Label alias | `LabelAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |

@@ -129,6 +129,59 @@ the violation shows that halts, permanent halts, accepted data, key grants, root
 under revoked passports, and a moving window are all reachable, so `safety` does not hold
 vacuously.
 
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction. "Header" points to the abstractions
+listed at the top of [`membership.qnt`](membership.qnt).
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-MEM-1 | passports and checkpoints have separate number sequences, each strictly increasing within a generation | guards: `rootIssue` and `rootRevoke` raise `nextNo` and `cpNo`; a Root that breaks this is modelled by `rootEquivocateCp` and `rootEquivocatePp` (header) |
+| R-MEM-2 | a passport is valid if signed by the Root of the current generation | `installedKeyOnly`, `currentGeneration`; probes `ignore_signer`, `accept_old_gen`; scenario `otherKeyRecordsAreDroppedTest` |
+| R-MEM-2 | its number is below the next free number and its bit is 1 | `validIn`; `cacheConsistent`, `revokedIsRejected`; probes `ignore_bitmap`, `below_window_valid` |
+| R-MEM-3 | a passport at or above the next free number is not accepted until a newer checkpoint | `validIn` (the bitmap covers only numbers below the next one); `cacheConsistent` |
+| R-MEM-3 | when admitting a device the Root issues the passport and the checkpoint together | guard: `rootIssue` |
+| R-MEM-4 | revocation is a new checkpoint with the bit cleared | `rootHonorsRevocation`; probe `keep_bit` |
+| R-MEM-4 | a change of rights is a new passport with a new number, the old bit cleared | `rootChangeRights`; `rootHonorsRevocation`, `windowKeepsValid` |
+| R-MEM-5 | a checkpoint is accepted only with a number greater than the node's own | `noRollback`; probe `accept_lower` |
+| R-MEM-5 | its number and body are persisted before the node acts on it | `noRollback` across `nodeReboot`; probe `reboot_rollback` |
+| R-MEM-6 | the hello, publications, grants and calls carry the sender's pair (generation, checkpoint number) | the fields `gen` and `cpNo` of `Data` |
+| R-MEM-6 | a recipient with a smaller pair requests the checkpoint and drops the message | guard in `nodeAcceptData`; the request is the pool (header) |
+| R-MEM-6 | a recipient with a larger pair sends its checkpoint; a new checkpoint is sent on all links | abstraction: the pool delivers every record to anyone (header) |
+| R-MEM-6 | a halted node answers a sender of its generation with its halt proof, every time | `nodeHearsHalted`; `haltPropagates` (proved through `HearingEnabled`); probe `halted_silent`; scenario `droppedProofComesBackTest` |
+| R-MEM-6 | a permanently halted node answers every sender, of any generation | `nodeHearsHalted` (`foreverPeer`); `haltPropagates` |
+| R-MEM-7 | a node returns its own passport and checkpoint on request | abstraction: the pool (header) |
+| R-MEM-7 | other passports are kept in a bounded cache | `pps`, at most one passport per number (`IndInv`) |
+| R-MEM-7 | a new checkpoint removes passports whose bit is cleared | `cacheConsistent`; probe `no_prune`; scenario `windowMovesPastReplacedTest` |
+| R-MEM-8 | two checkpoints or two passports with one number and different bodies halt the node | `cacheConsistent`, `convergence`; probe `no_halt`; witness `witnessHalt` |
+| R-MEM-8 | records with the same body and different signatures are one record | abstraction: signatures are perfect and a record is its body (header) |
+| R-MEM-9 | a halted node accepts no passport or checkpoint, no publication or grant, and grants no key | `haltedIsInert`; probe `halted_accepts` |
+| R-MEM-9 | it does not publish | guard: `nodeSend` |
+| R-MEM-9 | it executes no call and closes its streams | the calls and streams models (`haltClosesStreams`) |
+| R-MEM-9 | values accepted before the halt stay readable | the channels model; nothing here removes them |
+| R-MEM-9 | only a root change record leaves the halted state | `haltIsSticky`; probe `rc_no_forever` |
+| R-MEM-10 | a node keeps the halt proof and sends it when it halts and to every sender behind it | the proof goes to the pool; `nodeHearsHalted`; `haltPropagates` |
+| R-MEM-10 | on a valid proof a node halts whatever checkpoint it is at | `proofIsObeyed`; probe `proof_needs_cp` |
+| R-MEM-10 | the proof does not depend on delivery order | `convergence`; probe `need_next` |
+| R-MEM-11 | a root change record of a greater generation is accepted and the node moves to it directly | guard: `nodeRecvRc`; `currentGeneration`; witness `witnessRootChange` |
+| R-MEM-11 | every participant stores the latest accepted record and returns it on request | the field `rc`; the pool (header) |
+| R-MEM-12 | after a root change only records of the new Root are valid | `currentGeneration`, `installedKeyOnly`, `revokedIsRejected`; probes `accept_old_gen`, `accept_old_data_gen`, `ignore_signer`; scenario `oldGenerationDataIsDroppedTest` |
+| R-MEM-12 | counters start over, and the new Root reissues passports | `recoveryChange` starts the Root over; `rootAdmit` reissues |
+| R-MEM-13 | two root change records of one generation are a permanent halt | `haltIsSticky`; probe `rc_no_forever`; witness `witnessForever` |
+| R-MEM-13 | their proof is accepted at any generation and reaches every node | `nodeRecvHp`; `haltPropagates` (`foreverReachesPeers`) |
+| R-MEM-14 | the bitmap is no longer than the profile limit | `windowBounded`; probe `unbounded_window` |
+| R-MEM-14 | the window start moves only past numbers below which all bits are cleared | `windowKeepsValid`; probes `window_past_set_bit`, `below_window_valid`; witness `witnessWindowMoves` |
+| R-MEM-14 | the Root reissues the oldest valid passports to move the window | `rootChangeRights` with the same rights; scenario `windowMovesPastReplacedTest` |
+| R-MEM-15 | the Root's counters are never below what it can receive, persisted before signing | abstraction: a Root that breaks this equivocates, which the model allows (header) |
+| R-MEM-16 | a revoked device may still consider itself a member | `nodeSend` sends under any passport the device was issued; witness `witnessRevokedSends`; scenario `revokedSendNeedsLaterSendTest` |
+| R-VER-4 | a revoked device that does not know it receives no new keys | `revokedIsRejected` on every grant; probe `keep_bit` |
+| R-VER-4 | its publications are not accepted by a node that has seen the new checkpoint | `revokedIsRejected` on every acceptance; probes `ignore_bitmap`, `below_window_valid` |
+| R-CH-13 | publications and grants only from a valid member with the publish right; not needed on channel 0 | `dataNeedsPublish`; probe `accept_no_publish` |
+| R-CH-13 | the recipient computes the label of channel 0 itself | abstraction: channel 0 is the flag `ch0` |
+| R-CH-13 | the source grants a key only to a valid member with the read right | `grantsNeedRead`; probe `grant_no_right` |
+| R-CH-13 | a recipient without the read right rejects the grant | the channels model (`noReadNoKey`); not modelled here (header) |
+
 ## Inductive invariant
 
 [`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv` for the model without

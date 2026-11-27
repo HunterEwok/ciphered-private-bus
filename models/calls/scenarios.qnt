@@ -66,6 +66,39 @@ module scenarios {
       .then(targetReset("reset"))
       .then(targetCall(x1))
       .expect(executed == Set() and seen.contains("staleNonce") and safety)
+
+  // The root device signs an automatic action with its device key, although
+  // the target's passport does not name it: the action is refused, and the
+  // same action signed with the root key runs (R-CALL-4).
+  val r1 = { cmd: "r", id: 1, idem: false, act: 1, key: "device", nonce: 1, epoch: 1 }
+  val r2 = { cmd: "r", id: 2, idem: false, act: 1, key: "root", nonce: 2, epoch: 1 }
+  run rootDeviceKeyTest =
+    init
+      .then(targetAnswer("r"))
+      .then(cmdLearn("r", 1))
+      .then(cmdStart("r", 1, false, "device"))
+      .then(targetCall(r1))
+      .expect(executed == Set() and seen.contains("noRight") and safety)
+      .then(cmdReply("r", { cmd: "r", id: 1, nextNonce: 2, executed: false }))
+      .then(cmdStart("r", 1, false, "root"))
+      .then(targetCall(r2))
+      .expect(executed == Set({ cmd: "r", id: 2 }) and safety)
+}
+
+module scenarios_probe_root_device_all_rights {
+  import calls(COMMANDERS = Set("a"), OUTSIDERS = Set(), ROOT = "r", PRESENCE = Set("a"),
+               RIGHTS = Map("a" -> Set(1, 2)), MAX_NONCE = 4, MAX_EPOCH = 3, MAX_CALLS = 2, MAX_RESETS = 1,
+               MUTANT = "root_device_all_rights").* from "./calls"
+
+  val r1 = { cmd: "r", id: 1, idem: false, act: 1, key: "device", nonce: 1, epoch: 1 }
+
+  run rootDeviceKeyViolatesSafetyTest =
+    init
+      .then(targetAnswer("r"))
+      .then(cmdLearn("r", 1))
+      .then(cmdStart("r", 1, false, "device"))
+      .then(targetCall(r1))
+      .expect(not(safety))
 }
 
 module scenarios_probe_retry_on_mismatch {

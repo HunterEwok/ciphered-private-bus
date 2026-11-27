@@ -24,10 +24,11 @@ refusals with any nonce seen in the open. The header of `calls.qnt` lists every 
 | --- | --- | --- |
 | `atMostOnce` | R-CALL-5, R-CALL-13 | S10: a call that is not idempotent is executed at most once, also across automatic retries |
 | `freshNonce` | R-CALL-1, R-CALL-8, R-CORE-6 | S10: an action runs only over a nonce the target issued to this commander since the latest reset or reboot and did not consume |
-| `permitted` | R-CALL-4 | S10: only with the right under the target's current passport and the key the action class requires |
+| `permitted` | R-CALL-4 | S10: only with the right under the target's current passport and the key the action class requires; the root key has every right, the root device's other keys only those the passport gives it |
 | `slotsKnown` | R-CALL-7 | S14: slots only for named commanders and the root device, also after a commander stops being named |
 | `mismatchKeepsSlot` | R-CALL-6 | S14: a mismatch does not change the slot |
-| `noConfirmRetry` | R-CALL-13 | a confirmation-class call is never retried automatically |
+| `noConfirmRetry` | R-CALL-13 | a confirmation-class call is never retried automatically, after either open refusal |
+| `oneRetryPerKind` | R-CALL-13 | per call, at most one automatic retry per kind of open refusal |
 | `epochGrows` | R-CALL-13 | a replayed old key claim never moves the commander's known epoch back |
 
 Step properties are checked by a monitor when the step is taken, as in the membership model.
@@ -48,17 +49,63 @@ Probes, each expected to violate `safety`:
 | `reset_keeps_slots` | "Reset nonces" does not erase the slots |
 | `reboot_keeps_slots` | A reboot does not erase the slots |
 | `keep_revoked_slot` | The slot of a commander that is no longer named survives, and its next call refills it |
+| `root_device_all_rights` | Every key of the root device has every right, not only the root key |
+| `root_key_any_device` | A call signed with the root key is accepted from a device other than the root device |
+| `retry_confirmation_mismatch` | The commander retries a confirmation-class call after a mismatch |
+| `retry_twice` | The commander retries a call more than once after the same kind of open refusal |
 
 `retry_on_mismatch` needs a specific sequence (an executed call whose reply is withheld is replayed)
 and is checked by a fixed scenario in [`scenarios.qnt`](scenarios.qnt), which also shows that the
 replay is reported as unknown, that a retry after a newer key claim is executed once, that a
-confirmation-class call is not retried, and that a reset makes an earlier nonce stale.
+confirmation-class call is not retried, that a reset makes an earlier nonce stale, and that the root
+device's device key runs no action the passport does not give it while the root key runs it (the probe
+`root_device_all_rights` breaks `safety` on the same steps).
 
 The model led to two clarifications of the specification: a mismatch for a commander without a slot,
 for example after a reset, is answered like a nonce request, so the refusal itself carries a new nonce
 (R-CALL-6); and a review found that the slot of a commander that stops being named survived, so its
 next call consumed the nonce and refilled the slot. The slot is now erased in the same event
 (R-CALL-7).
+
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction.
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-CALL-1 | A slot exists per pair (commander, target) | one target; `slots` per device |
+| R-CALL-1 | kept in RAM only | `freshNonce`; probes `reset_keeps_slots`, `reboot_keeps_slots` |
+| R-CALL-1 | holds 16 random bytes | abstraction: nonces are fresh counter values (header) |
+| R-CALL-4 | executes only if the nonce matched the slot | `freshNonce`; probe `no_erase` |
+| R-CALL-4 | and the signing key has the right under the target's passport | `permitted`; probes `no_right_check`, `revoked_calls` |
+| R-CALL-4 | the class of an action is the target's, never from the call | the call names an action and no class; the target derives the class from the action. Abstraction: an action has one class for every commander, so the per-commander masks of a permit are not modelled |
+| R-CALL-4 | an automatic action is signed by the device key | `permitted` (`keyOk`) |
+| R-CALL-4 | a confirmation-class action by the user-presence key or the root key | `permitted`; probe `presence_not_required` |
+| R-CALL-4 | the root key has the right to every action | `permitted`; scenario `rootDeviceKeyTest` (the root key runs an action the passport does not give the root device) |
+| R-CALL-4 | the other keys of the root device have only the passport's rights | `permitted`; probe `root_device_all_rights`, scenario `rootDeviceKeyTest` |
+| R-CALL-5 | a matched nonce is erased before the action is executed | abstraction: processing is instantaneous; the order is the storage test's (header) |
+| R-CALL-5 | one nonce executes at most one action | `freshNonce`, `atMostOnce`; probe `no_erase` |
+| R-CALL-6 | on a mismatch the slot does not change | `mismatchKeepsSlot`; probe `mismatch_changes` |
+| R-CALL-6 | the answer needs neither decapsulation nor a signature | guard: the mismatch branch of `targetCall` reads only the slot |
+| R-CALL-6 | without a slot the answer is that to a nonce request, under R-CALL-7 | guard in `targetCall`; `slotsKnown` |
+| R-CALL-7 | slots only for named commanders and the root device | `slotsKnown`; probe `slot_for_anyone` |
+| R-CALL-7 | a call signed by the root key comes from the root device | `permitted` (`keyOk`); probe `root_key_any_device` |
+| R-CALL-7 | a nonce request from anyone else is not answered | guard in `targetAnswer`; `slotsKnown`; probe `slot_for_anyone` |
+| R-CALL-7 | a device that stops being a commander loses its slot in the same event | `slotsKnown`; probe `keep_revoked_slot` |
+| R-CALL-8 | "reset nonces" erases all slots | `freshNonce`; probe `reset_keeps_slots` |
+| R-CALL-8 | raised from the host's uptime counter with the profile's period | abstraction: a nondeterministic event |
+| R-CALL-8 | a reboot erases the slots | `freshNonce`; probe `reboot_keeps_slots` |
+| R-CALL-13 | two open refusals, mismatch checked before stale epoch | guard: branch order in `targetCall`. Not a safety property here: with the order swapped, a retry after "stale key epoch" meets the mismatch and executes nothing |
+| R-CALL-13 | a halted target answers with a halt proof | abstraction: the halt is the membership model's (header) |
+| R-CALL-13 | refusals are unsigned and do not consume the nonce | the adversary forges refusals with any value seen in the open; the stale-epoch branch consumes nothing |
+| R-CALL-13 | after "stale key epoch" an automatic retry with the same nonce and the new key | `cmdEpoch`; witness `witnessEpochRetryExecuted`, scenario `epochRetryTest` |
+| R-CALL-13 | after "nonce mismatch" no automatic retry, except for an idempotent call | `atMostOnce`; probe `retry_on_mismatch`, scenario `replayNotRetriedTest` |
+| R-CALL-13 | "no right" only after decapsulation, and the nonce is consumed | `freshNonce`; witness `witnessNoRight` |
+| R-CALL-13 | at most one automatic retry per kind of open refusal | `oneRetryPerKind`; probe `retry_twice` |
+| R-CALL-13 | a confirmation-class action is never retried automatically | `noConfirmRetry`; probes `retry_confirmation`, `retry_confirmation_mismatch` |
+| R-CALL-13 | a stale-epoch claim is accepted only signed by the target and with a greater epoch | `epochGrows`; probe `accept_any_epoch`; signatures are perfect (header) |
+| R-CORE-6 | nonce slots do not survive a reboot | `freshNonce`; probe `reboot_keeps_slots` |
 
 ## Inductive invariant
 

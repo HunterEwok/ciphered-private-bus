@@ -87,7 +87,10 @@ module calls {
 
   // R-CALL-7: slots only for named commanders and the root device.
   def allowed(c: str): bool = named.contains(c) or c == ROOT
-  def rightsOf(c: str): Set[int] = if (c == ROOT) ACTIONS else if (named.contains(c)) passport.get(c) else Set()
+  // R-CALL-4: the root key has the right to every action; any other key has
+  // the rights the target's passport gives its device, and the root device
+  // is no exception.
+  def rightsOf(c: str, key: str): Set[int] = if (key == "root") ACTIONS else if (named.contains(c)) passport.get(c) else Set()
 
   // R-CALL-4: an automatic action is signed by the device key, a
   // confirmation-class action by the user-presence key; the root key signs
@@ -172,11 +175,15 @@ module calls {
     } else {
       // The command is opened, the nonce is consumed, and the reply carries
       // the next nonce. The action runs only with the right and the key.
-      // The mutant revoked_calls checks the passport the target started with.
+      // The mutant revoked_calls checks the passport the target started with;
+      // the mutant root_device_all_rights gives every key of the root device
+      // every right; the mutant root_key_any_device accepts the root key from
+      // any device.
       val stale = MUTANT == "revoked_calls" and COMMANDERS.contains(x.cmd)
       val ok = (allowed(x.cmd) or stale)
-        and ((if (stale) RIGHTS.get(x.cmd) else rightsOf(x.cmd)).contains(x.act) or MUTANT == "no_right_check")
-        and (keyOk(x) or (MUTANT == "presence_not_required" and x.key == "device"))
+        and ((if (stale) RIGHTS.get(x.cmd) else if (MUTANT == "root_device_all_rights" and x.cmd == ROOT) ACTIONS else rightsOf(x.cmd, x.key)).contains(x.act) or MUTANT == "no_right_check")
+        and (keyOk(x) or (MUTANT == "presence_not_required" and x.key == "device")
+             or (MUTANT == "root_key_any_device" and x.key == "root"))
       val keep = MUTANT == "no_erase"
       val nxt = if (keep) cur else if (issued < MAX_NONCE) issued + 1 else 0
       val fresh = not(keep) and nxt != 0
@@ -187,7 +194,7 @@ module calls {
           (if (not(x.idem) and executed.contains(e)) Set("atMostOnce") else Set())
             .union(if (iss.cmd == x.cmd and iss.era == era and not(consumed.contains(x.nonce))) Set()
                    else Set("freshNonce"))
-            .union(if (allowed(x.cmd) and rightsOf(x.cmd).contains(x.act) and keyOk(x)) Set()
+            .union(if (allowed(x.cmd) and rightsOf(x.cmd, x.key).contains(x.act) and keyOk(x)) Set()
                    else Set("permitted"))
       commit(slots.set(x.cmd, nxt), tepoch, passport, named, cmds, calls,
         replies.union(Set({ cmd: x.cmd, id: x.id, nextNonce: nxt, executed: ok })), shown, if (fresh) nxt else issued,
@@ -281,11 +288,15 @@ module calls {
     all {
       shown.contains(n) or n == 0,
       p.active,
-      val retry = n != 0 and not(p.triedMismatch) and p.call.act != CONFIRM
+      val retry = n != 0 and (not(p.triedMismatch) or MUTANT == "retry_twice")
+        and (p.call.act != CONFIRM or MUTANT == "retry_confirmation_mismatch")
         and (p.call.idem or MUTANT == "retry_on_mismatch")
       if (retry) {
         val x = { ...p.call, nonce: n }
-        setCmd(c, { ...k, nonce: 0, pending: { ...p, call: x, triedMismatch: true } }, calls.union(Set(x)), Set())
+        commit(slots, tepoch, passport, named, cmds.set(c, { ...k, nonce: 0, pending: { ...p, call: x, triedMismatch: true } }),
+          calls.union(Set(x)), replies, shown, issued, issuedTo, era, consumed, executed,
+          (if (p.call.act == CONFIRM) Set("noConfirmRetry") else Set())
+            .union(if (p.triedMismatch) Set("oneRetryPerKind") else Set()), Set())
       } else
         setCmd(c, { ...k, nonce: n, pending: idle }, calls, Set("unknown")),
     }
@@ -306,12 +317,13 @@ module calls {
       if (not(p.active))
         commit(slots, tepoch, passport, named, cmds.set(c, { ...k, epoch: e }), calls, replies, shown, issued,
           issuedTo, era, consumed, executed, bad, Set())
-      else if (not(p.triedEpoch) and (p.call.act != CONFIRM or MUTANT == "retry_confirmation")) {
+      else if ((not(p.triedEpoch) or MUTANT == "retry_twice") and (p.call.act != CONFIRM or MUTANT == "retry_confirmation")) {
         val x = { ...p.call, epoch: e }
         commit(slots, tepoch, passport, named,
           cmds.set(c, { ...k, epoch: e, pending: { ...p, call: x, triedEpoch: true } }), calls.union(Set(x)),
           replies, shown, issued, issuedTo, era, consumed, executed,
-          bad.union(if (p.call.act == CONFIRM) Set("noConfirmRetry") else Set()), Set())
+          bad.union(if (p.call.act == CONFIRM) Set("noConfirmRetry") else Set())
+            .union(if (p.triedEpoch) Set("oneRetryPerKind") else Set()), Set())
       } else
         commit(slots, tepoch, passport, named, cmds.set(c, { ...k, epoch: e, pending: idle }), calls, replies,
           shown, issued, issuedTo, era, consumed, executed, bad, Set("unknown")),
@@ -357,14 +369,17 @@ module calls {
   val slotsKnown = not(broken.contains("slotsKnown")) and DEVICES.forall(d => slots.get(d) != 0 implies allowed(d))
   // S14, R-CALL-6: a mismatch does not change the slot.
   val mismatchKeepsSlot = not(broken.contains("mismatchKeepsSlot"))
-  // R-CALL-13: a confirmation-class call is never retried automatically.
+  // R-CALL-13: a confirmation-class call is never retried automatically,
+  // after either open refusal.
   val noConfirmRetry = not(broken.contains("noConfirmRetry"))
+  // R-CALL-13: per call, at most one automatic retry per kind of open refusal.
+  val oneRetryPerKind = not(broken.contains("oneRetryPerKind"))
   // R-CALL-13: the key epoch a commander knows never goes back, so a replayed
   // old claim cannot make it seal to a retired key.
   val epochGrows = not(broken.contains("epochGrows"))
 
   val safety = atMostOnce and freshNonce and permitted and slotsKnown and mismatchKeepsSlot and noConfirmRetry
-    and epochGrows
+    and oneRetryPerKind and epochGrows
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.

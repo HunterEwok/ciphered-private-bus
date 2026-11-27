@@ -13,7 +13,11 @@
     "accept_any_epoch",
     "reset_keeps_slots",
     "reboot_keeps_slots",
-    "keep_revoked_slot"
+    "keep_revoked_slot",
+    "root_device_all_rights",
+    "root_key_any_device",
+    "retry_confirmation_mismatch",
+    "retry_twice"
   ],
   "witnesses": [
     "witnessExecuted",

@@ -31,7 +31,8 @@ CHECKED = ["small", "tiny"]
 SIM_WITNESSES = CHECKS["witnesses"]
 # Probes whose defect needs a long specific sequence are checked by a scenario.
 SCENARIO_PROBES = ["retry_on_mismatch"]
-SCENARIOS = ["scenarios"] + [f"scenarios_probe_{p}" for p in SCENARIO_PROBES]
+# A probe may also have a scenario that pins down the trace the review found.
+SCENARIOS = ["scenarios"] + [f"scenarios_probe_{p}" for p in SCENARIO_PROBES + ["root_device_all_rights"]]
 SEED = "0x5eed"
 # The Apalache version is pinned with the other tools in tools/versions/versions.toml.
 with open(HERE.parents[1] / "tools" / "versions" / "versions.toml", "rb") as _f:

@@ -1,0 +1,318 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 HunterEwok
+
+# State machine model checks at the CI sizes (R-VER-2, R-VER-3): safety holds,
+# every probe fires, every witness is reached, and the inductive invariants
+# prove safety for every reachable state of the instances tiny_ind.
+
+name: models
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
+  pull_request:
+    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: models-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  step-coverage:
+    name: proof obligations cover every step branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare checks.json with the step actions of every proof file
+        run: python3 models/check_steps.py
+      - name: Check that every inductive invariant bounds what its proof draws
+        run: python3 models/check_draws.py
+
+  membership:
+    name: membership (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/membership
+        run: quint typecheck instances.qnt && quint typecheck view.qnt
+      - name: Simulate safety, probes, and witnesses
+        run: python3 models/membership/check.py simulate
+
+  membership-inductive:
+    name: membership (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        env:
+          # The step obligation needs more than the default heap.
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/membership/check.py inductive --main tiny_ind
+
+  membership-convergence:
+    name: membership (convergence proof)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove convergence (Apalache, instances conv_tiny_ind and conv_tiny_pair)
+        env:
+          # The step obligation needs more than the default heap.
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/membership/check.py convergence
+
+  channels:
+    name: channels (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/channels
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt && quint typecheck view.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/channels/check.py
+
+  channels-inductive:
+    name: channels (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        run: |
+          java -version
+          python3 models/channels/check.py --inductive tiny_ind
+
+  calls:
+    name: calls (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/calls
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt && quint typecheck view.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/calls/check.py
+
+  calls-inductive:
+    name: calls (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        # The bounded types of this model need more than the default 4 GB heap.
+        env:
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/calls/check.py --inductive tiny_ind
+
+  enrollment:
+    name: enrollment (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/enrollment
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt && quint typecheck view.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/enrollment/check.py
+
+  enrollment-inductive:
+    name: enrollment (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        # The bounded types of this model need more than the default 4 GB heap.
+        env:
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/enrollment/check.py --inductive tiny_ind
+
+  streams:
+    name: streams (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/streams
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/streams/check.py
+
+  relay:
+    name: relay (simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install the Rust evaluator with the job's token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: models/fetch-evaluator.sh
+      - name: Type check
+        working-directory: models/relay
+        run: quint typecheck instances.qnt && quint typecheck scenarios.qnt && quint typecheck view.qnt
+      - name: Simulate safety, probes, and witnesses; run the scenarios
+        run: python3 models/relay/check.py
+
+  streams-inductive:
+    name: streams (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        env:
+          # The step obligation needs more than the default heap.
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/streams/check.py --inductive tiny_ind
+
+  relay-inductive:
+    name: relay (inductive invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: |
+          npm ci --ignore-scripts
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove safety from the inductive invariant (Apalache, instance tiny_ind)
+        env:
+          # The step obligation needs more than the default heap.
+          JVM_ARGS: -Xmx12g
+        run: |
+          java -version
+          python3 models/relay/check.py --inductive tiny_ind

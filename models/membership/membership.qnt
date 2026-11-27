@@ -1,0 +1,640 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 HunterEwok
+//
+// Membership state machine of Ciphered Private Bus (verification level V2).
+//
+// Scope: passports, checkpoints with their window, revocation, change of
+// rights, root change, halt and halt proofs, reboot, and the acceptance of
+// data and key grants against the receiver's checkpoint. Requirements:
+// R-MEM-1..14 (R-MEM-6 with the answer of a halted node), R-MEM-16, R-CH-13,
+// R-VER-4; properties S4..S9 and S16, and the liveness of halt propagation.
+//
+// Abstractions (each one is stated so that a reader can judge what a green
+// run does and does not show):
+// - Signatures are perfect. The adversary cannot forge a record; it can only
+//   deliver, delay, reorder, duplicate, and drop records that exist. The
+//   network is therefore modelled as pools of every record ever issued; any
+//   node may receive any record at any time, any number of times.
+// - The Root may equivocate (two different records with one number). This
+//   models a Root restored from an old backup (R-MEM-15 violated) or a stolen
+//   root key (L4); the bus must detect it, not prevent it.
+// - The recovery key may equivocate (two root change records of one
+//   generation, L6). The Root of a generation signs with the key of the
+//   first root change record (key 0); the holder of the second key issues no
+//   passport or checkpoint. A node that installed the second key therefore
+//   verifies none of the generation's records, nor a proof built from them,
+//   and stays at the genesis checkpoint until the other root change record
+//   or a root change proof halts it for good.
+// - A checkpoint carries its window start and the set of valid passport
+//   numbers in the window [start, nextNo) (R-MEM-14); a number below the
+//   start has no bit and is not valid. The Root moves the start as far as
+//   R-MEM-14 allows, past every leading cleared bit, with each checkpoint it
+//   issues, and reissues a passport (a change of rights to the same rights)
+//   when the window would grow beyond WINDOW numbers.
+// - Rights are the two bits that membership decisions read: bit 0 read,
+//   bit 1 publish (Appendix B, Section B.1). The relay and join-request bits
+//   are left to the relay and enrollment models.
+// - A data message stands for a publication or a key grant received from a
+//   source: it carries the sender's device, passport number, (generation,
+//   checkpoint number), and whether it is on channel 0. Calls are checked
+//   against permits in models/calls, not against these rights.
+// - The recipient's check of its own read right before it takes a grant
+//   (R-CH-13, last sentence) is not modelled; the source's check is.
+module membership {
+  // ---------------------------------------------------------------- parameters
+  const DEVICES: Set[str]
+  const MAX_GEN: int      // highest root generation the recovery key may create
+  const MAX_NO: int       // highest passport and checkpoint number per generation
+  const WINDOW: int       // the profile limit on the bitmap length (R-MEM-14)
+  const MUTANT: str       // "none", or the name of a deliberate defect (R-VER-2)
+  const TRACK_RECV: bool  // record processed checkpoints, passports and root change records (for convergence only)
+
+  // --------------------------------------------------------------------- types
+  type Passport = { gen: int, no: int, dev: str, rights: int }
+  type Checkpoint = { gen: int, no: int, start: int, valid: Set[int], nextNo: int }
+  type RootChange = { gen: int, key: int }
+  // A halt proof names the kind and the head it proves. It is valid by
+  // construction: it is only ever created from two conflicting records.
+  type HaltProof = { kind: str, gen: int, no: int }
+  type Data = { src: str, ppNo: int, gen: int, cpNo: int, ch0: bool }
+
+  type Node = {
+    gen: int,
+    cp: Checkpoint,
+    pps: Set[Passport],       // passport cache (R-MEM-7)
+    rc: int,                  // key of the root change record of the current generation, -1 for generation 1
+    halted: bool,
+    forever: bool,            // permanent halt (R-MEM-13, L6)
+    // ghost: every record the node has processed, accepted or not. A record
+    // of another generation is dropped unprocessed and not recorded: the
+    // core has no wait buffer (R-MEM-6), and a record of a future generation
+    // can only be verified after its root change record (Appendix B,
+    // Section B.3, rule 3). Getting it again is a liveness matter.
+    recvCp: Set[Checkpoint],
+    recvPp: Set[Passport],
+    recvRc: Set[RootChange],
+    recvHp: Set[HaltProof],
+  }
+
+  type Root = {
+    gen: int,
+    cpNo: int,
+    nextNo: int,
+    valid: Set[int],
+    rights: int -> int,        // rights of each valid passport number
+    revoked: Set[int],         // ghost: passport numbers the owner asked to revoke
+  }
+
+  type Pool = {
+    cp: Set[Checkpoint],
+    pp: Set[Passport],
+    rc: Set[RootChange],
+    hp: Set[HaltProof],
+    data: Set[Data],
+  }
+
+  // An acceptance or a grant: the receiver's checkpoint at that moment, the
+  // generation of the message, and the rights of the passport it relied on.
+  type Entry = { node: str, peer: str, ppNo: int, msgGen: int, rights: int, ch0: bool, cp: Checkpoint, halted: bool }
+
+  // ----------------------------------------------------------------- variables
+  var nodes: str -> Node
+  var root: Root
+  var pool: Pool
+  var history: Set[Checkpoint] // ghost: checkpoints issued by the honest Root sequence
+  // Monitor: properties of a single step (a transition, an acceptance, a
+  // grant) are checked when the step is taken, and the name of a violated one
+  // is added here. This keeps no copy of the previous state and no log of
+  // past acceptances, which would multiply the states TLC has to explore.
+  var broken: Set[str]
+  var seen: Set[str]           // ghost: "accept", "grant" and "revokedSend" once they happened (witnesses)
+
+  // ------------------------------------------------------------------- helpers
+  pure def genesis(g: int): Checkpoint = { gen: g, no: 0, start: 1, valid: Set(), nextNo: 1 }
+
+  // Rights bits (Appendix B, Section B.1).
+  pure def canRead(r: int): bool = r % 2 == 1
+  pure def canPublish(r: int): bool = (r / 2) % 2 == 1
+  val RIGHTS = Set(0, 1, 2, 3)
+
+  // R-MEM-14: the window start moves only past cleared bits, so the farthest
+  // it may go is the lowest valid number, or the next number if none is valid.
+  pure def windowStart(valid: Set[int], nx: int): int =
+    valid.fold(nx, (m, k) => if (k < m) k else m)
+
+  pure def lexGt(g1: int, c1: int, g2: int, c2: int): bool =
+    g1 > g2 or (g1 == g2 and c1 > c2)
+
+  pure def cpConflict(a: Checkpoint, b: Checkpoint): bool =
+    a.gen == b.gen and a.no == b.no and a != b
+
+  pure def ppConflict(a: Passport, b: Passport): bool =
+    a.gen == b.gen and a.no == b.no and a != b
+
+  // R-MEM-2, R-MEM-14: valid for a verifier with checkpoint c. The bitmap
+  // covers [start, nextNo), so a number outside it is never in the set of
+  // valid numbers: the checks "number below next" and "number at or above the
+  // start" are part of reading the bitmap. The probe below_window_valid shows
+  // why the second one matters.
+  pure def validIn(p: Passport, c: Checkpoint): bool =
+    p.gen == c.gen and c.start <= p.no and p.no < c.nextNo and c.valid.contains(p.no)
+
+  // The root key that signs the passports and checkpoints of generation g:
+  // the first Root's key in generation 1 (rc -1), and in a later generation
+  // the key that the honest root change record names (key 0). A node
+  // verifies such a record, and a halt proof built from two of them, with
+  // the key it installed for that generation (Appendix B, Section B.3,
+  // rule 1). Mutant "ignore_signer" skips that check.
+  pure def signer(g: int): int = if (g == 1) -1 else 0
+  pure def verifies(n: Node, g: int): bool = n.rc == signer(g) or MUTANT == "ignore_signer"
+
+  // The check the nodes run; a probe may break it. Invariants use validIn.
+  // Mutant "below_window_valid": a number below the window start, which has
+  // no bit, is taken as valid.
+  pure def validUnder(p: Passport, c: Checkpoint): bool =
+    if (MUTANT == "ignore_bitmap") p.gen == c.gen and p.no < c.nextNo
+    else if (MUTANT == "below_window_valid") validIn(p, c) or (p.gen == c.gen and p.no < c.start)
+    else validIn(p, c)
+
+  pure def initNode: Node = {
+    gen: 1, cp: genesis(1), pps: Set(), rc: -1, halted: false, forever: false,
+    recvCp: Set(), recvPp: Set(), recvRc: Set(), recvHp: Set(),
+  }
+
+  pure def initRoot: Root = { gen: 1, cpNo: 0, nextNo: 1, valid: Set(), rights: Map(), revoked: Set() }
+
+  pure def emptyPool: Pool = { cp: Set(), pp: Set(), rc: Set(), hp: Set(), data: Set() }
+
+  // Properties of one transition of one node, from a to b.
+  pure def stepProblems(a: Node, b: Node): Set[str] =
+    // S6, R-MEM-5: within one generation the checkpoint number never
+    // decreases, including across a reboot.
+    (if (b.gen > a.gen or (b.gen == a.gen and b.cp.no >= a.cp.no)) Set() else Set("noRollback"))
+    // S9, R-MEM-12: the generation never decreases.
+    .union(if (b.gen >= a.gen) Set() else Set("currentGeneration"))
+    // S8, R-MEM-9, R-MEM-13: only a root change record leaves the halted
+    // state, and a permanent halt is never left.
+    .union(if ((a.forever implies b.forever) and ((a.halted and not(b.halted)) implies b.gen > a.gen))
+             Set() else Set("haltIsSticky"))
+    // S8, R-MEM-9: a halted node accepts no checkpoint.
+    .union(if ((a.halted and b.gen == a.gen) implies b.cp == a.cp) Set() else Set("haltedIsInert"))
+
+  // S4, S5, R-VER-4: a passport the honest Root sequence revoked at or before
+  // the receiver's checkpoint. Passport numbers are never reused, so "revoked
+  // at checkpoint c" means: number below c.nextNo and not in c.valid.
+  pure def revokedBy(ppNo: int, c: Checkpoint): bool = ppNo < c.nextNo and not(c.valid.contains(ppNo))
+
+  // Properties of one acceptance or grant, checked against the honest
+  // checkpoints issued so far. Honest checkpoints are issued in order, so all
+  // those at or below an honest receiver checkpoint already exist.
+  pure def entryProblems(e: Entry, h: Set[Checkpoint], isGrant: bool): Set[str] =
+    // S4, S5, R-VER-4: not revoked by the honest sequence at or before the
+    // receiver's checkpoint; S4, R-MEM-2, R-MEM-12: valid under the receiver's
+    // own checkpoint, honest or not, and of the message's own generation.
+    (if ((not(h.contains(e.cp)) or h.forall(c => not(c.gen == e.cp.gen and c.no <= e.cp.no and revokedBy(e.ppNo, c))))
+         and e.msgGen == e.cp.gen and e.ppNo < e.cp.nextNo and e.cp.valid.contains(e.ppNo))
+       Set() else Set("revokedIsRejected"))
+    // S8, R-MEM-9: a halted node accepts no data and grants no key.
+    .union(if (e.halted) Set("haltedIsInert") else Set())
+    // R-CH-13: keys are granted only to passports with the read right, as
+    // the granting node saw them, so an equivocated passport cannot mask it.
+    .union(if (isGrant and not(canRead(e.rights))) Set("grantsNeedRead") else Set())
+    // R-CH-13: data is accepted only from a passport with the publish right,
+    // except on channel 0.
+    .union(if (not(isGrant) and not(e.ch0) and not(canPublish(e.rights))) Set("dataNeedsPublish") else Set())
+
+  action commitWith(n2: str -> Node, r2: Root, p2: Pool, h2: Set[Checkpoint], extra: Set[str], tags: Set[str]): bool = all {
+    nodes' = n2,
+    root' = r2,
+    pool' = p2,
+    history' = h2,
+    broken' = broken.union(extra).union(DEVICES.fold(Set(), (acc, d) => acc.union(stepProblems(nodes.get(d), n2.get(d))))),
+    seen' = seen.union(tags),
+  }
+
+  action commit(n2: str -> Node, r2: Root, p2: Pool, h2: Set[Checkpoint]): bool =
+    commitWith(n2, r2, p2, h2, Set(), Set())
+
+  action setNode(d: str, n: Node, p2: Pool): bool =
+    commit(nodes.set(d, n), root, p2, history)
+
+  // -------------------------------------------------------------- initial state
+  action init = all {
+    nodes' = DEVICES.mapBy(d => initNode),
+    root' = initRoot,
+    pool' = emptyPool,
+    history' = Set(),
+    broken' = Set(),
+    seen' = Set(),
+  }
+
+  // ------------------------------------------------------------- Root actions
+  // Mutant "window_past_set_bit": the start moves one past the lowest valid
+  // number, so the bit of a valid passport falls out of the window.
+  def rootCheckpoint(valid: Set[int], nx: int): Checkpoint =
+    val s0 = windowStart(valid, nx)
+    val s = if (MUTANT == "window_past_set_bit" and s0 < nx) s0 + 1 else s0
+    { gen: root.gen, no: root.cpNo + 1, start: s, valid: valid.filter(k => k >= s), nextNo: nx }
+
+  // Admit a device, or change its rights: the passport and the checkpoint are
+  // issued together (R-MEM-3, R-MEM-4). The window must stay within WINDOW
+  // numbers (R-MEM-14); mutant "unbounded_window" drops that limit.
+  action rootIssue(d: str, rights: int, replaces: Set[int]): bool = all {
+    root.nextNo <= MAX_NO,
+    root.cpNo < MAX_NO,
+    val p = { gen: root.gen, no: root.nextNo, dev: d, rights: rights }
+    val v = root.valid.exclude(replaces).union(Set(root.nextNo))
+    val c = rootCheckpoint(v, root.nextNo + 1)
+    all {
+      c.nextNo - c.start <= WINDOW or MUTANT == "unbounded_window",
+      commit(nodes,
+        { ...root, cpNo: root.cpNo + 1, nextNo: root.nextNo + 1, valid: v,
+          rights: root.rights.put(root.nextNo, rights), revoked: root.revoked.union(replaces) },
+        { ...pool, pp: pool.pp.union(Set(p)), cp: pool.cp.union(Set(c)) },
+        history.union(Set(c))),
+    }
+  }
+
+  action rootAdmit = {
+    nondet d = DEVICES.oneOf()
+    nondet r = RIGHTS.oneOf()
+    rootIssue(d, r, Set())
+  }
+
+  // Change of rights: a new passport for the same device, the old one revoked.
+  // With the same rights this is the reissue that moves the window (R-MEM-14).
+  action rootChangeRights = all {
+    root.valid != Set(),
+    nondet k = root.valid.oneOf()
+    val old = pool.pp.filter(p => p.gen == root.gen and p.no == k)
+    all {
+      old != Set(),
+      nondet p = old.oneOf()
+      nondet r = RIGHTS.oneOf()
+      rootIssue(p.dev, r, Set(k)),
+    }
+  }
+
+  // Revocation: a new checkpoint with the bit cleared (R-MEM-4).
+  action rootRevoke = all {
+    root.valid != Set(),
+    root.cpNo < MAX_NO,
+    nondet k = root.valid.oneOf()
+    // Mutant "keep_bit": the Root issues the revoking checkpoint with the bit
+    // still set.
+    val v = if (MUTANT == "keep_bit") root.valid else root.valid.exclude(Set(k))
+    val c = rootCheckpoint(v, root.nextNo)
+    commit(nodes, { ...root, cpNo: root.cpNo + 1, valid: v, revoked: root.revoked.union(Set(k)) },
+      { ...pool, cp: pool.cp.union(Set(c)) }, history.union(Set(c))),
+  }
+
+  // Equivocation: a second, different checkpoint with an already used number.
+  // It is not part of the honest history.
+  action rootEquivocateCp = {
+    nondet c = pool.cp.filter(c => c.gen == root.gen and c.no >= 1).oneOf()
+    nondet k = 1.to(MAX_NO).oneOf()
+    val v = if (c.valid.contains(k)) c.valid.exclude(Set(k)) else c.valid.union(Set(k))
+    val c2 = { ...c, valid: v.filter(x => c.start <= x and x < c.nextNo) }
+    all {
+      c2 != c,
+      commit(nodes, root, { ...pool, cp: pool.cp.union(Set(c2)) }, history),
+    }
+  }
+
+  // Equivocation: a second passport with an already used number.
+  action rootEquivocatePp = {
+    nondet p = pool.pp.filter(p => p.gen == root.gen).oneOf()
+    val p2 = { ...p, rights: 3 - p.rights }
+    commit(nodes, root, { ...pool, pp: pool.pp.union(Set(p2)) }, history)
+  }
+
+  // ------------------------------------------------------ Recovery key actions
+  // Root change: the new Root starts its counters over (R-MEM-12) and reissues
+  // passports with rootAdmit.
+  action recoveryChange = all {
+    root.gen < MAX_GEN,
+    val rc = { gen: root.gen + 1, key: 0 }
+    commit(nodes, { ...initRoot, gen: root.gen + 1 },
+      { ...pool, rc: pool.rc.union(Set(rc)) }, history),
+  }
+
+  // Two root change records with one generation (L6).
+  action recoveryEquivocate = {
+    nondet rc = pool.rc.oneOf()
+    val rc2 = { ...rc, key: 1 - rc.key }
+    commit(nodes, root, { ...pool, rc: pool.rc.union(Set(rc2)) }, history)
+  }
+
+  // ---------------------------------------------------------- Adversary actions
+  // Anyone holding two conflicting records can assemble a halt proof.
+  action adversaryProof = any {
+    nondet a = pool.cp.oneOf()
+    nondet b = pool.cp.oneOf()
+    all {
+      cpConflict(a, b),
+      setNodeless(pool.hp.union(Set({ kind: "cp", gen: a.gen, no: a.no }))),
+    },
+    nondet a = pool.pp.oneOf()
+    nondet b = pool.pp.oneOf()
+    all {
+      ppConflict(a, b),
+      setNodeless(pool.hp.union(Set({ kind: "pp", gen: a.gen, no: a.no }))),
+    },
+    nondet a = pool.rc.oneOf()
+    nondet b = pool.rc.oneOf()
+    all {
+      a.gen == b.gen and a != b,
+      setNodeless(pool.hp.union(Set({ kind: "rc", gen: a.gen, no: 0 }))),
+    },
+  }
+
+  action setNodeless(hp: Set[HaltProof]): bool =
+    commit(nodes, root, { ...pool, hp: hp }, history)
+
+  // ------------------------------------------------------------- Node actions
+  pure def halt(n: Node): Node = { ...n, halted: true }
+
+  // Receive a checkpoint (R-MEM-5, R-MEM-8, R-MEM-9, R-MEM-12).
+  action nodeRecvCp(d: str, c: Checkpoint): bool = {
+    val n0 = nodes.get(d)
+    val acceptOld = MUTANT == "accept_old_gen" and c.gen < n0.gen
+    val n = if (TRACK_RECV and ((c.gen == n0.gen and verifies(n0, c.gen)) or acceptOld)) { ...n0, recvCp: n0.recvCp.union(Set(c)) } else n0
+    if (n.forever or (n.halted and MUTANT != "halted_accepts"))
+      setNode(d, n, pool)
+    else if ((c.gen != n.gen or not(verifies(n, c.gen))) and not(acceptOld))
+      setNode(d, n, pool)
+    else if (cpConflict(c, n.cp) and MUTANT != "no_halt")
+      setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "cp", gen: c.gen, no: c.no })) })
+    // Mutant "need_next": only the checkpoint right after the current one is
+    // taken, so the state depends on the order of arrival (S7).
+    else if ((c.no > n.cp.no and (MUTANT != "need_next" or c.no == n.cp.no + 1))
+             or acceptOld or (MUTANT == "accept_lower" and c.no < n.cp.no))
+      setNode(d, { ...n, cp: c, gen: c.gen,
+                   pps: if (MUTANT == "no_prune") n.pps else n.pps.filter(p => validUnder(p, c)) }, pool)
+    else
+      setNode(d, n, pool)
+  }
+
+  // Receive a passport (R-MEM-2, R-MEM-3, R-MEM-8).
+  action nodeRecvPp(d: str, p: Passport): bool = {
+    val n0 = nodes.get(d)
+    val n = if (TRACK_RECV and p.gen == n0.gen and verifies(n0, p.gen)) { ...n0, recvPp: n0.recvPp.union(Set(p)) } else n0
+    if (n.halted or n.forever or not(verifies(n, p.gen)))
+      setNode(d, n, pool)
+    else if (n.pps.exists(q => ppConflict(p, q)) and MUTANT != "no_halt")
+      setNode(d, halt(n), { ...pool, hp: pool.hp.union(Set({ kind: "pp", gen: p.gen, no: p.no })) })
+    else if (validUnder(p, n.cp))
+      setNode(d, { ...n, pps: n.pps.union(Set(p)) }, pool)
+    else
+      setNode(d, n, pool)
+  }
+
+  // Receive a root change record (R-MEM-11, R-MEM-13).
+  action nodeRecvRc(d: str, rc: RootChange): bool = {
+    val n0 = nodes.get(d)
+    val n = if (TRACK_RECV and rc.gen >= n0.gen) { ...n0, recvRc: n0.recvRc.union(Set(rc)) } else n0
+    if (n.forever)
+      setNode(d, n, pool)
+    else if (rc.gen == n.gen and n.rc != rc.key and n.rc >= 0 and MUTANT != "rc_no_forever")
+      setNode(d, { ...n, halted: true, forever: true },
+        { ...pool, hp: pool.hp.union(Set({ kind: "rc", gen: rc.gen, no: 0 })) })
+    else if (rc.gen > n.gen or (MUTANT == "rc_no_forever" and rc.gen == n.gen and n.rc != rc.key))
+      setNode(d, { ...n, gen: rc.gen, rc: rc.key, cp: genesis(rc.gen), pps: Set(),
+                   halted: false }, pool)
+    else
+      setNode(d, n, pool)
+  }
+
+  // Receive a halt proof (R-MEM-10; Appendix B, Section B.3, rules 2 and 3).
+  action nodeRecvHp(d: str, h: HaltProof): bool = {
+    val n0 = nodes.get(d)
+    val ok = h.kind == "rc" or (h.gen == n0.gen and verifies(n0, h.gen))
+    val n = if (ok) { ...n0, recvHp: n0.recvHp.union(Set(h)) } else n0
+    val sameGen = ok and h.gen == n.gen and (MUTANT != "proof_needs_cp" or h.no >= n.cp.no)
+    if (n.forever)
+      setNode(d, n, pool)
+    else if (h.kind == "rc")
+      setNode(d, { ...n, halted: true, forever: true }, pool)
+    else if (h.kind != "rc" and sameGen)
+      setNode(d, halt(n), pool)
+    else
+      setNode(d, n, pool)
+  }
+
+  // R-MEM-6, R-MEM-10: a halted node ranks its pair above every checkpoint of
+  // its generation, so any message from a node of that generation is answered
+  // with the halt proof. This is the only way a proof dropped as "future
+  // generation" comes back; the liveness property below depends on it. A
+  // permanently halted node ranks above every generation and answers every
+  // sender with the proof of the two root change records (R-MEM-13).
+  def haltedPeer(d: str, g: int): bool =
+    DEVICES.exists(e => e != d and nodes.get(e).halted and not(nodes.get(e).forever) and nodes.get(e).gen == g)
+
+  def foreverPeer(d: str): bool = DEVICES.exists(e => e != d and nodes.get(e).forever)
+
+  action nodeHearsHalted(d: str): bool = {
+    val n = nodes.get(d)
+    val proofs = pool.hp.filter(h =>
+      (h.kind != "rc" and h.gen == n.gen and haltedPeer(d, n.gen)) or (h.kind == "rc" and foreverPeer(d)))
+    all {
+      MUTANT != "halted_silent",
+      proofs != Set(),
+      nondet h = proofs.oneOf()
+      nodeRecvHp(d, h),
+    }
+  }
+
+  // Reboot: everything in R-CORE-5 survives; the passport cache is volatile.
+  action nodeReboot(d: str): bool = {
+    val n = nodes.get(d)
+    val n2 = if (MUTANT == "reboot_rollback") { ...n, cp: genesis(n.gen), pps: Set() }
+             else { ...n, pps: Set() }
+    setNode(d, n2, pool)
+  }
+
+  // A device sends data under any passport it was ever issued in its
+  // generation, including a revoked one: a revoked device may still consider
+  // itself a member (R-MEM-16). A send under a passport the Root already
+  // revoked is tagged for the witness.
+  action nodeSend(d: str): bool = {
+    val n = nodes.get(d)
+    val mine = pool.pp.filter(p => p.dev == d and p.gen == n.gen)
+    all {
+      not(n.halted),
+      mine != Set(),
+      nondet p = mine.oneOf()
+      nondet ch0 = Set(false, true).oneOf()
+      commitWith(nodes, root, { ...pool, data: pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen, cpNo: n.cp.no, ch0: ch0 })) },
+                 history, Set(), if (root.gen == n.gen and root.revoked.contains(p.no)) Set("revokedSend") else Set()),
+    }
+  }
+
+  // Accept data (R-MEM-6, R-MEM-12, R-CH-13, S4, S5). Off channel 0 the
+  // passport needs the publish right; mutant "accept_no_publish" skips that
+  // check. A receiver with an older pair
+  // drops the message and requests the checkpoint; nothing changes in its
+  // state. A message of an older generation names a passport of a replaced
+  // Root and is dropped too: passport numbers start over in every generation.
+  action nodeAcceptData(d: str, m: Data): bool = {
+    val n = nodes.get(d)
+    val known = n.pps.filter(p => p.dev == m.src and p.no == m.ppNo and validUnder(p, n.cp))
+    all {
+      not(n.halted) or MUTANT == "halted_accepts",
+      m.src != d,
+      m.gen == n.gen or MUTANT == "accept_old_data_gen",
+      not(lexGt(m.gen, m.cpNo, n.gen, n.cp.no)),
+      known != Set(),
+      nondet p = known.oneOf()
+      val e = { node: d, peer: m.src, ppNo: m.ppNo, msgGen: m.gen, rights: p.rights, ch0: m.ch0, cp: n.cp, halted: n.halted }
+      all {
+        m.ch0 or canPublish(p.rights) or MUTANT == "accept_no_publish",
+        commitWith(nodes, root, pool, history, entryProblems(e, history, false), Set("accept")),
+      },
+    }
+  }
+
+  // Grant a channel key to a reader with the read right (R-CH-13, R-MEM-9).
+  action nodeGrant(d: str): bool = {
+    val n = nodes.get(d)
+    all {
+      not(n.halted) or MUTANT == "halted_accepts",
+      nondet p = n.pps.oneOf()
+      all {
+        p.dev != d,
+        canRead(p.rights) or MUTANT == "grant_no_right",
+        validUnder(p, n.cp),
+        val e = { node: d, peer: p.dev, ppNo: p.no, msgGen: p.gen, rights: p.rights, ch0: false, cp: n.cp, halted: n.halted }
+        commitWith(nodes, root, pool, history, entryProblems(e, history, true), Set("grant")),
+      },
+    }
+  }
+
+  // ---------------------------------------------------------------------- step
+  action step = any {
+    rootAdmit,
+    rootChangeRights,
+    rootRevoke,
+    rootEquivocateCp,
+    rootEquivocatePp,
+    recoveryChange,
+    recoveryEquivocate,
+    adversaryProof,
+    nondet d = DEVICES.oneOf()
+    any {
+      all { pool.cp != Set(), nondet c = pool.cp.oneOf() nodeRecvCp(d, c) },
+      all { pool.pp != Set(), nondet p = pool.pp.oneOf() nodeRecvPp(d, p) },
+      all { pool.rc != Set(), nondet r = pool.rc.oneOf() nodeRecvRc(d, r) },
+      all { pool.hp != Set(), nondet h = pool.hp.oneOf() nodeRecvHp(d, h) },
+      all { pool.data != Set(), nondet m = pool.data.oneOf() nodeAcceptData(d, m) },
+      nodeHearsHalted(d),
+      nodeReboot(d),
+      nodeSend(d),
+      all { nodes.get(d).pps != Set(), nodeGrant(d) },
+    },
+  }
+
+  // ---------------------------------------------------------------- invariants
+
+  // Step properties (see stepProblems and entryProblems).
+  val noRollback = not(broken.contains("noRollback"))
+  val haltIsSticky = not(broken.contains("haltIsSticky"))
+  val haltedIsInert = not(broken.contains("haltedIsInert"))
+
+  // S9, R-MEM-12: a node holds only records of its current generation, and the
+  // generation never decreases.
+  val currentGeneration = not(broken.contains("currentGeneration")) and DEVICES.forall(d =>
+    val n = nodes.get(d)
+    n.cp.gen == n.gen and n.pps.forall(p => p.gen == n.gen))
+
+  // R-MEM-10: a node that processed a halt proof of its current generation is
+  // halted, whatever checkpoint it is at.
+  val proofIsObeyed = DEVICES.forall(d =>
+    val n = nodes.get(d)
+    n.recvHp.exists(h => h.gen == n.gen or h.kind == "rc") implies n.halted)
+
+  // R-MEM-4: every checkpoint the Root issues has the bit of each passport
+  // the owner revoked or replaced cleared.
+  val rootHonorsRevocation = root.valid.intersect(root.revoked) == Set()
+
+  // S8, R-MEM-7, R-MEM-8: a node that is not halted holds in its cache only
+  // passports valid under its checkpoint, and no two of them conflict.
+  val cacheConsistent = DEVICES.forall(d =>
+    val n = nodes.get(d)
+    n.halted or n.pps.forall(p =>
+      validIn(p, n.cp) and n.pps.forall(q => not(ppConflict(p, q)))))
+
+  // S4, S5, R-VER-4, R-MEM-2, R-MEM-12 (see entryProblems).
+  val revokedIsRejected = not(broken.contains("revokedIsRejected"))
+
+  // R-CH-13 (see entryProblems).
+  val grantsNeedRead = not(broken.contains("grantsNeedRead"))
+  val dataNeedsPublish = not(broken.contains("dataNeedsPublish"))
+
+  // R-MEM-14: every checkpoint the Root issues spans at most WINDOW numbers.
+  val windowBounded = history.forall(c => c.nextNo - c.start <= WINDOW)
+
+  // R-MEM-4, R-MEM-14: the Root's latest checkpoint has the bit of every
+  // passport the Root holds valid, so moving the window never revokes a
+  // member the owner did not revoke.
+  val windowKeepsValid = history.forall(c =>
+    (c.gen == root.gen and c.no == root.cpNo) implies (c.valid == root.valid and c.nextNo == root.nextNo))
+
+  // S7: two nodes that processed the same records are in the same state, with
+  // one exception: a node that saw two conflicting records halted while the
+  // other did not notice, and no halt proof has reached them yet.
+  val convergence = not(TRACK_RECV) or DEVICES.forall(a => DEVICES.forall(b =>
+    val x = nodes.get(a)
+    val y = nodes.get(b)
+    val same = x.recvCp == y.recvCp and x.recvPp == y.recvPp
+      and x.recvRc == y.recvRc and x.recvHp == y.recvHp
+    // A permanent halt is terminal: the rest of the state no longer matters.
+    same implies (
+      x.forever == y.forever and (x.forever or (
+        x.gen == y.gen
+          and (x.halted or y.halted or x.cp == y.cp)
+          and (x.halted == y.halted or x.recvHp.forall(h => h.gen != x.gen)))))))
+
+  // Appendix B, Section B.3, rule 1: a node holds a checkpoint or a passport
+  // of its generation only if the key it installed signed it.
+  val installedKeyOnly = DEVICES.forall(d =>
+    val n = nodes.get(d)
+    n.rc == signer(n.gen) or (n.cp == genesis(n.gen) and n.pps == Set()))
+
+  val safety = noRollback and currentGeneration and installedKeyOnly and haltIsSticky and haltedIsInert
+    and proofIsObeyed and rootHonorsRevocation and cacheConsistent
+    and revokedIsRejected and grantsNeedRead and dataNeedsPublish
+    and windowBounded and windowKeepsValid and convergence
+
+  // ------------------------------------------------------------- liveness
+  // S8, R-MEM-10: while a halted peer of its generation exists, a node
+  // eventually halts too, or leaves that generation; and once a peer is
+  // permanently halted, every node eventually is (R-MEM-13). It assumes only that a
+  // node that keeps talking to a halted peer is eventually answered (weak
+  // fairness of nodeHearsHalted). A node that installed the second root key
+  // of its generation cannot verify a proof built from records of the first
+  // one, so the first property is stated for nodes on the key that signs
+  // their generation's records. A node on the other key is covered by the
+  // second property once a peer halts for good.
+  temporal fairHearing = DEVICES.forall(d =>
+    weakFair(nodeHearsHalted(d), (nodes, root, pool, history, broken, seen)))
+
+  temporal haltReachesPeers = DEVICES.forall(d => 1.to(MAX_GEN).forall(g =>
+    always((nodes.get(d).gen == g and nodes.get(d).rc == signer(g) and haltedPeer(d, g)) implies
+      eventually(nodes.get(d).halted or nodes.get(d).gen != g or not(haltedPeer(d, g))))))
+
+  temporal foreverReachesPeers = DEVICES.forall(d =>
+    always(foreverPeer(d) implies eventually(nodes.get(d).forever)))
+
+  temporal haltPropagates = fairHearing implies (haltReachesPeers and foreverReachesPeers)
+
+  // ------------------------------------------------- non-vacuity witnesses
+  // Each witness is expected to be VIOLATED: the violation shows that the
+  // behaviour is reachable, so the safety checks above are not vacuous.
+  val witnessHalt = DEVICES.forall(d => not(nodes.get(d).halted))
+  val witnessForever = DEVICES.forall(d => not(nodes.get(d).forever))
+  val witnessAccept = not(seen.contains("accept"))
+  val witnessGrant = not(seen.contains("grant"))
+  val witnessRootChange = DEVICES.forall(d => nodes.get(d).gen == 1)
+  val witnessWindowMoves = history.forall(c => c.start == 1)
+  val witnessRevokedSends = not(seen.contains("revokedSend"))
+}

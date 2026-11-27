@@ -1,0 +1,9 @@
+{
+  "name": "cpb-models",
+  "private": true,
+  "description": "Model checking tools for the state machine models",
+  "license": "MPL-2.0",
+  "devDependencies": {
+    "@informalsystems/quint": "0.33.1"
+  }
+}

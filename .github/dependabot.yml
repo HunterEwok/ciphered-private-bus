@@ -21,3 +21,12 @@ updates:
       timezone: "UTC"
     cooldown:
       default-days: 7
+
+  - package-ecosystem: "npm"
+    directory: "/models"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    cooldown:
+      default-days: 7

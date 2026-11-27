@@ -172,10 +172,15 @@ Rules:
    change record with K1 and K2.
 2. A node that receives a valid proof for its bus MUST enter the halted state (R-MEM-8, R-MEM-13),
    whatever checkpoint it is at. It stores the proof and sends it on every link (R-MEM-10). A halted
-   node answers a call and a nonce request with this same message.
-3. A proof for a passport or checkpoint of a generation lower than the current one has no effect: that
-   generation has already been replaced by a root change. For a generation higher than the current one,
-   the node first obtains the root change record, as for any object of a new generation.
+   node answers a call, a nonce request, and every message that carries a pair of its generation with
+   this same message (R-MEM-6). A permanently halted node (a proof of kind 6) answers every message that
+   carries a pair, of any generation, in the same way.
+3. A proof of kind 6 is verified with K1 and K2 and takes effect at any generation (R-MEM-13).
+   A proof for a passport or checkpoint of a generation lower than the current one has no effect: that
+   generation has already been replaced by a root change. A proof of a generation higher than the
+   current one cannot be verified yet and is dropped; the node obtains the root change record as for
+   any object of a new generation, and once it has moved to that generation, its next message to a
+   halted peer brings the proof again (R-MEM-6). The core keeps no proof waiting.
 4. A node constructs a proof itself when it receives a record with a valid signature and the same `head`
    as a record it stores, but with a different `rest`.
 5. A relay verifies the proof, stores one per bus outside the data quota, and delivers it to every
@@ -340,7 +345,9 @@ The `blob` field:
 | 4 | `pad` | bstr | Optional: absent when its length would be zero. Zero bytes. The length of `data` plus `pad` equals a padding bucket and does not exceed 4096: the largest bucket equals the largest data. A publication with a greater length or with a non-zero padding byte is rejected |
 
 Largest publication: about 4.3 KiB. The retention depth of a channel is set by the latest accepted
-publication: when the depth decreases, surplus older publications are deleted immediately. A publication
+publication: when the depth decreases, surplus older publications are deleted immediately. A clearing
+publication that arrives late, in the window, clears the publications up to its number; a publication of
+depth 0 is accepted only as a new one, and neither is retained (R-CH-10). A publication
 under a key the recipient does not hold is dropped without a state change and triggers one key request
 per channel. Whoever sends or forwards a grant to a reader sends the retained publications of that
 channel under that key immediately after it, so what was dropped arrives again.
@@ -449,7 +456,7 @@ integers. The entire header is the associated data.
 | Offset | Length | Field | Notes |
 | --- | --- | --- | --- |
 | 0 | 1 | `kind` | 1 |
-| 1 | 1 | `flags` | Bit 0 direction (0 from the commander, 1 from the target), bit 1 data, bit 2 credit, bit 3 end |
+| 1 | 1 | `flags` | Bit 0 direction (0 from the commander, 1 from the target), bit 1 data, bit 2 credit, bit 3 end. Exactly one of bits 1 to 3 is set |
 | 2 | 16 | `target` | |
 | 18 | 16 | `commander` | |
 | 34 | 4 | `stream_id` | |
@@ -807,8 +814,8 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
 2. The owner's refusal is not an object. The Root simply does not issue a passport and deletes the join
    request. How long to wait is decided by the joiner's application: the core has no clock.
 3. If the root device itself is the acceptor (R-JOIN-9), steps 5 and 6 merge: there is no join request,
-   and the Root shows the confirmation screen at once. The fingerprint is shown here too, but comparing
-   it is optional, because there is no third device between the joiner and the Root.
+   and the Root shows the confirmation screen at once. The fingerprint is shown and compared here too,
+   as in every pairing: one procedure, and the pairing code is never the only barrier.
 4. The bus fingerprint is 20 digits by the same rule as `KeyFingerprint`, but with its own label and the
    raw 32 bytes of `bus` as input: the first 8 bytes of
    `SHA-256("cpb bus fingerprint v1" || 0x00 || bus)`.

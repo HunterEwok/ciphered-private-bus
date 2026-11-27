@@ -108,8 +108,6 @@ def objects(root_sig):
     o["Passport"] = (4, [pp_head, pp_rest, root_sig])
     o["Checkpoint"] = (5, [cp_head, cp_rest, root_sig])
     o["RootChange"] = (6, [rc_head, rc_rest, SIG, SIG_PQ])
-    o["RelayAccess"] = (13, [{1: B(32), 2: SEQ, 3: SEQ, 4: B(16), 5: SEQ},
-                             hpke(relay_access_plain), root_sig])
     # a call may be signed by the root key (R-CALL-4)
     call_body = {1: B(32), 2: B(32), 3: B(16), 4: B(16), 5: B(16), 6: SEQ, 7: SEQ,
                  8: SEQ, 9: hpke(command)}
@@ -124,6 +122,11 @@ common = {
     "KeyRequest": (9, [{1: B(32), 2: B(16), 3: B(16), 4: B(16), 5: SEQ, 6: B(16)}, SIG]),
     "KeyGrant": (16, [{1: B(32), 2: B(16), 3: SEQ, 4: SEQ, 5: SEQ, 6: B(16), 7: B(16),
                        8: SEQ, 9: B(32), 10: B(16)}, B(1168), SIG]),
+    # signed by the root device's device key (R-REL-13)
+    "RelayAccess": (13, [{1: B(32), 2: SEQ, 3: SEQ, 4: B(16), 5: SEQ},
+                         hpke(relay_access_plain), SIG]),
+    "RelayAccess, one external relay": (13, [{1: B(32), 2: SEQ, 3: SEQ, 4: B(16), 5: SEQ},
+                         hpke({**relay_access_plain, 3: [[B(16), B(16)]]}), SIG]),
     "RelayTicket": (10, [{1: P256, 2: SEQ, 3: U53, 4: U53, 5: B(32), 6: 15, 7: B(16), 8: 1},
                          SIG]),
     "Publication": (17, [{1: B(32), 2: B(16), 3: SEQ, 4: U53, 5: SEQ, 6: SEQ,
@@ -225,7 +228,7 @@ def report(name, rule, value, wrapped=None):
 
 
 for name, (t, obj) in {**objects(SIG), **common}.items():
-    report(name, name, obj, msg(t, obj))
+    report(name, name.split(",")[0], obj, msg(t, obj))
 for name, (t, obj) in objects(SIG_PQ).items():
     if name != "RootChange":
         report(name + " (PQ root sig)", name, obj, msg(t, obj))

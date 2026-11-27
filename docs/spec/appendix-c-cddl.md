@@ -69,9 +69,9 @@ headroom shows how much room they have.
 | `Call`, signed by a post-quantum root key | 13263 | 2 | 9 | 3121 |
 | `Passport`, post-quantum root signature | 12670 | 4 | 128 | 3714 |
 | `RootChange` | 8046 | 3 | 4 | 8338 |
-| `RelayAccess`, post-quantum root signature | 13632 | 2 | 5 | 2752 |
 | `Checkpoint` | 6432 | 3 | 128 | 9952 |
 | `RelayAccess` | 5839 | 2 | 5 | 10545 |
+| `RelayAccess`, one external relay | 1393 | 2 | 5 | 14991 |
 | `Call` | 5470 | 2 | 9 | 10914 |
 | `Passport` | 4877 | 4 | 128 | 11507 |
 | `Reply` | 4525 | 1 | 6 | 11859 |

@@ -553,12 +553,22 @@ Formulas:
 | Call | 5470 bytes, 5.3 KiB | 13263 bytes, 13.0 KiB, if the call is signed by the root key | Fits |
 | Publication | about 4.3 KiB | unchanged | Fits |
 | Key grant, sealing key claim, join request | up to 1.6 KiB | unchanged | Fits |
-| Relay access | 5839 bytes, 5.7 KiB | 13632 bytes, 13.3 KiB | Fits |
+| Relay access | 5839 bytes, 5.7 KiB | unchanged (device key) | Fits |
 | Relay ticket, relay hello | up to 879 bytes | unchanged | Fits |
 | Any of the above inside `Relayed` | plus at most 120 bytes | plus at most 120 bytes | Fits |
 
 The most deeply nested object is the passport: triple, `rest`, permit list, permit. That is depth 4.
 The longest arrays are the 128 permits of a passport and the 128 relays of a checkpoint.
+
+**Cost of a relay epoch.** Every revocation starts a relay epoch (R-REL-13). For a bus of 4096 members
+(the default bitmap) with one external relay, the root device performs 4096 X-Wing encapsulations and
+4096 device key signatures, and uploads 4096 bridges of at most 1515 bytes each in `Relayed` form,
+about 5.9 MiB, plus the passports again under the new alias: about 0.8 MiB for passports without
+permits (194 bytes each), up to 20 MiB with 128 permits each. Each further external relay repeats the
+uploads, not the cryptography. Every source also uploads its retained publications and latest grants
+again to each external relay. On a phone this is a matter of seconds. On an ESP32-class device, where
+one encapsulation and one signature take tens of milliseconds, it takes minutes per epoch; such a root
+device suits small buses. The timings are estimates, to be measured at gate G4.
 
 Decisions that writing out the fields required:
 
@@ -628,8 +638,9 @@ register the alias first.
 
 ### Relay Access (`RelayAccess`)
 
-A control-plane object, `t = 13`, issued by the Root to one member for one relay epoch. A triple
-`[header, sealed, sig]`, signed by the root key, label `cpb relay access v1`.
+A control-plane object, `t = 13`, issued by the root device to one member for one relay epoch. A triple
+`[header, sealed, sig]`, signed by the device key of the root device named in the checkpoint, label
+`cpb relay access v1`.
 
 Header:
 
@@ -651,8 +662,8 @@ Header:
 | 3 | `relays` | array of `[bstr(16), bstr(16)]`, 1..128 items | ≤ 4483 | `[RelayId, BusAlias]` of each external relay of the checkpoint, in the order of its `relays` list |
 
 A member accepts a relay access object only of the current root generation, with an epoch greater than
-or equal to the one it holds, and with a valid root signature. Size: at most 5839 bytes (5.7 KiB), and
-13632 bytes (13.3 KiB) with a post-quantum root signature.
+or equal to the one it holds, and with a valid signature of the root device of its checkpoint. Size: at
+most 5839 bytes (5.7 KiB); with one external relay, 1393 bytes.
 
 ### Ticket (`RelayTicket`)
 
@@ -688,8 +699,10 @@ Rules:
    bridges.
 4. On an epoch change the root device, at each external relay that stays in the checkpoint, does three
    things in this order: it uploads the bridges under the old alias; it registers the ticket of the new
-   alias and uploads the Root-signed control-plane objects under it; it sends the closing ticket of the
-   old alias. Sources then upload their retained publications and their latest grants again under the
+   alias and uploads the checkpoint, the latest root change record, and the passports under it; it sends
+   the closing ticket of the old alias. A bridge is the member's relay access object of the new epoch;
+   under the new alias the root device uploads relay access objects only when it issues one during the
+   epoch. Sources then upload their retained publications and their latest grants again under the
    new aliases, with new upload counters.
 5. After a root change, the new Root starts relay epoch 1 of its generation. If it holds the relay state
    of the previous generation, it bridges and closes the old aliases by rule 4. Otherwise members reach

@@ -2,17 +2,17 @@ object                              bytes depth items   room  schema
 Passport                             4877     4   128  11507  ok
 Checkpoint                           6432     3   128   9952  ok
 RootChange                           8046     3     4   8338  ok
-RelayAccess                          5839     2     5  10545  ok
 Call                                 5470     2     9  10914  ok
 SealClaim                            1356     3     4  15028  ok
 JoinRequest                          1596     2     6  14788  ok
 KeyRequest                            187     2     6  16197  ok
 KeyGrant                             1412     2    10  14972  ok
+RelayAccess                          5839     2     5  10545  ok
+RelayAccess, one external relay      1393     2     5  14991  ok
 RelayTicket                           227     3     8  16157  ok
 Publication                          4389     3    10  11995  ok
 Passport (PQ root sig)              12670     4   128   3714  ok
 Checkpoint (PQ root sig)            14225     3   128   2159  ok
-RelayAccess (PQ root sig)           13632     2     5   2752  ok
 Call (PQ root sig)                  13263     2     9   3121  ok
 Hello                                 322     2   128  16062  ok
 Auth                                   70     1     2  16314  ok

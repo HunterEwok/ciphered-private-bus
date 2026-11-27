@@ -77,7 +77,7 @@ not know about them.
 
 | Term | Identifier | Definition | Defined in |
 | --- | --- | --- | --- |
-| Root key | `RootKey` | Signs passports, checkpoints, root-issued relay access objects. Held by the host | R-KEY-1 |
+| Root key | `RootKey` | Signs passports and checkpoints. Held by the host | R-KEY-1 |
 | Device key | `DeviceKey` | Signs everything a node creates. Held by the host | R-KEY-1 |
 | User-presence key | `PresenceKey` | Signs actions that require user confirmation | R-CALL-4 |
 | K1 | `RecoveryKeyClassic` | Classical half of the recovery key (P-256) | Section 2 |
@@ -115,7 +115,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Join request | `JoinRequest` | Acceptor | R-JOIN-4, B.3 |
 | Channel key request | `KeyRequest` | Reader | R-CH-18, B.3 |
 | Halt proof | `HaltProof` | Contains two root-signed records | R-MEM-10, B.3 |
-| Relay access | `RelayAccess` | Root; sealed to one member | R-REL-13, B.10 |
+| Relay access | `RelayAccess` | Device key of the root device; sealed to one member | R-REL-13, B.10 |
 | Relay ticket | `RelayTicket` | Period key | R-REL-15, B.10 |
 | Closing ticket | field `closed` | The last ticket of a bus alias | R-REL-19, B.10 |
 | Bridge | `Bridge` (documentation only) | A relay access object of the next epoch kept under a closed alias | R-REL-19, B.10 |

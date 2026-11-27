@@ -27,10 +27,13 @@
 //   it accepts the next one (R-CH-7 with no unprocessed publications left).
 // - Data, blobs, padding, and channel 0 are not modelled; a publication is
 //   either data or the clearing publication without data.
-// - Key requests (R-CH-18), the source's own retained publications, and the
-//   holder's resend on hello (R-CH-11) only speed up delivery; in the pool
-//   every grant and publication is always available, so they add no
-//   behaviour to the safety model.
+// - The answer to a key request (R-CH-18) is the grant action: it carries
+//   the current key, goes only to a current reader with the read right, and
+//   never while the key is marked for rotation. The request itself, the
+//   source's own retained publications, and the holder's resend on hello
+//   (R-CH-11) only speed up delivery; in the pool every grant and
+//   publication is always available, so they add no behaviour to the safety
+//   model.
 module channels {
   // ---------------------------------------------------------------- parameters
   const DEVICES: Set[str]   // possible readers (the source is not one of them)

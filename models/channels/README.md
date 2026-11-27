@@ -82,6 +82,55 @@ grant a new key before publishing under it; with that rule added, the model show
 rebooting between the new key and its grants skipped them, so the source persists the readers still
 to be granted the key (R-CH-5, R-CORE-5).
 
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction.
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-CH-5 | a new key before the next publication when a reader is no longer valid or was removed | `rotateOnRemove`; probe `no_rotate_on_remove` |
+| R-CH-5 | when the host signals "rotate key epoch" | guard: `sourceEpoch` sets the mark, and `sourcePublishWith` requires it cleared |
+| R-CH-5 | when the key did not survive a reboot | guard: `sourcePublishWith` requires a held key |
+| R-CH-5 | and grant it before the next publication | `grantBeforePublish`; probe `publish_before_grant`, scenario `grantBeforePublishTest` |
+| R-CH-5 | a removed reader does not receive the new key | `grantsToReaders`; probe `grant_removed` |
+| R-CH-5 | the mark is set in the same event as the leave and persisted | `rotateOnRemove`; probes `no_rotate_on_remove`, `mark_not_persisted` |
+| R-CH-5 | while the mark is set, the marked key is granted to no one | `noMarkedGrant`; probe `grant_marked` |
+| R-CH-5 | the readers still to be granted the new key are persisted | `grantBeforePublish`; probe `grant_list_not_persisted` |
+| R-CH-6 | the source grants the current key to a new reader | guard: `sourceGrantTo` admits every valid reader with the read right, a joined one included |
+| R-CH-6 | the source may rotate the key first | `sourceRotate` is allowed at any time |
+| R-CH-7 | a reader erases the previous key once it accepts the next one | abstraction: processing is instantaneous, the reader holds one key (header) |
+| R-CH-7 | a compromised reader discloses only publications under the keys it still holds | abstraction: no compromise in this model; the key a reader holds is `kid` (Tamarin) |
+| R-CH-8 | the generation increases with every new key, strictly over the device key's life | `uniqueKeys`; probe `gen_not_persisted` |
+| R-CH-8 | the publication number increases strictly and is not reset by a new key | `uniqueNumbers`; probe `no_block_skip` |
+| R-CH-8 | the new value is persisted before sending; numbers may be reserved in blocks | guard in `sourcePublishWith` and `sourceReboot`; probe `no_block_skip` |
+| R-CH-9 | stores the highest generation, highest number, and window floor | `Reader` fields `hiGen`, `hiNo`, `floor`, kept by `readerReboot`; probe `high_not_persisted` |
+| R-CH-9 | a grant only with a generation not less than its own; at equal generation the commitment matches | guard in `readerGrant` (`kid` stands for the commitment); `freshness`; probe `accept_old_grant` |
+| R-CH-9 | a publication only under a key it holds | `acceptUnderHeldKey`; probe `accept_without_key` |
+| R-CH-9 | only new, or in the window if not held | `freshness`, `retention`; probe `refill_moves_high` |
+| R-CH-9 | the floor starts at 1 and only rises, past what trim evicts or a clear removes | `windowFloor`; probe `floor_stays`, scenario `floorAfterEvictionTest` |
+| R-CH-9 | a reboot does not move the floor | `windowFloor`; scenario `floorAfterEvictionTest` |
+| R-CH-9 | at depth 0 no window; a publication of depth 0 only as a new one | `retention`; probe `late_clear_kept` |
+| R-CH-9 | values change only after full verification and decryption | abstraction: signatures and the key commitment are perfect (header) |
+| R-CH-9 | a publication under a key not held is dropped and changes no state | guard in `readerPub`; `acceptUnderHeldKey` |
+| R-CH-9 | it triggers a key request; grants are followed by the retained publications | abstraction: every grant and publication is always in the pool (header) |
+| R-CH-9 | a channel record is not evicted while the key is held | abstraction: one channel, never evicted |
+| R-CH-10 | a clearing publication clears the channel | `retention`; probe `empty_no_clear`, scenario `clearTest` |
+| R-CH-10 | a late clearing publication clears up to its number and moves the floor above it | `retention`, `windowFloor`; probe `late_clear_kept`, scenario `lateClearTest` |
+| R-CH-10 | a clearing publication and one of depth 0 are never retained | `retention`; probe `late_clear_kept` |
+| R-CH-10 | the latest depth governs; a lower depth deletes the excess at once | `retention`; probe `no_trim`, scenario `shrinkTest` |
+| R-CH-11 | the recipient retains the N latest publications in number order | `retention`; probe `no_trim` |
+| R-CH-11 | a holder sends the latest grant and the retained publications after hello | abstraction: the pool (header); the relay's side is the relay model's |
+| R-CH-11 | the source starts with an empty window after its reboot | abstraction: the source's own retained publications are not modelled (header) |
+| R-CH-12 | depth 0: delivered and not retained | `retention` |
+| R-CH-13 | accept only from a valid member with the publish right | abstraction: one source, which is valid; nobody can forge (header) |
+| R-CH-13 | grant only to a valid member with the read right | `grantsToReaders`; probes `grant_removed`, `grant_no_read` |
+| R-CH-13 | a recipient without the read right rejects the grant | `noReadNoKey`; probe `grant_no_read` |
+| R-CH-18 | the source answers a key request with a grant of the current key, if the requester is still a reader | the answer is the grant action `sourceGrantTo`, which carries only the current key and has the guards of every grant: `grantsToReaders`, `noMarkedGrant`; probes `grant_removed`, `grant_marked`; scenario `keyRequestTest`. The request itself and its 16 bytes are abstracted: in the pool every grant is always available (header) |
+| R-CORE-5 | the key generation, publication number, rotation mark, and readers still to be granted survive a reboot | probes `gen_not_persisted`, `no_block_skip`, `mark_not_persisted`, `grant_list_not_persisted` |
+| R-CORE-5 | the held key, highest generation and number, floor, and depth survive a reboot | probe `high_not_persisted`; `readerReboot`; scenario `refillAfterRebootTest` |
+| R-REL-11 | every property holds when the relay behaves arbitrarily | abstraction: the pool delivers any grant or publication to anyone, any number of times, in any order (header) |
+
 ## Inductive invariant
 
 [`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`. Apalache proves the same three

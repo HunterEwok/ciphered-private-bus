@@ -104,6 +104,26 @@ module scenarios {
       .then(sourcePublishWith(1, false))
       .fail()
 
+  // R-CH-18: a key request is answered with a grant of the current key to a
+  // current reader; a device that left the readers gets none, and while the
+  // key is marked for rotation nobody gets one until the new key.
+  run keyRequestTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
+      .then(envRemoveDevice("b"))
+      .then(sourceGrantTo("a"))
+      .fail()
+
+  run keyRequestRemovedTest =
+    init
+      .then(sourceRotate)
+      .then(envRemoveDevice("b"))
+      .then(sourceRotate)
+      .then(sourceGrantTo("b"))
+      .fail()
+
   // After a reader leaves, the source cannot publish under the old key, even
   // after a reboot that keeps the key (R-CH-5, R-CORE-5).
   run rotateAfterRemoveTest =

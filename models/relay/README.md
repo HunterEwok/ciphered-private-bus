@@ -94,6 +94,62 @@ is forwarded, a key request is answered, a revocation purges data, the relay is 
 checkpoint, also by a checkpoint of a new root generation, the join buffer overflows, and a ticket of a
 new root generation is accepted.
 
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction. "Header" points to the abstractions
+listed at the top of [`relay.qnt`](relay.qnt).
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-REL-1 | a relay accepts a device connection after a hello | guard: `connect`; the hello itself is the Tamarin model's |
+| R-REL-1 | before the hello, and when generations differ, the sides exchange control-plane objects; the relay serves them to a passport of any generation | abstraction: control-plane objects other than the checkpoint, the root change record and the ticket are not modelled (header) |
+| R-REL-2 | the relay verifies the Root signature on passports and checkpoints and the source signature on publications | `onlyVerified`; probe `no_verify`. Checkpoints come only from the Root's history (`cps`), so none is forged |
+| R-REL-2 | it stores and forwards nothing unverified | `onlyVerified` (a forwarded object is checked when sent); probe `no_verify` |
+| R-REL-3 | publications are retained per (source, channel) by the depth in the header | `retentionHolds`; probe `retain_all` |
+| R-REL-3 | they are served on connection in publication number order | abstraction: the order of what is served is a delivery property, checked by the simulator (header) |
+| R-REL-3 | the latest grant per (source, channel, reader) is kept against the source's quota, with or without publications | `oneGrantOneRequest`, `quotasHold` (a grant is paid by its source); probe `over_quota` |
+| R-REL-3 | the grant is served before the publications | abstraction: delivery order (header) |
+| R-REL-3 | a grant of a generation not less than the held one replaces it | `latestGrant`; probe `grant_downgrade`; scenario `sameGenGrantTest` |
+| R-REL-3 | at equal generation it carries the same key and may carry a request's nonce | the nonce: guard in `recvGrant`, scenario `sameGenGrantTest`. The key: abstraction, a grant carries no key here; one key per generation is `uniqueKeys` of the channels model |
+| R-REL-3 | a key request is deleted once a grant with its nonce is forwarded to the reader, or a new request arrives | `recvGrant`, `connect` and `recvReq`; `oneGrantOneRequest`; probe `two_requests`; scenario `sameGenGrantTest`; witness `witnessRequestAnswered` |
+| R-REL-4 | memory is divided into quotas per bus and per source | `quotasHold`; probe `over_quota` |
+| R-REL-4 | a source that exhausted its quota evicts only its own publications | `evictsOnlyOwn`; probe `evict_other`, scenarios `ownLimitTest`, `evictOtherViolatesSafetyTest` |
+| R-REL-4 | the Root signs the limits in the ticket | abstraction: the ticket is its pair (gen, no); its limits are the constants `BUS_BYTES` and `SOURCE_BYTES` (header) |
+| R-REL-5 | a publication is served only to a device with a grant of its channel, and to the source | `servedOnlyGranted`; probe `serve_ungranted` |
+| R-REL-6 | what is stored for a device revoked under the relay's checkpoint is deleted | `revokedPurged`; probe `keep_revoked`; scenario `revocationPurgesTest` |
+| R-REL-6 | nothing more is accepted for or from it | `revokedPurged` (nothing is sent to it either); probe `accept_revoked` |
+| R-REL-7 | the relay keeps the latest checkpoint it knows | `checkpointForward`, `checkpointTaken`; probes `cp_rollback`, `cp_number_only`, `old_gen_cp`; scenario `newGenUnlistTest` |
+| R-REL-7 | and the latest root change record | guard: `learnRootChange` only raises `rootGen` |
+| R-REL-7 | passports and sealing key claims are stored and served on request | abstraction: control-plane objects outside the quota are not modelled (header) |
+| R-REL-8 | calls, replies and stream chunks are forwarded to connected devices and not stored | `nothingTransient`; probe `store_call` |
+| R-REL-11 | every property S1–S14 holds with an arbitrary relay | abstraction: checked in the other models, whose pool delivers anything (header); this model checks the honest relay |
+| R-MEM-12 | numbers of checkpoints and tickets start over for the Root of a new generation | `cpAt`, `checkpointForward`, `checkpointTaken`; probe `cp_number_only`; scenario `newGenUnlistTest` |
+| R-CH-12 | a publication of depth 0 is delivered and not retained | `nothingTransient`; probe `store_depth0`; witness `witnessForwarded0` |
+| R-CH-18 | a key request is kept one per (reader, channel) and charged to the reader | `oneGrantOneRequest`, `quotasHold` (`payer`); probe `two_requests` |
+| R-JOIN-8 | join requests are kept in a separate buffer with its own quota | the list `joins`, outside `bytes`; `joinsBounded` |
+| R-JOIN-8 | the number is bounded; on overflow the oldest is evicted | `joinsBounded`; probes `join_unbounded`, `join_drop_new`; scenario `joinOverflowTest` |
+| R-JOIN-8 | the relay makes no decisions about requests | `recvJoin` reads no content of a request |
+| B.10 ticket rule 1 | a ticket is valid while the Root of the current generation signed it and the checkpoint lists the relay | guard in `learnTicket` (`served`, generation of the latest root change record); `ticketOfCurrentRoot`; probe `old_ticket` |
+| B.10 ticket rule 2 | a relay keeps the ticket with the greatest pair (gen, no) and never accepts a smaller or equal one | `ticketOfCurrentRoot`; probe `ticket_rollback` |
+| B.10 ticket rule 3 | after a root change the relay serves under the previous limits until a ticket or a checkpoint of the new generation | guard: `learnRootChange` changes neither `served` nor the ticket; `checkpointTaken`; witness `witnessNewGenTicket` |
+| B.10 ticket rule 3 | after a root change it accepts no ticket of the old generation | `ticketOfCurrentRoot`; probe `old_ticket` |
+| B.10 ticket rule 4 | a valid checkpoint without the relay empties it | `unlistedEmpty`; probe `keep_unserved`; witnesses `witnessUnlisted`, `witnessUnlistedNewGen` |
+| B.10 accounting | whoever signed a stored object pays for it | `quotasHold` (`bytesMatch` with `payer`: a request is paid by its reader) |
+| B.10 accounting | control-plane objects are stored outside `bus_bytes` | abstraction: not modelled (header) |
+| B.10 accounting | calls, replies, refusals and stream chunks are not stored | `nothingTransient`; probe `store_call` |
+| B.10 eviction rule 1 | a source over its limit loses its own publications, the oldest of the same channel first, then by arrival | `evictsOnlyOwn`; probe `evict_other`. The order within the source's own publications is the definition of `evictOwn`; no property depends on it |
+| B.10 eviction rule 2 | grants are never evicted for publications | `grantsKept`; probe `evict_grant` |
+| B.10 eviction rule 2 | a grant that does not fit beside the source's grants is rejected | `quotasHold`; probe `over_quota` |
+| B.10 eviction rule 3 | an object larger than `source_bytes` is rejected | `quotasHold`; probe `over_quota` |
+| B.10 eviction rule 4 | on a full bus the source occupying most loses its publications, the smaller identifier on a tie, else the next above the average with publications, else the new object is rejected | `fairShare`, `quotasHold`; probe `unfair`; scenario `fairShareTest`; witnesses `witnessBusEvicted`, `witnessNoVictim`. The tie rule is the definition of `most` |
+| B.10 eviction rule 5 | arrival order is a local counter | the counter `arr` |
+| B.10 fair share | a source within its fair share never loses data because of other sources | `fairShare`; probe `unfair`; scenario `fairShareTest` |
+| B.10 refusal | a refusal is a hint with a code | abstraction: the model records only that an object was refused, not the code |
+
+R-REL-9 (adapter test), R-REL-10 (one relay, many buses) and R-REL-12 (several relays, simulator)
+are outside this model.
+
 ## Inductive invariant
 
 [`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`; Apalache proves the same three

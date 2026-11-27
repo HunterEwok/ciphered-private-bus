@@ -21,24 +21,26 @@ reveal device keys. The header of `pairing.spthy` lists every abstraction.
 | `acceptor_agreement` | R-JOIN-1 | the acceptor confirms only a run the joiner confirmed with the same key |
 | `bus_authenticity` | R-JOIN-2 | the joiner takes bus parameters only from the acceptor that showed the code |
 | `device_binding` | R-JOIN-4 | the acceptor takes an honest device's key only with a signature made in this run, even if the code leaked |
-| `admission_via_request` | S4, R-JOIN-5..7 | a passport issued through a join request goes only to a device that paired for this bus, with the presence key and name it signed, even with a compromised acceptor and a leaked code |
-| `admission_direct` | R-JOIN-9 | the same when the Root pairs directly, unless the code leaked |
+| `admission_via_request` | S4, R-JOIN-5..7 | a passport issued through a join request goes only to a device that paired for this bus, and the Root admits it with the presence key and name it signed, even with a compromised acceptor and a leaked code; the passport carries the key and presence key, not the name |
+| `admission_direct` | R-JOIN-9 | the same when the Root pairs directly, also with a leaked code: the owner compares the fingerprint here too |
 
 Probes, each a deliberate defect selected with `-D`, each expected to falsify its lemma (R-VER-2):
 
 | Probe | Defect | Lemma |
 | --- | --- | --- |
 | `PROBE_NO_FINGERPRINT` | the Root admits without the fingerprint comparison | `admission_via_request` |
+| `PROBE_DIRECT_NO_FINGERPRINT` | the Root pairing directly admits without the fingerprint comparison | `admission_direct` |
 | `PROBE_NO_TRANSCRIPT` | the joiner's signature omits `pairing_hash` | `device_binding` |
 | `PROBE_SIG_KEY_ONLY` | the joiner's signature covers only the device key | `admission_via_request` |
 | `PROBE_NO_CONFIRM` | the acceptor skips the joiner's confirmation | `acceptor_agreement` |
 
 The attack that `PROBE_NO_TRANSCRIPT` must find relays a signature between two complete CPace runs with
-the adversary in the middle. The probe adds restrictions to one bus, one code, one device, one joiner run
-and one acceptor run, which is all the attack needs; a restriction only removes traces, so the trace found
-is also a trace of the unrestricted model.
+the adversary in the middle; the attack on `PROBE_DIRECT_NO_FINGERPRINT` runs CPace with the Root on a
+leaked code. Both probes add restrictions to one bus, one code, one device, one joiner run and one
+acceptor run, which is all either attack needs; a restriction only removes traces, so the trace found is
+also a trace of the unrestricted model.
 
-[`checks.json`](checks.json) lists the probes and what CI runs: three quick lemmas and every probe.
+[`checks.json`](checks.json) lists the probes and what CI runs: every lemma and every probe.
 
 Tamarin warns that some variables of `Acceptor_Request`, `Root_Admit` and `Root_AdmitDirect` are not
 derivable from their premises. This is intended: signature checks are written as pattern matches on
@@ -47,7 +49,7 @@ derivable from their premises. This is intended: signature checks are written as
 ## Running
 
 ```sh
-proofs/run-tamarin.sh -m pairing -w <folder> -c          # CI subset
+proofs/run-tamarin.sh -m pairing -w <folder> -c          # what CI runs
 proofs/run-tamarin.sh -m pairing -w <folder> -p          # every lemma and every probe
 ```
 

@@ -50,6 +50,8 @@
  * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
  * to falsify the lemma named:
  *   PROBE_NO_FINGERPRINT  the Root admits without the comparison  -> admission_via_request
+ *   PROBE_DIRECT_NO_FINGERPRINT  the Root pairing directly admits without
+ *                         the comparison                          -> admission_direct
  *   PROBE_NO_TRANSCRIPT   the joiner's signature omits pairing_hash -> device_binding
  *   PROBE_SIG_KEY_ONLY    the joiner's signature covers only the key -> admission_via_request
  *   PROBE_NO_CONFIRM      the acceptor skips the joiner's confirmation -> acceptor_agreement
@@ -78,11 +80,13 @@ restriction Eq:
 restriction Neq:
   "All x y #i. Neq(x, y) @ i ==> not(x = y)"
 
-#ifdef PROBE_NO_TRANSCRIPT
-// The relay attack on this probe needs two complete CPace runs with the
-// adversary in the middle, and the search does not reach it in hours. These
-// restrictions keep one bus, one code, one device, one joiner run and one
-// acceptor run, which is all the attack needs. A restriction only removes
+#ifdef PROBE_NO_TRANSCRIPT | PROBE_DIRECT_NO_FINGERPRINT
+// The relay attack on PROBE_NO_TRANSCRIPT needs two complete CPace runs with
+// the adversary in the middle, and the search does not reach it in hours;
+// the attack on PROBE_DIRECT_NO_FINGERPRINT, one CPace run with a leaked
+// code, does not end in 3 GB without them. These restrictions keep one bus,
+// one code, one device, one joiner run and one acceptor run, which is all
+// either attack needs. A restriction only removes
 // traces, so a trace found here is a trace of the unrestricted model; the
 // model itself, where device_binding is proven, has no such restriction.
 restriction OneBus:
@@ -261,7 +265,7 @@ rule Root_Admit:
     [ !Bus(bus, root, k1, k2), !RootSeal(bus, rs), !AccKey(bus, A, pk(la)),
       In(<hdr, body, sign(<'cpb join request v1', hdr, body>, la)>) ]
   --[ RootIssued(bus, dk, pres, $name), RootIssuedViaRequest(bus, A, dk, pres, $name) ]->
-    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+    [ Out(sign(<'cpb passport v1', bus, dk, pres>, root)) ]
 #else
 rule Root_Admit:
     let dk   = pk(xd)
@@ -274,11 +278,12 @@ rule Root_Admit:
       !Screen(J, dk),
       In(<hdr, body, sign(<'cpb join request v1', hdr, body>, la)>) ]
   --[ RootIssued(bus, dk, pres, $name), RootIssuedViaRequest(bus, A, dk, pres, $name) ]->
-    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+    [ Out(sign(<'cpb passport v1', bus, dk, pres>, root)) ]
 #endif
 
-// The Root as the acceptor (R-JOIN-9): no join request; comparing the
-// fingerprint is optional (B.11, Rules, item 3), so the model does not require it.
+// The Root as the acceptor (R-JOIN-9): no join request; the owner compares
+// the fingerprint here too (Appendix B, Section B.11, Rules, item 3).
+#ifdef PROBE_DIRECT_NO_FINGERPRINT
 rule Root_AdmitDirect:
     let ksn  = h(<'cpb pair seal n v1', isk, ph>)
         dk   = pk(xd)
@@ -288,7 +293,20 @@ rule Root_AdmitDirect:
     [ A2('Root', bus, ~pw, ph, isk), !Bus(bus, root, k1, k2),
       In(<'PairSealed', senc(<'PairDevice', dk, pres, $name, sig, ph>, ksn)>) ]
   --[ RootIssued(bus, dk, pres, $name), RootIssuedDirect(bus, ~pw, dk, pres, $name) ]->
-    [ Out(sign(<'cpb passport v1', bus, dk, pres, $name>, root)) ]
+    [ Out(sign(<'cpb passport v1', bus, dk, pres>, root)) ]
+#else
+rule Root_AdmitDirect:
+    let ksn  = h(<'cpb pair seal n v1', isk, ph>)
+        dk   = pk(xd)
+        pres = pk(xp)
+        sig  = sign(devsigmsg(bus, ph, dk, pres, $name), xd)
+    in
+    [ A2('Root', bus, ~pw, ph, isk), !Bus(bus, root, k1, k2),
+      !Screen(J, dk),
+      In(<'PairSealed', senc(<'PairDevice', dk, pres, $name, sig, ph>, ksn)>) ]
+  --[ RootIssued(bus, dk, pres, $name), RootIssuedDirect(bus, ~pw, dk, pres, $name) ]->
+    [ Out(sign(<'cpb passport v1', bus, dk, pres>, root)) ]
+#endif
 
 /* ------------------------------------------------------------------ lemmas */
 
@@ -351,22 +369,23 @@ lemma device_binding:
        | (Ex #k. RevealDev(dk) @ k)"
 
 // S4, R-JOIN-5..7: a passport issued through a join request goes only to the
-// key of a device that ran the pairing for this bus, and carries exactly the
-// presence key and name that device signed, even with a compromised
-// acceptor and a leaked code.
+// key of a device that ran the pairing for this bus, and the Root admits it
+// with exactly the presence key and name that device signed, even with a
+// compromised acceptor and a leaked code. The passport carries the key and
+// the presence key; the name is shown to the owner and is not in the
+// passport (Appendix B, Section B.3).
 lemma admission_via_request:
   "All bus A dk pres name #i.
      RootIssuedViaRequest(bus, A, dk, pres, name) @ i
      ==> (Ex ph #j. JoinerSentDevice(dk, pres, name, bus, ph) @ j & j < i)
        | (Ex #k. RevealDev(dk) @ k)"
 
-// R-JOIN-9: when the Root pairs directly, the same holds unless the code
-// leaked (the owner may skip the comparison here).
+// R-JOIN-9: when the Root pairs directly, the same holds, also with a leaked
+// code: the owner compares the fingerprint here too.
 lemma admission_direct:
   "All bus pw dk pres name #i.
      RootIssuedDirect(bus, pw, dk, pres, name) @ i
      ==> (Ex ph #j. JoinerSentDevice(dk, pres, name, bus, ph) @ j & j < i)
-       | (Ex #k. RevealDev(dk) @ k)
-       | (Ex #k. Leak(pw) @ k)"
+       | (Ex #k. RevealDev(dk) @ k)"
 
 end

@@ -7,8 +7,9 @@ A Tamarin [model](hello.spthy) of the link hello (verification level V1 of the
 B.4; S14): both sides send a `Hello` with their supported versions, a fresh nonce, the bus, the root
 generation, the checkpoint number and their device identifier, present their passport, and send `Auth`,
 a device key signature over `cpb hello v1 || 0x00 || SHA-256(own hello) || SHA-256(peer's hello)`. The
-network is the Dolev-Yao adversary; it may in addition reveal device keys and the root key of a bus. A
-relay presents its ticket instead of a passport; the model has one root-signed credential for both.
+network is the Dolev-Yao adversary; it may in addition reveal device keys, relay keys and the root key of
+a bus. A relay presents its ticket instead of a passport, and keeps one key for every bus it serves, so
+tickets of many buses name the same key.
 Revocation, generations and the exchange of control-plane objects before the hello are left to the state
 model in [models/membership](../../models/membership). The header of `hello.spthy` lists every
 abstraction.
@@ -20,7 +21,8 @@ A key counts against a property only if it was revealed before the event.
 | Lemma | Requirement | Property |
 | --- | --- | --- |
 | `executable` | | sanity: two devices accept each other, with nothing revealed |
-| `peer_authentic` | S14, R-REL-1, R-ARC-5 | a side accepts a peer only if that peer signed exactly these two hellos after it received this side's hello, so with this side's fresh nonce; an `Auth` reflected between two devices is rejected |
+| `executable_relay` | | sanity: a relay links on two buses with its one key, with nothing revealed |
+| `peer_authentic` | S14, R-REL-1, R-ARC-5 | a side accepts a peer only if that peer signed exactly these two hellos on this bus after it received this side's hello, so with this side's fresh nonce, and both agree on the versions, root generations and checkpoint numbers; an `Auth` reflected between two devices, or a relay's `Auth` from another bus, is rejected |
 | `no_self_connection` | R-REL-1, B.4 | a side never accepts a link with itself, even when the adversary reflects its own hello and `Auth` back to it |
 | `no_downgrade` | R-FMT-15 | a side that accepts a peer saw the version list the peer sent, and the peer saw the list this side sent, so both select the same version |
 | `one_accept_per_hello` | R-REL-1 | each hello is accepted at most once: a recorded hello and `Auth` cannot be replayed |
@@ -32,6 +34,8 @@ Probes, each a deliberate defect selected with `-D`, each expected to falsify it
 | `PROBE_NO_PEER_HELLO` | `Auth` signs the own hello only, not the peer's, so not the peer's nonce | `peer_authentic` |
 | `PROBE_NO_VERSIONS` | the hello hash leaves out the version list | `no_downgrade` |
 | `PROBE_SELF_HELLO` | a hello that names the receiver's own device or repeats its nonce is not rejected | `no_self_connection` |
+| `PROBE_NO_BUS` | the hello hash leaves out the bus | `peer_authentic` |
+| `PROBE_NO_STATE` | the hello hash leaves out the root generation and the checkpoint number | `peer_authentic` |
 
 [`checks.json`](checks.json) lists the probes and what CI runs: every lemma and every probe.
 

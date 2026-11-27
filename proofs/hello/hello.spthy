@@ -12,18 +12,20 @@
  *
  * Abstractions, each stated here so that a reader can check them:
  * - A passport is the Root's signature over the bus, the device identifier
- *   and the device key. A relay presents its ticket instead, which the Root
- *   signs in the same way and which names the relay key; the model has one
- *   credential for both. Revocation, generations and checkpoint contents are
- *   left to the state model in models/membership; the generation and the
- *   checkpoint number are opaque fields of the hello here.
+ *   and the device key, made for one bus. A relay presents its ticket
+ *   instead, which the Root signs in the same way and which names the relay
+ *   key; a relay keeps one key for every bus it serves, so tickets of many
+ *   buses name the same key. Revocation, generations and checkpoint
+ *   contents are left to the state model in models/membership; the
+ *   generation and the checkpoint number are opaque fields of the hello
+ *   here, and the lemmas show that both sides agree on them.
  * - The version list is an opaque term. The selected version is a function
  *   of both lists, so agreement on both lists is agreement on the version.
  * - Both sides run the same rules: either may speak first, and a side may
  *   run any number of hellos at once.
  * - Receivers match every field untyped: the adversary may send any term.
- * - Compromise: RevealDev gives a device signing key, RevealRoot the root
- *   key of a bus. A key counts against a property only if it was revealed
+ * - Compromise: RevealDev gives a device signing key, RevealRelay a relay
+ *   key (for every bus it serves), RevealRoot the root key of a bus. A key counts against a property only if it was revealed
  *   before the event.
  *
  * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
@@ -34,6 +36,9 @@
  *                        list                                 -> no_downgrade
  *   PROBE_SELF_HELLO     a hello naming the receiver's own device or
  *                        repeating its nonce is not rejected  -> no_self_connection
+ *   PROBE_NO_BUS         the hello hash leaves out the bus    -> peer_authentic
+ *   PROBE_NO_STATE       the hello hash leaves out the root
+ *                        generation and the checkpoint number -> peer_authentic
  */
 
 theory CpbHello
@@ -44,7 +49,14 @@ builtins: hashing, signing
 // The part of a hello that its hash covers.
 #ifdef PROBE_NO_VERSIONS
 macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', n, bus, gen, cp, d>)
-#else
+#endif
+#ifdef PROBE_NO_BUS
+macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', vs, n, gen, cp, d>)
+#endif
+#ifdef PROBE_NO_STATE
+macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', vs, n, bus, d>)
+#endif
+#ifdef not PROBE_NO_VERSIONS & not PROBE_NO_BUS & not PROBE_NO_STATE
 macros: hhash(vs, n, bus, gen, cp, d) = h(<'cpb hello', vs, n, bus, gen, cp, d>)
 #endif
 
@@ -79,12 +91,30 @@ rule NewBus:
 rule NewDevice:
     [ !RootLtk(B, rk), Fr(~ltk) ]
   --[ NewDevice(B, $D) ]->
-    [ !Ltk(B, $D, ~ltk),
+    [ !Ltk(B, $D, ~ltk), !DevLtk(B, $D, ~ltk),
       Out(<pk(~ltk), sign(<'cpb passport v1', B, $D, pk(~ltk)>, rk)>) ]
 
+// A relay has one key for every bus it serves.
+rule NewRelay:
+    [ Fr(~ltk) ]
+  --[ NewRelay($R) ]->
+    [ !RelayLtk($R, ~ltk), Out(pk(~ltk)) ]
+
+// The Root of a bus issues a ticket that names the relay key.
+rule Ticket:
+    [ !RootLtk(B, rk), !RelayLtk(R, ltk) ]
+  --[ NewDevice(B, R) ]->
+    [ !Ltk(B, R, ltk),
+      Out(<pk(ltk), sign(<'cpb passport v1', B, R, pk(ltk)>, rk)>) ]
+
 rule RevealDev:
-    [ !Ltk(B, D, ltk) ]
+    [ !DevLtk(B, D, ltk) ]
   --[ RevealDev(B, D) ]->
+    [ Out(ltk) ]
+
+rule RevealRelay:
+    [ !RelayLtk(R, ltk) ]
+  --[ RevealRelay(R) ]->
     [ Out(ltk) ]
 
 rule RevealRoot:
@@ -111,60 +141,79 @@ rule ReceiveHello:
     [ HelloState(B, X, ltk, V, n, G, C), !Root(B, pk(rk)),
       In(<'hello', vy, ny, B, gy, cy, Y>),
       In(<pky, sign(<'cpb passport v1', B, Y, pky>, rk)>) ]
-  --[ Signed(B, X, V, n, Y, vy, ny), Neq(Y, X), Neq(ny, n) ]->
-    [ AuthState(B, X, V, n, Y, vy, ny, pky, own, peer),
+  --[ Signed(B, X, V, n, G, C, Y, vy, ny, gy, cy), Neq(Y, X), Neq(ny, n) ]->
+    [ AuthState(B, X, V, n, G, C, Y, vy, ny, gy, cy, pky, own, peer),
       Out(sign(authmsg(own, peer), ltk)) ]
 
 // It accepts the peer's Auth: the peer's device key over the peer's hello
 // first and its own hello second.
 rule ReceiveAuth:
-    [ AuthState(B, X, V, n, Y, vy, ny, pk(ly), own, peer),
+    [ AuthState(B, X, V, n, G, C, Y, vy, ny, gy, cy, pk(ly), own, peer),
       In(sign(authmsg(peer, own), ly)) ]
-  --[ Accepted(B, X, V, n, Y, vy, ny) ]->
+  --[ Accepted(B, X, V, n, G, C, Y, vy, ny, gy, cy) ]->
     [ ]
 
 /* ------------------------------------------------------------------ lemmas */
 
 lemma executable:
   exists-trace
-  "Ex B X Y vx nx vy ny #i #j.
-     Accepted(B, X, vx, nx, Y, vy, ny) @ i & Accepted(B, Y, vy, ny, X, vx, nx) @ j
+  "Ex B X Y vx nx gx cx vy ny gy cy #i #j.
+     Accepted(B, X, vx, nx, gx, cx, Y, vy, ny, gy, cy) @ i
+     & Accepted(B, Y, vy, ny, gy, cy, X, vx, nx, gx, cx) @ j
      & not X = Y
      & (not Ex b d #k. RevealDev(b, d) @ k)
+     & (not Ex r #k. RevealRelay(r) @ k)
+     & (not Ex b #k. RevealRoot(b) @ k)"
+
+// A relay with tickets of two buses links on both with its one key.
+lemma executable_relay:
+  exists-trace
+  "Ex B1 B2 R X1 X2 v1 n1 g1 c1 w1 m1 h1 d1 v2 n2 g2 c2 w2 m2 h2 d2 #i #j.
+     Accepted(B1, X1, v1, n1, g1, c1, R, w1, m1, h1, d1) @ i
+     & Accepted(B2, X2, v2, n2, g2, c2, R, w2, m2, h2, d2) @ j
+     & (Ex #k. NewRelay(R) @ k)
+     & not B1 = B2
+     & (not Ex b d #k. RevealDev(b, d) @ k)
+     & (not Ex r #k. RevealRelay(r) @ k)
      & (not Ex b #k. RevealRoot(b) @ k)"
 
 // S14, R-REL-1: a side accepts a peer only if that peer signed exactly these
-// two hellos, after it received this side's hello: the peer took part in
-// this link, with this side's fresh nonce. The order of the hashes stops an
-// Auth reflected between two devices.
+// two hellos on this bus, after it received this side's hello: the peer took
+// part in this link, with this side's fresh nonce, and both agree on the
+// versions, the root generations and the checkpoint numbers. The order of
+// the hashes stops an Auth reflected between two devices; the bus in the
+// hashes stops a relay's Auth from one bus being used on another.
 lemma peer_authentic:
-  "All B X vx nx Y vy ny #i.
-     Accepted(B, X, vx, nx, Y, vy, ny) @ i
-     ==> (Ex #j. Signed(B, Y, vy, ny, X, vx, nx) @ j & j < i)
+  "All B X vx nx gx cx Y vy ny gy cy #i.
+     Accepted(B, X, vx, nx, gx, cx, Y, vy, ny, gy, cy) @ i
+     ==> (Ex #j. Signed(B, Y, vy, ny, gy, cy, X, vx, nx, gx, cx) @ j & j < i)
        | (Ex #r. RevealDev(B, Y) @ r & r < i)
+       | (Ex #r. RevealRelay(Y) @ r & r < i)
        | (Ex #r. RevealRoot(B) @ r & r < i)"
 
 // R-FMT-15: the network and relays cannot force a downgrade. A side that
 // accepts a peer saw the version list the peer sent, and the peer saw the
 // list this side sent; so both select the same version.
 lemma no_downgrade:
-  "All B X vx nx Y vy ny #i.
-     Accepted(B, X, vx, nx, Y, vy, ny) @ i
+  "All B X vx nx gx cx Y vy ny gy cy #i.
+     Accepted(B, X, vx, nx, gx, cx, Y, vy, ny, gy, cy) @ i
      ==> ((Ex #j. HelloSent(B, Y, vy, ny) @ j)
-          & (Ex #k vz. Signed(B, Y, vz, ny, X, vx, nx) @ k))
+          & (Ex #k vz gz cz. Signed(B, Y, vz, ny, gz, cz, X, vx, nx, gx, cx) @ k))
        | (Ex #r. RevealDev(B, Y) @ r & r < i)
+       | (Ex #r. RevealRelay(Y) @ r & r < i)
        | (Ex #r. RevealRoot(B) @ r & r < i)"
 
 // B.4: a side never accepts a link with itself, even when the adversary
 // reflects its own hello and Auth back to it.
 lemma no_self_connection:
-  "All B X vx nx vy ny #i. Accepted(B, X, vx, nx, X, vy, ny) @ i ==> F"
+  "All B X vx nx gx cx vy ny gy cy #i. Accepted(B, X, vx, nx, gx, cx, X, vy, ny, gy, cy) @ i ==> F"
 
 // One acceptance per hello: the fresh nonce of a side makes every accepted
 // link a different one, so a recorded hello and Auth cannot be replayed.
 lemma one_accept_per_hello:
-  "All B X vx nx Y vy ny Z vz nz #i #j.
-     Accepted(B, X, vx, nx, Y, vy, ny) @ i & Accepted(B, X, vx, nx, Z, vz, nz) @ j
+  "All B X vx nx gx cx Y vy ny gy cy Z vz nz gz cz #i #j.
+     Accepted(B, X, vx, nx, gx, cx, Y, vy, ny, gy, cy) @ i
+     & Accepted(B, X, vx, nx, gx, cx, Z, vz, nz, gz, cz) @ j
      ==> #i = #j"
 
 end

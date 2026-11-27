@@ -54,6 +54,8 @@ module channels {
     nextNo: int,           // next publication number to hand out
     reserved: int,         // persisted: upper bound of the reserved block of numbers
     mustRotate: bool,      // persisted: the key must be rotated before the next publication
+    toGrant: Set[str],     // persisted: readers still to be granted the current key before a publication
+    atRotation: Set[str],  // ghost: valid readers with the read right when the current key was made
   }
 
   type Reader = {
@@ -91,6 +93,7 @@ module channels {
 
   pure def initSource: Source = {
     gen: 0, kid: 0, keyOk: false, granted: Set(), nextNo: 1, reserved: 0, mustRotate: false,
+    toGrant: Set(), atRotation: Set(),
   }
   pure def initReader: Reader = { gen: 0, kid: 0, hiGen: 0, hiNo: 0, floor: 1, depth: 0, retained: Set() }
 
@@ -170,7 +173,8 @@ module channels {
     val g = source.gen + 1
     // R-CH-8: a generation is never used for two keys.
     val reused = pool.grants.exists(x => x.gen >= g) or pool.pubs.exists(x => x.gen >= g)
-    commitWith({ ...source, gen: g, kid: made + 1, keyOk: true, granted: Set(), mustRotate: false },
+    commitWith({ ...source, gen: g, kid: made + 1, keyOk: true, granted: Set(), mustRotate: false,
+                 toGrant: members.exclude(NO_READ), atRotation: members.exclude(NO_READ) },
       readers, members, pool, if (reused) Set("uniqueKeys") else Set(),
       if (source.mustRotate and source.granted.exists(r => not(members.contains(r)))) Set("rotateAfterRemove") else Set()),
   }
@@ -186,7 +190,8 @@ module channels {
       allowed,
       // R-CH-13, S5: keys go only to valid readers with the read right.
       val bad = not(members.contains(d)) or NO_READ.contains(d)
-      commitWith({ ...source, granted: source.granted.union(Set(d)) }, readers, members,
+      commitWith({ ...source, granted: source.granted.union(Set(d)), toGrant: source.toGrant.exclude(Set(d)) },
+        readers, members,
         { ...pool, grants: pool.grants.union(Set({ gen: source.gen, kid: source.kid, reader: d })) },
         (if (bad) Set("grantsToReaders") else Set()).union(if (source.mustRotate) Set("noMarkedGrant") else Set()),
         Set()),
@@ -196,8 +201,10 @@ module channels {
   action sourceGrant = { nondet d = DEVICES.oneOf() sourceGrantTo(d) }
 
   // Publish under the current key (R-CH-8, R-CH-10, R-CH-11).
+  // The new key is first granted to the readers (R-CH-5).
   action sourcePublishWith(depth: int, empty: bool): bool = all {
     not(mustRotateNow),
+    source.toGrant.intersect(members) == Set() or MUTANT == "publish_before_grant",
     source.nextNo <= MAX_NO,
     val no = source.nextNo
     // Reserve the next block before handing out a number beyond the last one.
@@ -207,9 +214,14 @@ module channels {
     val dup = pool.pubs.exists(q => q.no >= no)
     // R-CH-5, S5: nobody outside the readers holds the key a publication is made under.
     val leak = pool.grants.exists(x => x.kid == source.kid and not(members.contains(x.reader)))
+    // R-CH-5: the new key was granted, before this publication, to every
+    // reader that was valid when it was made and still is.
+    val ungranted = source.atRotation.intersect(members)
+      .exists(d => not(pool.grants.contains({ gen: source.gen, kid: source.kid, reader: d })))
     commitWith({ ...source, nextNo: no + 1, reserved: reserved }, readers, members,
       { ...pool, pubs: pool.pubs.union(Set(p)) },
-      (if (dup) Set("uniqueNumbers") else Set()).union(if (leak) Set("rotateOnRemove") else Set()),
+      (if (dup) Set("uniqueNumbers") else Set()).union(if (leak) Set("rotateOnRemove") else Set())
+        .union(if (ungranted) Set("grantBeforePublish") else Set()),
       if (empty and depth > 0) Set("clear") else Set()),
   }
 
@@ -222,15 +234,17 @@ module channels {
   // The host signals "rotate key epoch" (R-CH-5).
   action sourceEpoch = commitWith({ ...source, mustRotate: true }, readers, members, pool, Set(), Set())
 
-  // Reboot of the source (R-CORE-5): the generation, the block bound, and the
-  // rotation mark survive; the key itself may not; the memory is lost,
-  // including the readers granted the key.
+  // Reboot of the source (R-CORE-5): the generation, the block bound, the
+  // rotation mark, and the readers still to be granted the key survive; the
+  // key itself may not; the memory is lost, including the readers granted the
+  // key.
   action sourceReboot = {
     nondet keep = Set(false, true).oneOf()
     val start = if (MUTANT == "no_block_skip") source.reserved - BLOCK + 1 else source.reserved + 1
     val g = if (MUTANT == "gen_not_persisted" and source.gen > 0) source.gen - 1 else source.gen
     commitWith({ ...source, gen: g, keyOk: keep and source.keyOk, granted: Set(),
                  mustRotate: source.mustRotate and MUTANT != "mark_not_persisted",
+                 toGrant: if (MUTANT == "grant_list_not_persisted") Set() else source.toGrant,
                  nextNo: if (start < 1) 1 else start },
       readers, members, pool, Set(), Set())
   }
@@ -330,6 +344,7 @@ module channels {
   val acceptUnderHeldKey = not(broken.contains("acceptUnderHeldKey")) // R-CH-9
   val noMarkedGrant = not(broken.contains("noMarkedGrant"))         // R-CH-5
   val windowFloor = not(broken.contains("windowFloor"))             // R-CH-9, S12
+  val grantBeforePublish = not(broken.contains("grantBeforePublish")) // R-CH-5
 
   // R-CH-10, R-CH-11, R-CH-12: a reader retains at most `depth`
   // publications, all of them in its window, with distinct numbers, and none
@@ -345,7 +360,7 @@ module channels {
   val noReadNoKey = NO_READ.forall(d => readers.get(d).kid == 0)
 
   val safety = freshness and uniqueNumbers and uniqueKeys and rotateOnRemove and grantsToReaders
-    and acceptUnderHeldKey and noMarkedGrant and windowFloor and retention and noReadNoKey
+    and acceptUnderHeldKey and noMarkedGrant and windowFloor and grantBeforePublish and retention and noReadNoKey
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.

@@ -99,6 +99,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   combination closes the stream (R-STR-2, Appendix B, Section B.7).
 - Specification: S7 is stated for the records a node processed; a record dropped because it is not yet
   valid for the node reaches it again through the exchange of control-plane objects.
+- Specification: the source persists the readers still to be granted a new channel key until each
+  grant is sent (R-CH-5, R-CORE-5). Reason: the channels model showed that a source that rebooted
+  between a new key and its grants published under the key without granting it.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

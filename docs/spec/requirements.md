@@ -646,6 +646,8 @@ distinguishes channels by it but does not know which channel it is.
 > own channel that has a key for rotation in the same event and persists the mark (R-CORE-5, R-CORE-7):
 > after a reboot it no longer knows whom it granted the key, so the condition cannot be recomputed.
 > While the mark is set, the source grants the marked key to no one; a grant waits for the new key.
+> The source persists the readers still to be granted the new key until each grant is sent, so a reboot
+> between the new key and its grants does not skip them (R-CORE-5).
 > *Serves:* S5. *Verified by:* model, Tamarin.
 
 > **R-CH-6.** The source grants the current channel key to a new reader. With it the reader gains access
@@ -996,8 +998,8 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 
 > **R-CORE-5.** The following MUST survive a reboot in the core's storage: the bus identifier with the
 > root and recovery keys; the root generation and the checkpoint; the node's own passport; the latest
-> accepted root change record; for its own channels, the key generation, the publication number, and the
-> rotation mark (R-CH-5); the
+> accepted root change record; for its own channels, the key generation, the publication number, the
+> rotation mark, and the readers still to be granted the new key (R-CH-5); the
 > channel keys the node holds as source or reader, and for each of them the highest accepted generation
 > and number, the window floor (R-CH-9), and the depth of the latest accepted publication (R-CH-10);
 > the private sealing keys of the current epochs; the halt

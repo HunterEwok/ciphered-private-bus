@@ -37,6 +37,9 @@ module inductive {
     0.to(MAX_GEN).contains(s.gen), s.kid == s.gen, s.gen == mk,
     0.to(MAX_NO + BLOCK - 1).contains(s.reserved), 1 <= s.nextNo, s.nextNo <= s.reserved + 1,
     s.granted.subseteq(DEVICES),
+    // R-CH-5: the readers still to be granted the key were readers when it
+    // was made, and those were readers or have left since
+    s.toGrant.subseteq(s.atRotation), s.atRotation.subseteq(DEVICES),
     // a key exists only once one was created
     s.keyOk implies s.gen >= 1,
   }
@@ -74,6 +77,11 @@ module inductive {
     DEVICES.forall(d => readerOk(d, rs.get(d), p)),
     poolOk(p, s, m),
     m.subseteq(DEVICES), gn.subseteq(DEVICES), jn.subseteq(DEVICES),
+    s.atRotation.subseteq(m.union(gn)),
+    // R-CH-5: every reader that was valid when the current key was made, is
+    // still valid, and is no longer waiting for it holds a grant of it
+    s.keyOk implies s.atRotation.forall(d => (m.contains(d) and not(s.toGrant.contains(d))) implies
+      p.grants.contains({ gen: s.gen, kid: s.kid, reader: d })),
     0.to(MAX_GEN).contains(mk),
     b == Set(),
     sn.subseteq(TAGS),
@@ -102,6 +110,8 @@ module inductive {
     nondet sgen = 0.to(MAX_GEN).oneOf()
     nondet sok = Set(false, true).oneOf()
     nondet sgranted = DEVICES.powerset().oneOf()
+    nondet stogrant = DEVICES.powerset().oneOf()
+    nondet satrot = DEVICES.powerset().oneOf()
     nondet snext = 1.to(MAX_NO + BLOCK).oneOf()
     nondet sres = 0.to(MAX_NO + BLOCK - 1).oneOf()
     nondet srot = Set(false, true).oneOf()
@@ -117,7 +127,7 @@ module inductive {
     nondet pg = GRANTS.powerset().oneOf()
     nondet sn = TAGS.powerset().oneOf()
     val s = { gen: sgen, kid: sgen, keyOk: sok, granted: sgranted, nextNo: snext, reserved: sres,
-              mustRotate: srot }
+              mustRotate: srot, toGrant: stogrant, atRotation: satrot }
     val rs = DEVICES.mapBy(d => { gen: rgen.get(d), kid: rgen.get(d), hiGen: rgen.get(d), hiNo: rhi.get(d),
                                   floor: rfloor.get(d), depth: rdepth.get(d), retained: rret.get(d) })
     val p = { pubs: pp, grants: pg }

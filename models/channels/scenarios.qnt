@@ -21,6 +21,7 @@ module scenarios {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, false))
@@ -37,6 +38,7 @@ module scenarios {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, false))
@@ -52,6 +54,7 @@ module scenarios {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, true))
@@ -68,6 +71,7 @@ module scenarios {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, true))
@@ -92,6 +96,14 @@ module scenarios {
       .then(sourceGrantTo("a"))
       .fail()
 
+  // A new key is granted to every reader before the next publication (R-CH-5).
+  run grantBeforePublishTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(sourcePublishWith(1, false))
+      .fail()
+
   // After a reader leaves, the source cannot publish under the old key, even
   // after a reboot that keeps the key (R-CH-5, R-CORE-5).
   run rotateAfterRemoveTest =
@@ -112,6 +124,7 @@ module scenarios {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, false))
@@ -133,6 +146,7 @@ module scenarios_probe_refill_moves_high {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", { gen: 1, kid: 1, reader: "a" }))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, false))
@@ -151,6 +165,7 @@ module scenarios_probe_no_trim {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", { gen: 1, kid: 1, reader: "a" }))
       .then(sourcePublishWith(1, false))
       .then(sourcePublishWith(1, false))
@@ -167,6 +182,7 @@ module scenarios_probe_empty_no_clear {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", { gen: 1, kid: 1, reader: "a" }))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, true))
@@ -183,6 +199,7 @@ module scenarios_probe_late_clear_kept {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", { gen: 1, kid: 1, reader: "a" }))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, true))
@@ -206,6 +223,7 @@ module scenarios_probe_floor_stays {
     init
       .then(sourceRotate)
       .then(sourceGrantTo("a"))
+      .then(sourceGrantTo("b"))
       .then(readerGrant("a", g1))
       .then(sourcePublishWith(2, false))
       .then(sourcePublishWith(2, false))

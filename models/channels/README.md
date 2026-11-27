@@ -28,6 +28,7 @@ forge (R-REL-11). The header of `channels.qnt` lists every abstraction.
 | `grantsToReaders` | R-CH-13 | keys are granted only to valid readers with the read right |
 | `acceptUnderHeldKey` | R-CH-9 | a publication is accepted only under a key the reader holds |
 | `noMarkedGrant` | R-CH-5 | while the rotation mark is set, the marked key is granted to no one |
+| `grantBeforePublish` | R-CH-5 | a publication is made only after its key was granted to every reader that was valid when the key was made and still is |
 | `retention` | R-CH-10, R-CH-11, R-CH-12 | at most `depth` retained publications, all in the window, distinct numbers, none of them a clearing publication or one of depth 0 |
 | `noReadNoKey` | R-CH-13 | a device without the read right never holds a key |
 | `windowFloor` | R-CH-9, R-CH-10, R-CH-11 | S12: the floor of the window never falls, rises above every publication that trim evicts or a clear removes, and moves only then |
@@ -53,6 +54,8 @@ Probes, each expected to violate `safety`:
 | `late_clear_kept` | A late clearing publication, or one of depth 0, is retained by a refill |
 | `grant_marked` | The source grants a key marked for rotation |
 | `floor_stays` | The floor stays where it is when trim evicts publications |
+| `publish_before_grant` | The source publishes under a new key before granting it to the readers |
+| `grant_list_not_persisted` | A reboot loses the readers still to be granted the new key |
 
 `empty_no_clear`, `refill_moves_high`, `no_trim`, `late_clear_kept`, and `floor_stays` need a long
 specific sequence and are checked by fixed scenarios in [`scenarios.qnt`](scenarios.qnt), which also
@@ -74,7 +77,10 @@ publication of depth 0 is accepted only as a new one (R-CH-9, R-CH-10). A later 
 the floor did not rise when trim evicted a publication, so after publications 1, 3 and 2 at depth 2
 and a reboot, publication 1 was accepted again. The floor now moves to the lowest retained number when
 trim evicts, and stays put when a reboot loses the retained publications (R-CH-9); the scenario
-`floorAfterEvictionTest` replays that sequence.
+`floorAfterEvictionTest` replays that sequence. The same review found that nothing made the source
+grant a new key before publishing under it; with that rule added, the model showed that a source
+rebooting between the new key and its grants skipped them, so the source persists the readers still
+to be granted the key (R-CH-5, R-CORE-5).
 
 ## Inductive invariant
 

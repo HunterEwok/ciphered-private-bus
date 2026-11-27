@@ -16,7 +16,9 @@
     "no_trim",
     "late_clear_kept",
     "grant_marked",
-    "floor_stays"
+    "floor_stays",
+    "publish_before_grant",
+    "grant_list_not_persisted"
   ],
   "witnesses": [
     "witnessAccept",

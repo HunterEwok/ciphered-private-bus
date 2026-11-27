@@ -20,9 +20,13 @@
 // - Sizes are small units; a grant and a key request take one unit. Blobs,
 //   padding and the clearing publication are not modelled; a blob counts as
 //   part of its publication's size.
-// - The relay's checkpoint is reduced to its number, the set of revoked
-//   devices and whether it still lists the relay. The ticket is reduced to its
-//   pair (gen, no); its limits are the constants BUS_BYTES and SOURCE_BYTES.
+// - The relay's checkpoint is reduced to its pair (gen, no), the set of
+//   revoked devices and whether it still lists the relay; checkpoint numbers
+//   start over for the Root of a new generation (R-MEM-12). The Root's
+//   checkpoints are also numbered in the order they were issued (a ghost
+//   index), against which the relay's order of pairs is checked. The ticket
+//   is reduced to its pair (gen, no); its limits are the constants BUS_BYTES
+//   and SOURCE_BYTES. There is at most one root change.
 // - What the relay sends is not kept: properties of a send are checked by a
 //   monitor when it happens. The order of what is served (grant first, then
 //   publications by number) is a delivery property (R-REL-11) and is checked
@@ -70,8 +74,8 @@ module relay {
 
   type Relay = {
     served: bool,          // the latest checkpoint lists the relay
-    cpNo: int,             // number of the latest checkpoint accepted
-    cpMax: int,            // ghost: greatest checkpoint number ever accepted
+    cpNo: int,             // ghost: index of the checkpoint held
+    cp: (int, int),        // pair (gen, no) of the checkpoint held
     revoked: Set[int],     // devices revoked under that checkpoint
     rootGen: int,          // generation of the latest root change record
     tGen: int,             // pair (gen, no) of the ticket held
@@ -88,7 +92,11 @@ module relay {
   // ----------------------------------------------------------------- variables
   var relay: Relay
   var cps: int -> Set[int]   // ghost: every checkpoint the Root issued, by number
-  var root: { gen: int, tNo: int, cpNo: int, listed: bool }
+  // The Root: its generation, the number of its latest ticket, the index of
+  // its latest checkpoint, the index of the last checkpoint before the root
+  // change (0 before it), and whether the latest checkpoint lists the relay.
+  type Root = { gen: int, tNo: int, cpNo: int, chgAt: int, listed: bool }
+  var root: Root
   var events: int
   var nextJoin: int          // ghost: number of join requests ever made
   // Monitor: properties of a single step are checked when it is taken, and
@@ -97,7 +105,10 @@ module relay {
   var seen: Set[str]         // ghost: behaviours that happened (witnesses)
 
   // ------------------------------------------------------------------ helpers
-  pure def max2(a: int, b: int): int = if (a > b) a else b
+  // The pair (gen, no) of the checkpoint with index k: numbers start over
+  // after the root change (R-MEM-12).
+  pure def cpAt(rt: Root, k: int): (int, int) = if (rt.gen > 1 and k > rt.chgAt) (rt.gen, k - rt.chgAt) else (1, k)
+  pure def pairLess(a: (int, int), b: (int, int)): bool = a._1 < b._1 or (a._1 == b._1 and a._2 < b._2)
   pure def payer(o: Obj): int = if (o.kind == "req") o.reader else o.src
   pure def sizeOf(o: Obj): int = if (o.kind == "pub") o.size else 1
   pure def atP(o: Obj, k: (int, int, int)): bool = o.kind == "pub" and o.src == k._1 and o.ch == k._2 and o.no == k._3
@@ -280,11 +291,11 @@ module relay {
 
   action init = all {
     relay' = {
-      served: true, cpNo: 1, cpMax: 1, revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), bytes: NO_BYTES,
+      served: true, cpNo: 1, cp: (1, 1), revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), bytes: NO_BYTES,
       hi: tuples(DEVS, CHANS).mapBy(k => 0), dep: tuples(DEVS, CHANS).mapBy(k => 0), arr: 0, joins: List(), online: Set(),
     },
     cps' = Map(1 -> Set()),
-    root' = { gen: 1, tNo: 1, cpNo: 1, listed: true },
+    root' = { gen: 1, tNo: 1, cpNo: 1, chgAt: 0, listed: true },
     events' = 0,
     nextJoin' = 0,
     broken' = Set(),
@@ -432,7 +443,7 @@ module relay {
   }
 
   // ---------------------------------------------------------- Root and events
-  action eventWith(cps2: int -> Set[int], root2: { gen: int, tNo: int, cpNo: int, listed: bool }, nj: int): bool = all {
+  action eventWith(cps2: int -> Set[int], root2: Root, nj: int): bool = all {
     events < MAX_EVENTS,
     relay' = relay, cps' = cps2, root' = root2, events' = events + 1, nextJoin' = nj,
     broken' = broken, seen' = seen,
@@ -449,14 +460,22 @@ module relay {
     eventWith(cps.put(root.cpNo + 1, cps.get(root.cpNo)), { ...root, cpNo: root.cpNo + 1, listed: false }, nextJoin),
   }
   // A root change and a new ticket.
-  action rootChange = eventWith(cps, { ...root, gen: root.gen + 1, tNo: 0 }, nextJoin)
+  action rootChange = eventWith(cps, { ...root, gen: root.gen + 1, tNo: 0, chgAt: root.cpNo }, nextJoin)
   action rootTicket = eventWith(cps, { ...root, tNo: root.tNo + 1 }, nextJoin)
 
-  // The relay accepts a checkpoint only with a greater number (R-REL-7). The
-  // relay's latest checkpoint is the only one whose relay list counts, so a
-  // checkpoint after `rootUnlist` removes it. Mutant "cp_rollback": any number.
+  // A checkpoint reaches the relay. It accepts one of the root generation it
+  // knows with a greater pair (gen, no), and drops any other (R-REL-7,
+  // R-MEM-12, B.10 rule 3). The relay's latest checkpoint is the only one
+  // whose relay list counts, so a checkpoint after `rootUnlist` removes it,
+  // also one of a new generation (B.10 rules 3 and 4). Mutants: "cp_rollback"
+  // accepts any other pair, "cp_number_only" compares the numbers alone, and
+  // "old_gen_cp" accepts a checkpoint of an older root generation.
   action learnCp(n: int): bool = {
     val r = relay
+    val c = cpAt(root, n)
+    val accept = (c._1 == r.rootGen or MUTANT == "old_gen_cp")
+      and (if (MUTANT == "cp_rollback") c != r.cp else if (MUTANT == "cp_number_only") c._2 > r.cp._2
+           else pairLess(r.cp, c))
     val unlisted = not(root.listed) and n == root.cpNo
     val rev = cps.get(n)
     // Mutant "keep_revoked": what is stored for a revoked device stays.
@@ -465,14 +484,22 @@ module relay {
     val cleared = unlisted and MUTANT != "keep_unserved"
     val bytes2 = pick(cleared, NO_BYTES, without(r.bytes, r.store.exclude(purge)))
     all {
-      cps.keys().contains(n), n > r.cpNo or (MUTANT == "cp_rollback" and n != r.cpNo),
-      commitWith(
-        if (cleared) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: Set(), bytes: bytes2, online: Set(), joins: List() }
-        else if (unlisted) { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, served: false, store: purge, bytes: bytes2 }
-        else { ...r, cpNo: n, cpMax: max2(r.cpMax, n), revoked: rev, store: purge, bytes: bytes2, online: r.online.exclude(rev) },
-        Set(),
-        (if (purge != r.store) Set("revokedPurged") else Set())
-          .union(if (unlisted) Set("unlisted") else Set())),
+      cps.keys().contains(n),
+      if (accept)
+        commitWith(
+          if (cleared) { ...r, cpNo: n, cp: c, revoked: rev, served: false, store: Set(), bytes: bytes2, online: Set(), joins: List() }
+          else if (unlisted) { ...r, cpNo: n, cp: c, revoked: rev, served: false, store: purge, bytes: bytes2 }
+          else { ...r, cpNo: n, cp: c, revoked: rev, store: purge, bytes: bytes2, online: r.online.exclude(rev) },
+          // R-REL-7, R-MEM-12: only a checkpoint issued later, of the root
+          // generation the relay knows, replaces the held one.
+          if (n <= r.cpNo or c._1 != r.rootGen) Set("checkpointForward") else Set(),
+          (if (purge != r.store) Set("revokedPurged") else Set())
+            .union(if (unlisted) Set("unlisted") else Set())
+            .union(if (unlisted and c._1 > 1) Set("unlistedNewGen") else Set()))
+      else
+        // B.10 rule 3: a checkpoint issued later, of the root generation the
+        // relay knows, is never dropped.
+        commitWith(r, if (n > r.cpNo and c._1 == r.rootGen) Set("checkpointTaken") else Set(), Set()),
     }
   }
 
@@ -599,13 +626,17 @@ module relay {
   val ticketOfCurrentRoot = not(broken.contains("ticketOfCurrentRoot"))
   // B.10 rule 4: a relay no longer listed stores nothing.
   val unlistedEmpty = not(relay.served) implies (relay.store == Set() and relay.joins == List())
-  // R-REL-7: the relay's checkpoint only moves forward: its revoked set
-  // contains that of the newest checkpoint it ever accepted.
-  val checkpointForward = cps.get(relay.cpMax).subseteq(relay.revoked)
+  // R-REL-7, R-MEM-12: the relay's checkpoint only moves forward in the
+  // order the Root issued them, and only to one of the root generation the
+  // relay knows (checked at every accepted checkpoint).
+  val checkpointForward = not(broken.contains("checkpointForward"))
+  // B.10 rule 3: a checkpoint issued later, of the root generation the relay
+  // knows, is accepted (checked at every dropped checkpoint).
+  val checkpointTaken = not(broken.contains("checkpointTaken"))
 
   val safety = onlyVerified and nothingTransient and servedOnlyGranted and revokedPurged and quotasHold
     and fairShare and evictsOnlyOwn and grantsKept and latestGrant and oneGrantOneRequest and retentionHolds and joinsBounded
-    and ticketOfCurrentRoot and unlistedEmpty and checkpointForward
+    and ticketOfCurrentRoot and unlistedEmpty and checkpointForward and checkpointTaken
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.
@@ -618,6 +649,7 @@ module relay {
   val witnessRequestAnswered = not(seen.contains("requestAnswered"))
   val witnessRevokedPurged = not(seen.contains("revokedPurged"))
   val witnessUnlisted = not(seen.contains("unlisted"))
+  val witnessUnlistedNewGen = not(seen.contains("unlistedNewGen"))
   val witnessJoinEvicted = not(seen.contains("joinEvicted"))
   val witnessNewGenTicket = not(seen.contains("newGenTicket"))
 }

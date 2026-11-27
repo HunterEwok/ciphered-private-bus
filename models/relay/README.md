@@ -48,7 +48,8 @@ send or an eviction may do, are checked by a monitor when the step is taken, as 
 | `joinsBounded` | R-JOIN-8 | the join buffer is bounded and keeps the newest request |
 | `ticketOfCurrentRoot` | B.10 rules 2, 3 | a ticket is accepted only with a greater pair and of the latest root generation |
 | `unlistedEmpty` | B.10 rule 4 | a relay no longer in the checkpoint stores nothing and buffers no join requests |
-| `checkpointForward` | R-REL-7 | the relay's checkpoint never moves back |
+| `checkpointForward` | R-REL-7, R-MEM-12 | the relay replaces its checkpoint only with one the Root issued later, of the root generation the relay knows |
+| `checkpointTaken` | B.10 rule 3 | the relay never drops a checkpoint the Root issued later, of the root generation it knows, even when its number is smaller after a root change |
 
 Probes, each expected to violate `safety`:
 
@@ -72,6 +73,8 @@ Probes, each expected to violate `safety`:
 | `old_ticket` | A ticket of the old root generation is accepted after a root change |
 | `keep_unserved` | A relay removed from the checkpoint keeps its data |
 | `cp_rollback` | An older checkpoint replaces a newer one |
+| `cp_number_only` | Checkpoints are compared by number without the generation |
+| `old_gen_cp` | A checkpoint of the old root generation is accepted after a root change |
 
 Fixed scenarios in [`scenarios.qnt`](scenarios.qnt) (`quint test`): a source within its fair share keeps
 its publication when another source fills the bus (and `unfair` evicts it); the join buffer evicts the
@@ -79,13 +82,16 @@ oldest request; after the checkpoint that revokes a device nothing from or for i
 gets no hello; and the answer to a key request, a grant of the generation the relay already holds with
 the request's nonce, replaces the held grant and deletes the request. A source over its own limit evicts its
 own oldest publication and not that of another source (and `evict_other`, which simulation does not
-reach with its fixed seed, evicts the other one).
+reach with its fixed seed, evicts the other one). After a root change, the first checkpoint of the new
+Root, numbered 1, removes the relay that holds checkpoint (1, 2) and empties it (and `cp_number_only`
+drops that checkpoint).
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated: a
 source evicts its own publication, a full bus evicts another source's publication, a full bus refuses
 an object for lack of a victim, a grant is replaced, a publication is served, a publication of depth 0
 is forwarded, a key request is answered, a revocation purges data, the relay is removed from the
-checkpoint, the join buffer overflows, and a ticket of a new root generation is accepted.
+checkpoint, also by a checkpoint of a new root generation, the join buffer overflows, and a ticket of a
+new root generation is accepted.
 
 ## Inductive invariant
 
@@ -95,7 +101,8 @@ obligations as for the other models: the initial state satisfies `IndInv`, every
 `broken` staying empty, `IndInv` states these lemmas:
 
 - the Root's checkpoints only add revoked devices, and the relay's checkpoint is one of them, the
-  latest it accepted, with its revoked set;
+  latest it accepted, with its revoked set and its pair (gen, no), of a root generation the relay
+  knows;
 - a relay no longer listed holds the Root's last checkpoint, which unlisted it, and has no connected
   device and no join requests; no revoked device is connected;
 - every stored object is signed, of a kind the relay stores, with its arrival number at most the

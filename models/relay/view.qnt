@@ -20,10 +20,10 @@ module viewdefs {
   type RObj = { kind: str, src: int, ch: int, reader: int, no: int, gen: int, depth: int, size: int, ok: bool, arr: int }
   type RBytes = { pub: (int, int, int) -> int, grant: (int, int, int) -> int, req: (int, int, int) -> int }
   type RRelay = {
-    served: bool, cpNo: int, cpMax: int, revoked: Set[int], rootGen: int, tGen: int, tNo: int, store: Set[RObj],
+    served: bool, cpNo: int, cp: (int, int), revoked: Set[int], rootGen: int, tGen: int, tNo: int, store: Set[RObj],
     bytes: RBytes, hi: (int, int) -> int, dep: (int, int) -> int, arr: int, joins: List[int], online: Set[int],
   }
-  type RRoot = { gen: int, tNo: int, cpNo: int, listed: bool }
+  type RRoot = { gen: int, tNo: int, cpNo: int, chgAt: int, listed: bool }
   type View = { relay: RRelay, joinCount: int, cps: int -> Set[int], root: RRoot, events: int, broken: Set[str] }
 
   pure def viewOf(r: RRelay, c: int -> Set[int], rt: RRoot, ev: int, b: Set[str]): View =
@@ -102,10 +102,11 @@ module bisim {
   pure val CPNOS = 1.to(P_MAX_EVENTS + 1)
   pure val ARRS = 1.to(P_MAX_ARR)
   pure val TAGS = Set("ownEvicted", "busEvicted", "noVictim", "grantReplaced", "servedPub", "forwarded0",
-                      "requestAnswered", "revokedPurged", "unlisted", "joinEvicted", "newGenTicket", "refused",
+                      "requestAnswered", "revokedPurged", "unlisted", "unlistedNewGen", "joinEvicted", "newGenTicket", "refused",
                       "callForwarded", "callRefused")
   pure val BROKEN = Set("onlyVerified", "servedOnlyGranted", "nothingForRevoked", "fairShare", "evictsOnlyOwn",
-                        "grantsKept", "latestGrant", "newestJoinKept", "ticketOfCurrentRoot")
+                        "grantsKept", "latestGrant", "newestJoinKept", "ticketOfCurrentRoot",
+                        "checkpointForward", "checkpointTaken")
 
   // An object the relay can store, field by field: the kinds it stores and the
   // values the actions can give them (the signature flag and the depth are
@@ -131,6 +132,7 @@ module bisim {
     // every new checkpoint, root change and join request is one event
     (rt.cpNo - 1) + (rt.gen - 1) + nj <= ev,
     1 <= rt.gen, rt.gen <= 2, 0 <= rt.tNo, rt.tNo <= 2, CPNOS.contains(rt.cpNo),
+    if (rt.gen == 1) rt.chgAt == 0 else (1 <= rt.chgAt and rt.chgAt <= rt.cpNo),
     c.keys() == CPNOS.filter(k => k <= rt.cpNo), c.keys().forall(k => c.get(k).subseteq(DEVS)),
     0 <= r.arr, r.arr <= P_MAX_ARR,
     r.hi.keys() == KEYS, r.dep.keys() == KEYS,
@@ -139,7 +141,7 @@ module bisim {
     r.online.subseteq(DEVS), r.revoked.subseteq(DEVS),
     1 <= r.rootGen, r.rootGen <= rt.gen, 1 <= r.tGen, r.tGen <= 2, 1 <= r.tNo, r.tNo <= 2,
     // the relay's checkpoints are ones the Root issued
-    c.keys().contains(r.cpNo), c.keys().contains(r.cpMax),
+    c.keys().contains(r.cpNo), 1 <= r.cp._1, r.cp._1 <= 2, CPNOS.contains(r.cp._2),
     // the store: objects of the stored kinds, at most one per key slot
     r.store.forall(o => isObj(o)),
     r.store.forall(a => r.store.forall(x => sameSlot(a, x) implies a == x)),
@@ -198,7 +200,9 @@ module bisim {
     nondet qB = setOfMaps(GSLOTS, 0.to(1)).oneOf()
     nondet served = Set(false, true).oneOf()
     nondet cpNo = CPNOS.oneOf()
-    nondet cpMax = CPNOS.oneOf()
+    nondet cpG = 1.to(2).oneOf()
+    nondet cpN = CPNOS.oneOf()
+    nondet chgAt = 0.to(P_MAX_EVENTS + 1).oneOf()
     nondet revoked = DEVS.powerset().oneOf()
     nondet revAll = setOfMaps(CPNOS, DEVS.powerset()).oneOf()
     nondet rootGen = 1.to(2).oneOf()
@@ -229,12 +233,12 @@ module bisim {
         arr: qArr.get(t) })
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
     val r = {
-      served: served, cpNo: cpNo, cpMax: cpMax, revoked: revoked, rootGen: rootGen, tGen: tGen, tNo: tNo,
+      served: served, cpNo: cpNo, cp: (cpG, cpN), revoked: revoked, rootGen: rootGen, tGen: tGen, tNo: tNo,
       store: pubs.union(grants).union(reqs), bytes: { pub: pB, grant: gB, req: qB }, hi: hi, dep: dep, arr: arr,
       joins: range(0, P_JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,
     }
-    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, listed: listed }
+    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, chgAt: chgAt, listed: listed }
     all {
       structOf(r, c, rt, ev, nj, b, sn),
       A::relay' = r, A::cps' = c, A::root' = rt, A::events' = ev, A::nextJoin' = nj, A::broken' = b, A::seen' = sn,
@@ -260,7 +264,9 @@ module bisim {
     nondet qB = setOfMaps(GSLOTS, 0.to(1)).oneOf()
     nondet served = Set(false, true).oneOf()
     nondet cpNo = CPNOS.oneOf()
-    nondet cpMax = CPNOS.oneOf()
+    nondet cpG = 1.to(2).oneOf()
+    nondet cpN = CPNOS.oneOf()
+    nondet chgAt = 0.to(P_MAX_EVENTS + 1).oneOf()
     nondet revoked = DEVS.powerset().oneOf()
     nondet revAll = setOfMaps(CPNOS, DEVS.powerset()).oneOf()
     nondet rootGen = 1.to(2).oneOf()
@@ -291,12 +297,12 @@ module bisim {
         arr: qArr.get(t) })
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
     val r = {
-      served: served, cpNo: cpNo, cpMax: cpMax, revoked: revoked, rootGen: rootGen, tGen: tGen, tNo: tNo,
+      served: served, cpNo: cpNo, cp: (cpG, cpN), revoked: revoked, rootGen: rootGen, tGen: tGen, tNo: tNo,
       store: pubs.union(grants).union(reqs), bytes: { pub: pB, grant: gB, req: qB }, hi: hi, dep: dep, arr: arr,
       joins: range(0, P_JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,
     }
-    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, listed: listed }
+    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, chgAt: chgAt, listed: listed }
     all {
       structOf(r, c, rt, ev, nj, b, sn),
       B::relay' = r, B::cps' = c, B::root' = rt, B::events' = ev, B::nextJoin' = nj, B::broken' = b, B::seen' = sn,
@@ -405,7 +411,7 @@ module bisim {
       if (B::events < P_MAX_EVENTS and B::root.tNo < 2) all { B::rootTicket, matchOk' = true }
       else bNone
     else if (mv.kind == "learnCp")
-      if (B::cps.keys().contains(mv.n) and mv.n > r.cpNo) all { B::learnCp(mv.n), matchOk' = true }
+      if (B::cps.keys().contains(mv.n)) all { B::learnCp(mv.n), matchOk' = true }
       else bNone
     else if (mv.kind == "learnRootChange")
       if (r.rootGen < B::root.gen) all { B::learnRootChange, matchOk' = true }

@@ -19,7 +19,9 @@
     "join_drop_new",
     "old_ticket",
     "keep_unserved",
-    "cp_rollback"
+    "cp_rollback",
+    "cp_number_only",
+    "old_gen_cp"
   ],
   "witnesses": [
     "witnessOwnEvicted",
@@ -31,6 +33,7 @@
     "witnessRequestAnswered",
     "witnessRevokedPurged",
     "witnessUnlisted",
+    "witnessUnlistedNewGen",
     "witnessJoinEvicted",
     "witnessNewGenTicket"
   ],

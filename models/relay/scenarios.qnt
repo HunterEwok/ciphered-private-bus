@@ -53,6 +53,36 @@ module scenarios {
       .expect(relay.store.exists(o => o.kind == "req"))
       .then(recvGrant(grant(1)))
       .expect(relay.store.filter(o => o.kind != "pub").map(o => (o.kind, o.no)) == Set(("grant", 1)) and safety)
+
+  // B.10 rules 3 and 4, R-MEM-12: the relay holds checkpoint (1, 2); after a
+  // root change the new Root's first checkpoint (2, 1) no longer lists the
+  // relay, and the relay accepts it although its number is smaller, and
+  // deletes what it stored.
+  run newGenUnlistTest =
+    init
+      .then(recvPub(pub(2, 1, 1)))
+      .then(rootRevoke(1))
+      .then(learnCp(2))
+      .expect(relay.cp == (1, 2))
+      .then(rootChange)
+      .then(learnRootChange)
+      .then(rootUnlist)
+      .then(learnCp(3))
+      .expect(relay.cp == (2, 1) and not(relay.served) and relay.store == Set() and safety)
+}
+
+module scenarios_probe_cp_number_only {
+  import relay(N_DEV = 2, CHANS = Set(1), MAX_NO = 2, MAX_DEPTH = 2, SIZES = Set(1, 2), SOURCE_BYTES = 3, BUS_BYTES = 3, JOIN_MAX = 1, MAX_ARR = 4, MAX_EVENTS = 3, MUTANT = "cp_number_only").* from "./relay"
+
+  run cpNumberOnlyViolatesSafetyTest =
+    init
+      .then(rootRevoke(1))
+      .then(learnCp(2))
+      .then(rootChange)
+      .then(learnRootChange)
+      .then(rootUnlist)
+      .then(learnCp(3))
+      .expect(relay.served and not(safety))
 }
 
 module scenarios_probe_unfair {

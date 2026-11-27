@@ -28,7 +28,7 @@ module inductive {
   val KEYS = tuples(DEVS, CHANS)
   val CPNOS = 1.to(MAX_EVENTS + 1)
   val TAGS = Set("ownEvicted", "busEvicted", "noVictim", "grantReplaced", "servedPub", "forwarded0",
-                 "requestAnswered", "revokedPurged", "unlisted", "joinEvicted", "newGenTicket", "refused",
+                 "requestAnswered", "revokedPurged", "unlisted", "unlistedNewGen", "joinEvicted", "newGenTicket", "refused",
                  "callForwarded", "callRefused")
 
   // What the relay can hold, field by field (membership of a record in a big
@@ -45,13 +45,15 @@ module inductive {
     },
   }
 
-  def indInvOf(r: Relay, c: int -> Set[int], rt: { gen: int, tNo: int, cpNo: int, listed: bool }, ev: int, nj: int,
+  def indInvOf(r: Relay, c: int -> Set[int], rt: Root, ev: int, nj: int,
                b: Set[str], s: Set[str]): bool = and {
     // bounds
     0 <= ev, ev <= MAX_EVENTS, 0 <= nj,
     // every new checkpoint, root change and join request is one event
     (rt.cpNo - 1) + (rt.gen - 1) + nj <= ev,
     1 <= rt.gen, rt.gen <= 2, 0 <= rt.tNo, rt.tNo <= 2, CPNOS.contains(rt.cpNo),
+    // the index of the last checkpoint before the root change, 0 before it
+    if (rt.gen == 1) rt.chgAt == 0 else (1 <= rt.chgAt and rt.chgAt <= rt.cpNo),
     c.keys() == CPNOS.filter(k => k <= rt.cpNo), c.keys().forall(k => c.get(k).subseteq(DEVS)),
     // the Root's checkpoints only add revoked devices
     c.keys().forall(k => c.keys().forall(m => k <= m implies c.get(k).subseteq(c.get(m)))),
@@ -62,7 +64,9 @@ module inductive {
     r.online.subseteq(DEVS), r.revoked.subseteq(DEVS),
     1 <= r.rootGen, r.rootGen <= rt.gen, 1 <= r.tGen, r.tGen <= 2, 1 <= r.tNo, r.tNo <= 2,
     // the relay's checkpoint is one the Root issued, the latest it accepted
-    1 <= r.cpNo, r.cpNo <= rt.cpNo, r.cpMax == r.cpNo, r.revoked == c.get(r.cpNo),
+    1 <= r.cpNo, r.cpNo <= rt.cpNo, r.revoked == c.get(r.cpNo),
+    // its pair is that of the checkpoint, of a root generation the relay knows
+    r.cp == cpAt(rt, r.cpNo), r.cp._1 <= r.rootGen,
     // a relay no longer listed holds the Root's last checkpoint, which unlisted it
     not(r.served) implies (r.cpNo == rt.cpNo and not(rt.listed) and r.online == Set() and r.joins == List()),
     // nothing revoked is connected
@@ -141,6 +145,7 @@ module inductive {
     nondet rGen = 1.to(2).oneOf()
     nondet rTNo = 0.to(2).oneOf()
     nondet rCpNo = CPNOS.oneOf()
+    nondet chgAt = 0.to(MAX_EVENTS + 1).oneOf()
     nondet listed = Set(false, true).oneOf()
     nondet ev = 0.to(MAX_EVENTS).oneOf()
     nondet nj = 0.to(MAX_EVENTS).oneOf()
@@ -154,13 +159,13 @@ module inductive {
     val reqs = GSLOTS.filter(t => qBytes.get(t) == 1).map(t =>
       { kind: "req", src: t._1, ch: t._2, reader: t._3, no: 1, gen: 0, depth: 0, size: 0, ok: true, arr: qArr.get(t) })
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
+    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, chgAt: chgAt, listed: listed }
     val r = {
-      served: served, cpNo: cpNo, cpMax: cpNo, revoked: revAll.get(cpNo), rootGen: rootGen, tGen: tGen, tNo: tNo,
+      served: served, cpNo: cpNo, cp: cpAt(rt, cpNo), revoked: revAll.get(cpNo), rootGen: rootGen, tGen: tGen, tNo: tNo,
       store: pubs.union(grants).union(reqs), bytes: { pub: pBytes, grant: gBytes, req: qBytes }, hi: hi, dep: dep, arr: arr,
       joins: range(0, JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,
     }
-    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, listed: listed }
     all {
       indInvOf(r, c, rt, ev, nj, Set(), sn),
       relay' = r, cps' = c, root' = rt, events' = ev, nextJoin' = nj, broken' = Set(), seen' = sn,

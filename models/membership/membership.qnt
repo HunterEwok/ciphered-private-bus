@@ -107,7 +107,7 @@ module membership {
   // is added here. This keeps no copy of the previous state and no log of
   // past acceptances, which would multiply the states TLC has to explore.
   var broken: Set[str]
-  var seen: Set[str]           // ghost: "accept" and "grant" once they happened (witnesses)
+  var seen: Set[str]           // ghost: "accept", "grant" and "revokedSend" once they happened (witnesses)
 
   // ------------------------------------------------------------------- helpers
   pure def genesis(g: int): Checkpoint = { gen: g, no: 0, start: 1, valid: Set(), nextNo: 1 }
@@ -454,7 +454,8 @@ module membership {
 
   // A device sends data under any passport it was ever issued in its
   // generation, including a revoked one: a revoked device may still consider
-  // itself a member (R-MEM-16).
+  // itself a member (R-MEM-16). A send under a passport the Root already
+  // revoked is tagged for the witness.
   action nodeSend(d: str): bool = {
     val n = nodes.get(d)
     val mine = pool.pp.filter(p => p.dev == d and p.gen == n.gen)
@@ -463,7 +464,8 @@ module membership {
       mine != Set(),
       nondet p = mine.oneOf()
       nondet ch0 = Set(false, true).oneOf()
-      setNode(d, n, { ...pool, data: pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen, cpNo: n.cp.no, ch0: ch0 })) }),
+      commitWith(nodes, root, { ...pool, data: pool.data.union(Set({ src: d, ppNo: p.no, gen: n.gen, cpNo: n.cp.no, ch0: ch0 })) },
+                 history, Set(), if (root.gen == n.gen and root.revoked.contains(p.no)) Set("revokedSend") else Set()),
     }
   }
 
@@ -634,6 +636,5 @@ module membership {
   val witnessGrant = not(seen.contains("grant"))
   val witnessRootChange = DEVICES.forall(d => nodes.get(d).gen == 1)
   val witnessWindowMoves = history.forall(c => c.start == 1)
-  val witnessRevokedSends = not(pool.data.exists(m =>
-    DEVICES.exists(d => revokedBy(m.ppNo, nodes.get(d).cp) and nodes.get(d).gen == m.gen)))
+  val witnessRevokedSends = not(seen.contains("revokedSend"))
 }

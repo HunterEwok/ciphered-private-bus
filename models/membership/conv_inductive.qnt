@@ -172,7 +172,7 @@ module conv_inductive {
       implies p.hp.exists(x => x.kind != "rc" and x.gen == ns.get(d).gen)),
     DEVICES.forall(d => ns.get(d).forever implies p.hp.exists(x => x.kind == "rc")),
     b == Set(),
-    s.subseteq(Set("accept", "grant")),
+    s.subseteq(Set("accept", "grant", "revokedSend")),
   }
 
   val IndInv = indInvOf(nodes, root, pool, history, broken, seen)
@@ -256,7 +256,7 @@ module conv_inductive {
     nondet pdata = DATAS.powerset().oneOf()
     val hist = SLOTS.filter(s => hIn.get(s))
       .map(s => { gen: s._1, no: s._2, start: hStart.get(s), valid: hValid.get(s), nextNo: hNext.get(s) })
-    nondet sn = Set("accept", "grant").powerset().oneOf()
+    nondet sn = Set("accept", "grant", "revokedSend").powerset().oneOf()
     val ns = DEVICES.mapBy(d => {
       gen: gens.get(d),
       cp: { gen: gens.get(d), no: cpNo.get(d), start: cpStart.get(d), valid: cpValid.get(d), nextNo: cpNext.get(d) },

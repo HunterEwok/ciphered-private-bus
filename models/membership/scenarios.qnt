@@ -26,6 +26,19 @@ module scenarios {
       .then(nodeAcceptData("a", oldData))
       .fail()
 
+  // The witness of a send under a revoked passport needs a send after the
+  // revocation: data sent before it, and a checkpoint that revokes the
+  // passport reaching a node later, do not count.
+  run revokedSendNeedsLaterSendTest =
+    init
+      .then(rootIssue("b", 3, Set()))
+      .then(nodeSend("b"))
+      .then(rootRevoke)
+      .then(nodeRecvCp("a", { gen: 1, no: 2, start: 2, valid: Set(), nextNo: 2 }))
+      .expect(witnessRevokedSends)
+      .then(nodeSend("b"))
+      .expect(not(witnessRevokedSends))
+
   // A passport and a checkpoint are verified with the root key of their
   // generation that the node installed (Appendix B, Section B.3, rule 1).
   // After a second root change record of generation 2 (a stolen recovery

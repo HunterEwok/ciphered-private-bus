@@ -357,7 +357,7 @@ module bisim {
   pure val SLOTS = V_SLOTS
   pure val BROKEN = Set("noRollback", "currentGeneration", "haltIsSticky", "haltedIsInert",
                         "revokedIsRejected", "grantsNeedRead", "dataNeedsPublish")
-  pure val TAGS = Set("accept", "grant")
+  pure val TAGS = Set("accept", "grant", "revokedSend")
 
   pure val SHAPES_2: Set[(int, int, int, Set[int])] = Set(
     (1, 1, 1, Set()), (1, 1, 2, Set()), (1, 1, 2, Set(1)), (1, 2, 2, Set()),

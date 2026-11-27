@@ -42,7 +42,7 @@ send or an eviction may do, are checked by a monitor when the step is taken, as 
 | `fairShare` | S14, B.10 | a source within its fair share never loses data because of another source |
 | `evictsOnlyOwn` | R-REL-4, B.10 rule 1 | a source over its own limit evicts only its own publications |
 | `grantsKept` | B.10 rule 2 | a grant is never evicted to make room |
-| `latestGrant` | R-REL-3 | a grant replaces the held one only with a higher generation |
+| `latestGrant` | R-REL-3 | a grant replaces the held one only with a generation not less than its own |
 | `oneGrantOneRequest` | R-REL-3 | one grant per (source, channel, reader) and one key request per (reader, channel) |
 | `retentionHolds` | R-REL-3, R-CH-10, R-CH-11 | a channel keeps at most as many publications as the depth of its newest |
 | `joinsBounded` | R-JOIN-8 | the join buffer is bounded and keeps the newest request |
@@ -75,8 +75,11 @@ Probes, each expected to violate `safety`:
 
 Fixed scenarios in [`scenarios.qnt`](scenarios.qnt) (`quint test`): a source within its fair share keeps
 its publication when another source fills the bus (and `unfair` evicts it); the join buffer evicts the
-oldest request; and after the checkpoint that revokes a device nothing from or for it is stored and it
-gets no hello.
+oldest request; after the checkpoint that revokes a device nothing from or for it is stored and it
+gets no hello; and the answer to a key request, a grant of the generation the relay already holds with
+the request's nonce, replaces the held grant and deletes the request. A source over its own limit evicts its
+own oldest publication and not that of another source (and `evict_other`, which simulation does not
+reach with its fixed seed, evicts the other one).
 
 Witnesses (`witness*`) state that a behaviour never happens and are expected to be violated: a
 source evicts its own publication, a full bus evicts another source's publication, a full bus refuses

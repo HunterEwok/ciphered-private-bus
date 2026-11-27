@@ -29,10 +29,10 @@ CHECKS = json.loads((HERE / "checks.json").read_text())
 CHECKED = ["small", "tiny"]
 # Random simulation reaches every witness.
 SIM_WITNESSES = CHECKS["witnesses"]
-# Probes whose defect needs a long specific sequence are checked by a scenario only;
-# every relay probe is reached by simulation, and unfair also has a scenario.
-SCENARIO_PROBES = []
-SCENARIOS = ["scenarios", "scenarios_probe_unfair"]
+# Probes whose defect needs a specific sequence are checked by a scenario only;
+# unfair is reached by simulation and also has a scenario.
+SCENARIO_PROBES = ["evict_other"]
+SCENARIOS = ["scenarios", "scenarios_probe_unfair", "scenarios_own_limit", "scenarios_probe_evict_other"]
 SEED = "0x5eed"
 # The Apalache version is pinned with the other tools in tools/versions/versions.toml.
 with open(HERE.parents[1] / "tools" / "versions" / "versions.toml", "rb") as _f:

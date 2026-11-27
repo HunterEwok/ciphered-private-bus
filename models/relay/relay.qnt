@@ -339,15 +339,16 @@ module relay {
     }
   }
 
-  // A key grant arrives: the latest per (source, channel, reader), a higher
-  // generation replaces it (R-REL-3). It is forwarded to the reader if
+  // A key grant arrives: the latest per (source, channel, reader), one of a
+  // generation not less than the held one replaces it (R-REL-3); at equal
+  // generation it may carry the nonce of a key request (R-CH-18). It is forwarded to the reader if
   // connected, together with the retained publications, and then a key
   // request it answers is deleted.
   action recvGrant(o: Obj): bool = {
     val r = relay
     val old = r.store.filter(x => x.kind == "grant" and x.src == o.src and x.ch == o.ch and x.reader == o.reader)
     // Mutant "grant_downgrade": a grant replaces the held one whatever its generation.
-    val replaces = old.forall(x => o.gen > x.gen) or MUTANT == "grant_downgrade"
+    val replaces = old.forall(x => o.gen >= x.gen) or MUTANT == "grant_downgrade"
     val refusedFor = (r.revoked.contains(o.src) or r.revoked.contains(o.reader)) and MUTANT != "accept_revoked"
     val o2 = { ...o, arr: r.arr + 1 }
     val a = admit(r.store.exclude(old), without(r.bytes, old), o2)
@@ -363,7 +364,7 @@ module relay {
                    arr: if (a.refused) r.arr else r.arr + 1 },
         a.bad.union(if (not(o.ok)) Set("onlyVerified") else Set())
           .union(if (online and not(a.refused) and r.revoked.contains(o.reader)) Set("nothingForRevoked") else Set())
-          .union(if (not(a.refused) and old.exists(x => x.gen >= o.gen)) Set("latestGrant") else Set()),
+          .union(if (not(a.refused) and old.exists(x => x.gen > o.gen)) Set("latestGrant") else Set()),
         a.tags.union(if (old != Set() and not(a.refused)) Set("grantReplaced") else Set())
           .union(if (online and pubs != Set() and not(a.refused)) Set("servedPub") else Set())),
     }
@@ -580,7 +581,7 @@ module relay {
   val evictsOnlyOwn = not(broken.contains("evictsOnlyOwn"))
   // B.10 rule 2: a grant is never evicted to make room.
   val grantsKept = not(broken.contains("grantsKept"))
-  // R-REL-3: a grant replaces the held one only with a higher generation
+  // R-REL-3: a grant replaces the held one only with a generation not less
   // (checked at every replacement).
   val latestGrant = not(broken.contains("latestGrant"))
   // R-REL-3: one grant per (source, channel, reader), one key request per

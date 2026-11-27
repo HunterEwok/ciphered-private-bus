@@ -370,7 +370,7 @@ module bisim {
     else if (mv.kind == "grant") {
       val old = r.store.filter(x => x.kind == "grant" and x.src == o.src and x.ch == o.ch and x.reader == o.reader)
       if (o.ok and r.served and not(r.revoked.contains(o.src) or r.revoked.contains(o.reader)) and o.kind == "grant"
-          and o.src != o.reader and old.forall(x => o.gen > x.gen) and r.arr < P_MAX_ARR)
+          and o.src != o.reader and old.forall(x => o.gen >= x.gen) and r.arr < P_MAX_ARR)
         all { B::recvGrant(o), matchOk' = true }
       else bNone
     }

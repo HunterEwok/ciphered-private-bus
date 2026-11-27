@@ -82,6 +82,23 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   every sender, of any generation, with its halt proof, and that proof takes effect at any
   generation because it is verified with K1 and K2 alone (R-MEM-6, R-MEM-13, Appendix B,
   Section B.3, rules 2 and 3).
+- Specification: the window floor starts at 1 and rises only when publications leave the retained
+  ones because the depth is exceeded, or above a clearing publication; losing the retained
+  publications in a reboot does not move it (R-CH-9). Reason: with the floor defined as the lowest
+  retained number, a floor kept below an evicted publication let it be accepted again after a reboot.
+- Specification: a relay replaces a held grant also with one of the same generation, which may carry
+  the nonce of a key request (R-REL-3). Reason: otherwise the answer to a key request of a reader whose
+  source had not rotated could not pass the relay.
+- Specification: the class of an action comes from the permits in the target's passport, never from
+  the call; the root key has the right to every action, and the other keys of the root device only the
+  rights the passport gives that device (R-CALL-4).
+- Specification: the owner compares the device key fingerprint also when the Root pairs a joiner
+  itself (R-JOIN-9, Appendix B, Section B.11, note 3). Reason: one pairing procedure, and the code is
+  never the only barrier.
+- Specification: a stream chunk sets exactly one of the flags data, credit and end; any other
+  combination closes the stream (R-STR-2, Appendix B, Section B.7).
+- Specification: S7 is stated for the records a node processed; a record dropped because it is not yet
+  valid for the node reaches it again through the exchange of control-plane objects.
 - Rust toolchain updated from 1.97.0 to 1.100.0.
 - The repository hygiene check now also scans dot-files and directories (previously
   skipped), rejects more traces of AI tooling (notices, trailers, vendor and model names,

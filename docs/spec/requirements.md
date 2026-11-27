@@ -147,7 +147,7 @@ not defined by the bus; it is an assumption for which the application is respons
 | S4 | Membership | A node accepts anything only from a device holding a passport of the current Root that is valid under that node's checkpoint. |
 | S5 | Revocation | From the moment a node learns a checkpoint without device X, it accepts nothing from X and seals nothing to it. |
 | S6 | No rollback | The checkpoint number on a node never decreases, including across reboots. A revoked device does not come back through an old record. |
-| S7 | Convergence | Two nodes that received the same set of records in any order are in the same membership state. There is one exception: one node saw two conflicting records and halted, while the other received them already outdated, one per link, and did not notice the conflict. The halt then reaches the second node through the proof that the first node sends on every link (R-MEM-10). |
+| S7 | Convergence | Two nodes that processed the same set of records in any order are in the same membership state. A record a node drops because it is not yet valid for it, such as a checkpoint of a root generation the node has not reached, is not processed; it reaches the node again through the exchange of control-plane objects when the generations differ (R-MEM-6, R-REL-1). There is one exception: one node saw two conflicting records and halted, while the other received them already outdated, one per link, and did not notice the conflict. The halt then reaches the second node through the proof that the first node sends on every link (R-MEM-10). |
 | S8 | Single history | Two different records of one author with the same number put the node into the halted state. Only a root change record leaves the halted state. |
 | S9 | Root change | The root key changes only through a record signed by both halves of the recovery key. After the change the previous Root has no power. |
 | S10 | Call integrity | An action is executed at most once, and only if the call is signed by a permitted key over a fresh nonce issued by the target. An action of the confirmation class requires the user-presence key or the root key. |
@@ -526,7 +526,8 @@ and a Root signature after the owner confirms.
 > *Serves:* S14. *Verified by:* relay model.
 
 > **R-JOIN-9.** The Root MAY pair a joiner itself, without an acceptor. It is the same exchange; no join
-> request is prepared.
+> request is prepared. The owner compares the device key fingerprint on both screens here too
+> (R-JOIN-5, R-JOIN-7).
 > *Serves:* S4. *Verified by:* Tamarin.
 
 > **R-JOIN-10.** Bus creation: the root device asks the host to generate the root key, generates K1 and
@@ -671,11 +672,14 @@ distinguishes channels by it but does not know which channel it is.
 > the highest accepted publication number, and the window floor. It MUST accept a grant only with a
 > generation not less than its own; at equal generation the commitment MUST match. It MUST accept a
 > publication only under a key it holds, and only with a number greater than its highest, or with a
-> number in the window [floor, highest] if it does not currently hold that publication. The floor is the
-> lowest number among the retained publications of the channel (R-CH-11); at depth 0 there is no
-> window, and a publication of depth 0 is accepted only as a new one. A rebooted recipient thus
-> refills its retained publications, and a repeat of an already
-> accepted one changes nothing, as in the DDS/RTPS reader history cache [DDS-RTPS]. These values change
+> number in the window [floor, highest] if it does not currently hold that publication. The floor starts
+> at 1 and only rises: when publications leave the retained ones because the depth is exceeded
+> (R-CH-11), the floor moves to the lowest retained number, and a clearing publication moves it above
+> its own number (R-CH-10). Losing the retained publications in a reboot does not move it, so a
+> publication that once left the window is never accepted again. At depth 0 there is no window, and a
+> publication of depth 0 is accepted only as a new one. A rebooted recipient thus refills its retained
+> publications, and a repeat of an already accepted one changes nothing, as in the DDS/RTPS reader
+> history cache [DDS-RTPS]. These values change
 > only after full verification and decryption. A publication under a key the recipient does not hold is
 > dropped, changes no state, and triggers one key request per channel (R-CH-18). Whoever sends or
 > forwards a grant follows it immediately with the retained publications of the channel (R-CH-11), so
@@ -787,9 +791,11 @@ has not yet consumed.
 > *Serves:* S1, S10. *Verified by:* Tamarin.
 
 > **R-CALL-4.** The target MUST execute the action only if the nonce matched the slot and the signing key
-> has the right to this action under the target's passport. An automatic action is signed by the
-> commander's device key. A confirmation-class action is signed by the commander's user-presence key or
-> by the root key.
+> has the right to this action under the target's passport. The class of an action is the target's:
+> it comes from the permits in the target's passport, never from the call. An automatic action is signed
+> by the commander's device key. A confirmation-class action is signed by the commander's user-presence
+> key or by the root key. The root key has the right to every action; the device and user-presence keys
+> of the root device have only the rights the target's passport gives that device.
 > *Serves:* S10. *Verified by:* Tamarin, model.
 
 > **R-CALL-5.** A matched nonce MUST be erased before the action is executed. One nonce executes at most
@@ -863,8 +869,9 @@ has not yet consumed.
 
 > **R-STR-2.** A stream chunk contains: target and commander, a direction bit (from the commander or from
 > the target), the stream number, the chunk number, flags (data, credit, end), the amount of added credit
-> in bytes if the credit flag is set, and the ciphertext. The cipher nonce equals the chunk number; the
-> chunk header is associated data.
+> in bytes if the credit flag is set, and the ciphertext. Exactly one of the three flags is set, so every
+> chunk has one meaning; a chunk with any other combination closes the stream. The cipher nonce equals
+> the chunk number; the chunk header is associated data.
 > *Serves:* S1, S11. *Verified by:* vectors, Tamarin.
 
 > **R-STR-3.** A stream is opened in one of two modes, named in the call. Ordered: the recipient MUST
@@ -920,7 +927,8 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 > retention depth in the header and serves them to a reader on connection in publication number order.
 > It keeps the latest key grant for each quadruple (bus, source, channel label, reader) against the
 > source's quota, whether or not there are publications, and serves it before the publications. A grant
-> with a higher generation replaces the previous one. A key request (R-CH-18) is deleted once the relay
+> with a generation not less than the held one replaces it: at equal generation it carries the same key
+> and may carry the nonce of a key request (R-CH-18). A key request (R-CH-18) is deleted once the relay
 > has forwarded to the reader a grant with the same nonce or has received a new request from the reader.
 > *Serves:* delivery. *Verified by:* relay model, simulator.
 

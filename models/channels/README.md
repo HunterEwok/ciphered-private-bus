@@ -30,6 +30,7 @@ forge (R-REL-11). The header of `channels.qnt` lists every abstraction.
 | `noMarkedGrant` | R-CH-5 | while the rotation mark is set, the marked key is granted to no one |
 | `retention` | R-CH-10, R-CH-11, R-CH-12 | at most `depth` retained publications, all in the window, distinct numbers, none of them a clearing publication or one of depth 0 |
 | `noReadNoKey` | R-CH-13 | a device without the read right never holds a key |
+| `windowFloor` | R-CH-9, R-CH-10, R-CH-11 | S12: the floor of the window never falls, rises above every publication that trim evicts or a clear removes, and moves only then |
 
 Step properties are checked by a monitor when the step is taken, as in the membership model.
 
@@ -51,11 +52,12 @@ Probes, each expected to violate `safety`:
 | `no_trim` | A reader retains more publications than the depth |
 | `late_clear_kept` | A late clearing publication, or one of depth 0, is retained by a refill |
 | `grant_marked` | The source grants a key marked for rotation |
+| `floor_stays` | The floor stays where it is when trim evicts publications |
 
-`empty_no_clear`, `refill_moves_high`, `no_trim`, and `late_clear_kept` need a long specific sequence
-and are checked by fixed scenarios in [`scenarios.qnt`](scenarios.qnt), which also show that refill
-after a reboot, shrinking the depth, clearing, a late clearing publication, and rotation after a
-removal are reachable with `safety` intact.
+`empty_no_clear`, `refill_moves_high`, `no_trim`, `late_clear_kept`, and `floor_stays` need a long
+specific sequence and are checked by fixed scenarios in [`scenarios.qnt`](scenarios.qnt), which also
+show that refill after a reboot, shrinking the depth, clearing, a late clearing publication, eviction
+by trim followed by a reboot, and rotation after a removal are reachable with `safety` intact.
 
 A reader persists the depth of its latest accepted publication with its window (R-CORE-5): after a
 reboot it is what lets the window refill. Losing it would only stop the refill, which is liveness, not
@@ -68,7 +70,11 @@ source now persists a rotation mark set in the same event in which a device leav
 R-CORE-5); the probe `mark_not_persisted` removes it. A review of the model found a second gap: a
 clearing publication or one of depth 0 that arrived late, inside the window, was retained by a refill.
 A late clearing publication now clears the window up to its number and moves the floor above it, and a
-publication of depth 0 is accepted only as a new one (R-CH-9, R-CH-10).
+publication of depth 0 is accepted only as a new one (R-CH-9, R-CH-10). A later review found a third:
+the floor did not rise when trim evicted a publication, so after publications 1, 3 and 2 at depth 2
+and a reboot, publication 1 was accepted again. The floor now moves to the lowest retained number when
+trim evicts, and stays put when a reboot loses the retained publications (R-CH-9); the scenario
+`floorAfterEvictionTest` replays that sequence.
 
 ## Inductive invariant
 

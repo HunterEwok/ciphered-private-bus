@@ -31,7 +31,7 @@ CHECKED = ["small", "tiny"]
 # after a reboot) are shown reachable by the fixed scenarios.
 SIM_WITNESSES = ["witnessAccept", "witnessClear", "witnessRotateAfterRemove"]
 # Probes whose defect needs a long specific sequence are checked by a scenario.
-SCENARIO_PROBES = ["empty_no_clear", "refill_moves_high", "no_trim", "late_clear_kept"]
+SCENARIO_PROBES = ["empty_no_clear", "refill_moves_high", "no_trim", "late_clear_kept", "floor_stays"]
 SCENARIOS = ["scenarios"] + [f"scenarios_probe_{p}" for p in SCENARIO_PROBES]
 SEED = "0x5eed"
 # The Apalache version is pinned with the other tools in tools/versions/versions.toml.

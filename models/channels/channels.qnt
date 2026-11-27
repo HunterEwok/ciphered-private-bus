@@ -97,6 +97,14 @@ module channels {
   // R-CH-5: the source must rotate before the next publication.
   def mustRotateNow: bool = not(source.keyOk) or source.mustRotate
 
+  // R-CH-9: the floor rises only when publications leave the retained ones
+  // because the depth is exceeded, or above a clearing publication, and then
+  // above every publication that left; so one that left is never accepted
+  // again. `out` are the publications that left the window in this step.
+  pure def floorProblems(a: Reader, b: Reader, out: Set[Pub], clear: bool): Set[str] =
+    if (b.floor >= a.floor and out.forall(q => q.no < b.floor)
+        and (out != Set() or clear or b.floor == a.floor)) Set() else Set("windowFloor")
+
   // Properties of one transition of one reader.
   pure def readerProblems(a: Reader, b: Reader): Set[str] =
     // S12: the channel value is never replaced with an older one, also across
@@ -256,24 +264,35 @@ module channels {
       val cleared = p.depth == 0 or p.empty
       val kept = if (cleared) (if (MUTANT == "empty_no_clear" and p.empty) r.retained else Set())
                  else trim(r.retained.union(Set(p)), p.depth)
+      // The floor rises above what left the window (R-CH-9); the mutant
+      // floor_stays computes it as before the fix.
+      val out = r.retained.union(Set(p)).exclude(kept).exclude(if (cleared) Set(p) else Set())
       val r2 = { ...r, hiNo: p.no, depth: p.depth, retained: kept,
-                 floor: if (cleared) p.no + 1 else minNo(kept, p.no) }
+                 floor: if (cleared) p.no + 1
+                        else if (MUTANT == "floor_stays") minNo(kept, p.no)
+                        else if (out != Set()) minNo(kept, p.no) else r.floor }
       // Accepted only under a key the reader holds (R-CH-9).
-      setReader(d, r2, if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set(),
+      setReader(d, r2, (if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set())
+        .union(floorProblems(r, r2, if (cleared) r.retained else out, cleared)),
         Set("accept").union(if (p.depth < r.depth and not(cleared)) Set("shrink") else Set()))
     } else if (p.empty and MUTANT != "late_clear_kept") {
       // A late clearing publication clears everything up to its number, and
       // the floor moves above it, so nothing older refills the window
       // (R-CH-9, R-CH-10).
       val r2 = { ...r, retained: r.retained.filter(q => q.no > p.no), floor: p.no + 1 }
-      setReader(d, r2, if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set(), Set("lateClear"))
+      setReader(d, r2, (if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set())
+        .union(floorProblems(r, r2, r.retained.filter(q => q.no <= p.no), true)), Set("lateClear"))
     } else {
       // A publication in the window that the reader does not hold: refill.
       // Only the depth of the latest publication governs (R-CH-10).
       val kept = trim(r.retained.union(Set(p)), r.depth)
-      val r2 = { ...r, retained: kept, floor: minNo(kept, r.floor),
+      val out = r.retained.union(Set(p)).exclude(kept)
+      val r2 = { ...r, retained: kept,
+                 floor: if (MUTANT == "floor_stays") minNo(kept, r.floor)
+                        else if (out != Set()) minNo(kept, r.hiNo) else r.floor,
                  hiNo: if (MUTANT == "refill_moves_high") p.no else r.hiNo }
-      setReader(d, r2, if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set(), Set("refill"))
+      setReader(d, r2, (if (p.kid != r.kid) Set("acceptUnderHeldKey") else Set())
+        .union(floorProblems(r, r2, out, false)), Set("refill"))
     }
   }
 
@@ -310,6 +329,7 @@ module channels {
   val grantsToReaders = not(broken.contains("grantsToReaders"))     // R-CH-13, S5
   val acceptUnderHeldKey = not(broken.contains("acceptUnderHeldKey")) // R-CH-9
   val noMarkedGrant = not(broken.contains("noMarkedGrant"))         // R-CH-5
+  val windowFloor = not(broken.contains("windowFloor"))             // R-CH-9, S12
 
   // R-CH-10, R-CH-11, R-CH-12: a reader retains at most `depth`
   // publications, all of them in its window, with distinct numbers, and none
@@ -325,7 +345,7 @@ module channels {
   val noReadNoKey = NO_READ.forall(d => readers.get(d).kid == 0)
 
   val safety = freshness and uniqueNumbers and uniqueKeys and rotateOnRemove and grantsToReaders
-    and acceptUnderHeldKey and noMarkedGrant and retention and noReadNoKey
+    and acceptUnderHeldKey and noMarkedGrant and windowFloor and retention and noReadNoKey
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.

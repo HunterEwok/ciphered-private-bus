@@ -103,6 +103,26 @@ module scenarios {
       .expect(source.mustRotate)
       .then(sourcePublishWith(1, false))
       .fail()
+
+  // Publications 1, 3, 2 at depth 2: publication 1 leaves the window when 2
+  // arrives, the floor rises to 2, and after a reboot publication 1 is not
+  // accepted again (R-CH-9, S12).
+  val q3 = { gen: 1, kid: 1, no: 3, depth: 2, empty: false }
+  run floorAfterEvictionTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(readerGrant("a", g1))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, false))
+      .then(readerPub("a", p1))
+      .then(readerPub("a", q3))
+      .then(readerPub("a", p2))
+      .expect(readers.get("a").retained == Set(p2, q3) and readers.get("a").floor == 2 and safety)
+      .then(readerReboot("a"))
+      .then(readerPub("a", p1))
+      .expect(readers.get("a").retained == Set() and safety)
 }
 
 module scenarios_probe_refill_moves_high {
@@ -170,5 +190,28 @@ module scenarios_probe_late_clear_kept {
       .then(readerPub("a", { gen: 1, kid: 1, no: 1, depth: 2, empty: false }))
       .then(readerPub("a", { gen: 1, kid: 1, no: 3, depth: 2, empty: false }))
       .then(readerPub("a", { gen: 1, kid: 1, no: 2, depth: 2, empty: true }))
+      .expect(not(safety))
+}
+
+module scenarios_probe_floor_stays {
+  import channels(DEVICES = Set("a", "b"), NO_READ = Set(), LATE = Set(), MAX_GEN = 2, MAX_NO = 4,
+                  MAX_DEPTH = 2, BLOCK = 2, MUTANT = "floor_stays").* from "./channels"
+
+  val g1 = { gen: 1, kid: 1, reader: "a" }
+  val p1 = { gen: 1, kid: 1, no: 1, depth: 2, empty: false }
+  val p2 = { gen: 1, kid: 1, no: 2, depth: 2, empty: false }
+  val q3 = { gen: 1, kid: 1, no: 3, depth: 2, empty: false }
+
+  run floorStaysViolatesSafetyTest =
+    init
+      .then(sourceRotate)
+      .then(sourceGrantTo("a"))
+      .then(readerGrant("a", g1))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, false))
+      .then(sourcePublishWith(2, false))
+      .then(readerPub("a", p1))
+      .then(readerPub("a", q3))
+      .then(readerPub("a", p2))
       .expect(not(safety))
 }

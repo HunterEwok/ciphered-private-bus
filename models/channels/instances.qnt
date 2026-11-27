@@ -28,3 +28,4 @@ module probe_no_trim { import channels(DEVICES = Set("a", "b", "c"), NO_READ = S
 module probe_mark_not_persisted { import channels(DEVICES = Set("a", "b", "c"), NO_READ = Set("c"), LATE = Set("b"), MAX_GEN = 3, MAX_NO = 5, MAX_DEPTH = 2, BLOCK = 2, MUTANT = "mark_not_persisted").* from "./channels" }
 module probe_late_clear_kept { import channels(DEVICES = Set("a", "b", "c"), NO_READ = Set("c"), LATE = Set("b"), MAX_GEN = 3, MAX_NO = 5, MAX_DEPTH = 2, BLOCK = 2, MUTANT = "late_clear_kept").* from "./channels" }
 module probe_grant_marked { import channels(DEVICES = Set("a", "b", "c"), NO_READ = Set("c"), LATE = Set("b"), MAX_GEN = 3, MAX_NO = 5, MAX_DEPTH = 2, BLOCK = 2, MUTANT = "grant_marked").* from "./channels" }
+module probe_floor_stays { import channels(DEVICES = Set("a", "b", "c"), NO_READ = Set("c"), LATE = Set("b"), MAX_GEN = 3, MAX_NO = 5, MAX_DEPTH = 2, BLOCK = 2, MUTANT = "floor_stays").* from "./channels" }

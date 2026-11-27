@@ -15,7 +15,8 @@
     "high_not_persisted",
     "no_trim",
     "late_clear_kept",
-    "grant_marked"
+    "grant_marked",
+    "floor_stays"
   ],
   "witnesses": [
     "witnessAccept",

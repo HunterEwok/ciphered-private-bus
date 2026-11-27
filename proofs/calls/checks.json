@@ -3,7 +3,9 @@
     "PROBE_KEEP_NONCE": "at_most_once",
     "PROBE_NONCE_UNSIGNED": "call_integrity_auto",
     "PROBE_CONFIRM_DEVICE_KEY": "call_integrity_confirm",
+    "PROBE_CLASS_FROM_CALL": "call_integrity_confirm",
     "PROBE_STATIC_REPLY_KEY": "reply_binding",
+    "PROBE_SHARED_REPLY_KEY": "reply_key_unique",
     "PROBE_NO_DIRECTION": "stream_binding"
   },
   "ci": {
@@ -15,6 +17,7 @@
       "call_integrity_confirm",
       "at_most_once",
       "context_secrecy",
+      "reply_key_unique",
       "command_secrecy",
       "reply_secrecy",
       "stream_secrecy",
@@ -25,7 +28,9 @@
       "PROBE_KEEP_NONCE",
       "PROBE_NONCE_UNSIGNED",
       "PROBE_CONFIRM_DEVICE_KEY",
+      "PROBE_CLASS_FROM_CALL",
       "PROBE_STATIC_REPLY_KEY",
+      "PROBE_SHARED_REPLY_KEY",
       "PROBE_NO_DIRECTION"
     ]
   }

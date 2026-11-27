@@ -4,8 +4,8 @@
 // Fixed scenarios (`quint test`). Each drives the model straight to a case
 // that matters, and the matching probe shows the defect on the same steps.
 
-// S14, B.10 rule 4: source 2 holds one unit, within its fair share of a bus
-// of 3 units. Source 1 fills the bus within its own limit; the bus overflows
+// S14, B.10 eviction rule 4: source 2 holds one unit, within its fair share of
+// a bus of 3 units. Source 1 fills the bus within its own limit; the bus overflows
 // and the relay evicts from the source that occupies most, source 1, so
 // source 2 keeps its publication.
 module scenarios {
@@ -54,7 +54,7 @@ module scenarios {
       .then(recvGrant(grant(1)))
       .expect(relay.store.filter(o => o.kind != "pub").map(o => (o.kind, o.no)) == Set(("grant", 1)) and safety)
 
-  // B.10 rules 3 and 4, R-MEM-12: the relay holds checkpoint (1, 2); after a
+  // R-REL-6, R-MEM-12: the relay holds checkpoint (1, 2); after a
   // root change the new Root's first checkpoint (2, 1) no longer lists the
   // relay, and the relay accepts it although its number is smaller, and
   // deletes what it stored.
@@ -99,8 +99,8 @@ module scenarios_probe_unfair {
       .expect(not(fairShare))
 }
 
-// R-REL-4, B.10 rule 1: source 1 goes over its own limit of 3 units on a bus
-// of 6 and evicts its own oldest publication; the publication of source 2
+// R-REL-4, B.10 eviction rule 1: source 1 goes over its own limit of 3 units on
+// a bus of 6 and evicts its own oldest publication; the publication of source 2
 // stays (and `evict_other` evicts it instead).
 module scenarios_own_limit {
   import relay(N_DEV = 2, CHANS = Set(1), MAX_NO = 2, MAX_DEPTH = 2, SIZES = Set(1, 2), SOURCE_BYTES = 3, BUS_BYTES = 6, JOIN_MAX = 1, MAX_ARR = 4, MAX_EVENTS = 3, MUTANT = "none").* from "./relay"

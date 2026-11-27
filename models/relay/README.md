@@ -2,14 +2,16 @@
 <!-- Copyright (C) 2026 HunterEwok -->
 # Relay model
 
-A Quint [model](relay.qnt) of a relay (verification level V2 of the
+A Quint [model](relay.qnt) of a member relay (verification level V2 of the
 [specification](../../docs/spec/requirements.md), Section 11 and Appendix B, Section B.10; R-REL-2..8,
-R-JOIN-8, R-CH-12): one relay serving one bus, and what it accepts, stores, evicts, serves and
-forgets. Publications with their retention depth, key grants, key requests, and calls arrive from a
+R-JOIN-8, R-CH-12): one member relay serving one bus, and what it accepts, stores, evicts, serves
+and forgets. Publications with their retention depth, key grants, key requests, and calls arrive from a
 network that also delivers forged objects; the relay keeps quotas per source and per bus with the
-eviction rules of Section B.10, learns checkpoints that revoke a device or remove the relay itself,
-holds tickets across a root change, and buffers join requests. The header of `relay.qnt` lists every
-abstraction.
+eviction rules of Section B.10, learns checkpoints that revoke a device or remove the relay itself
+from the `relays` list, also across a root change, and buffers join requests. The header of
+`relay.qnt` lists every abstraction. The external relay, with tickets, aliases and bridges, is the
+[external relay model](../extrelay/); the accounting and eviction rules are the same for both kinds
+of relay, with aliases in place of devices.
 
 This model checks the honest relay. That a relay behaving arbitrarily cannot break S1..S14
 (R-REL-11) is checked in the other models: their network is a pool that delivers any object any
@@ -40,16 +42,15 @@ send or an eviction may do, are checked by a monitor when the step is taken, as 
 | `revokedPurged` | R-REL-6, S5 | nothing is stored from or for a revoked device, and nothing is sent to it |
 | `quotasHold` | R-REL-4 | no source exceeds its limit and the bus does not exceed its own |
 | `fairShare` | S14, B.10 | a source within its fair share never loses data because of another source |
-| `evictsOnlyOwn` | R-REL-4, B.10 rule 1 | a source over its own limit evicts only its own publications |
-| `grantsKept` | B.10 rule 2 | a grant is never evicted to make room |
+| `evictsOnlyOwn` | R-REL-4, B.10 eviction rule 1 | a source over its own limit evicts only its own publications |
+| `grantsKept` | B.10 eviction rule 2 | a grant is never evicted to make room |
 | `latestGrant` | R-REL-3 | a grant replaces the held one only with a generation not less than its own |
 | `oneGrantOneRequest` | R-REL-3 | one grant per (source, channel, reader) and one key request per (reader, channel) |
 | `retentionHolds` | R-REL-3, R-CH-10, R-CH-11 | a channel keeps at most as many publications as the depth of its newest |
 | `joinsBounded` | R-JOIN-8 | the join buffer is bounded and keeps the newest request |
-| `ticketOfCurrentRoot` | B.10 rules 2, 3 | a ticket is accepted only with a greater pair and of the latest root generation |
-| `unlistedEmpty` | B.10 rule 4 | a relay no longer in the checkpoint stores nothing and buffers no join requests |
+| `unlistedEmpty` | R-REL-6 | a relay no longer in the checkpoint's `relays` list stores nothing and buffers no join requests |
 | `checkpointForward` | R-REL-7, R-MEM-12 | the relay replaces its checkpoint only with one the Root issued later, of the root generation the relay knows |
-| `checkpointTaken` | B.10 rule 3 | the relay never drops a checkpoint the Root issued later, of the root generation it knows, even when its number is smaller after a root change |
+| `checkpointTaken` | R-REL-7, R-MEM-12 | the relay never drops a checkpoint the Root issued later, of the root generation it knows, even when its number is smaller after a root change |
 
 Probes, each expected to violate `safety`:
 
@@ -70,8 +71,6 @@ Probes, each expected to violate `safety`:
 | `retain_all` | Retention depth is ignored |
 | `join_unbounded` | The join buffer has no bound |
 | `join_drop_new` | On overflow the new join request is dropped instead of the oldest |
-| `old_ticket` | A ticket of the old root generation is accepted after a root change |
-| `ticket_rollback` | A ticket with a smaller or equal pair (gen, no) is accepted |
 | `keep_unserved` | A relay removed from the checkpoint keeps its data |
 | `cp_rollback` | An older checkpoint replaces a newer one |
 | `cp_number_only` | Checkpoints are compared by number without the generation |
@@ -91,8 +90,7 @@ Witnesses (`witness*`) state that a behaviour never happens and are expected to 
 source evicts its own publication, a full bus evicts another source's publication, a full bus refuses
 an object for lack of a victim, a grant is replaced, a publication is served, a publication of depth 0
 is forwarded, a key request is answered, a revocation purges data, the relay is removed from the
-checkpoint, also by a checkpoint of a new root generation, the join buffer overflows, and a ticket of a
-new root generation is accepted.
+checkpoint, also by a checkpoint of a new root generation, and the join buffer overflows.
 
 ## Requirement coverage
 
@@ -103,7 +101,7 @@ listed at the top of [`relay.qnt`](relay.qnt).
 | Requirement | Sentence | Checked by |
 | --- | --- | --- |
 | R-REL-1 | a relay accepts a device connection after a hello | guard: `connect`; the hello itself is the Tamarin model's |
-| R-REL-1 | before the hello, and when generations differ, the sides exchange control-plane objects; the relay serves them to a passport of any generation | abstraction: control-plane objects other than the checkpoint, the root change record and the ticket are not modelled (header) |
+| R-REL-1 | before the hello, and when generations differ, the sides exchange control-plane objects; the relay serves them to a passport of any generation | abstraction: control-plane objects other than the checkpoint and the root change record are not modelled (header) |
 | R-REL-2 | the relay verifies the Root signature on passports and checkpoints and the source signature on publications | `onlyVerified`; probe `no_verify`. Checkpoints come only from the Root's history (`cps`), so none is forged |
 | R-REL-2 | it stores and forwards nothing unverified | `onlyVerified` (a forwarded object is checked when sent); probe `no_verify` |
 | R-REL-3 | publications are retained per (source, channel) by the depth in the header | `retentionHolds`; probe `retain_all` |
@@ -115,26 +113,22 @@ listed at the top of [`relay.qnt`](relay.qnt).
 | R-REL-3 | a key request is deleted once a grant with its nonce is forwarded to the reader, or a new request arrives | `recvGrant`, `connect` and `recvReq`; `oneGrantOneRequest`; probe `two_requests`; scenario `sameGenGrantTest`; witness `witnessRequestAnswered` |
 | R-REL-4 | memory is divided into quotas per bus and per source | `quotasHold`; probe `over_quota` |
 | R-REL-4 | a source that exhausted its quota evicts only its own publications | `evictsOnlyOwn`; probe `evict_other`, scenarios `ownLimitTest`, `evictOtherViolatesSafetyTest` |
-| R-REL-4 | the Root signs the limits in the ticket | abstraction: the ticket is its pair (gen, no); its limits are the constants `BUS_BYTES` and `SOURCE_BYTES` (header) |
+| R-REL-4 | the memory limits of a member relay are set by the application on that device (B.10) | the constants `BUS_BYTES` and `SOURCE_BYTES` (header); for an external relay the ticket carries them, see the external relay model |
 | R-REL-5 | a publication is served only to a device with a grant of its channel, and to the source | `servedOnlyGranted`; probe `serve_ungranted` |
 | R-REL-6 | what is stored for a device revoked under the relay's checkpoint is deleted | `revokedPurged`; probe `keep_revoked`; scenario `revocationPurgesTest` |
 | R-REL-6 | nothing more is accepted for or from it | `revokedPurged` (nothing is sent to it either); probe `accept_revoked` |
+| R-REL-6 | a member relay that accepts a checkpoint without its identifier in `relays` deletes everything it stores, join requests included, and serves the bus no more | `unlistedEmpty`; probe `keep_unserved`; scenario `newGenUnlistTest`; witnesses `witnessUnlisted`, `witnessUnlistedNewGen` |
 | R-REL-7 | the relay keeps the latest checkpoint it knows | `checkpointForward`, `checkpointTaken`; probes `cp_rollback`, `cp_number_only`, `old_gen_cp`; scenario `newGenUnlistTest` |
 | R-REL-7 | and the latest root change record | guard: `learnRootChange` only raises `rootGen` |
 | R-REL-7 | passports and sealing key claims are stored and served on request | abstraction: control-plane objects outside the quota are not modelled (header) |
 | R-REL-8 | calls, replies and stream chunks are forwarded to connected devices and not stored | `nothingTransient`; probe `store_call` |
 | R-REL-11 | every property S1–S14 holds with an arbitrary relay | abstraction: checked in the other models, whose pool delivers anything (header); this model checks the honest relay |
-| R-MEM-12 | numbers of checkpoints and tickets start over for the Root of a new generation | `cpAt`, `checkpointForward`, `checkpointTaken`; probe `cp_number_only`; scenario `newGenUnlistTest` |
+| R-MEM-12 | checkpoint numbers start over for the Root of a new generation | `cpAt`, `checkpointForward`, `checkpointTaken`; probe `cp_number_only`; scenario `newGenUnlistTest` |
 | R-CH-12 | a publication of depth 0 is delivered and not retained | `nothingTransient`; probe `store_depth0`; witness `witnessForwarded0` |
 | R-CH-18 | a key request is kept one per (reader, channel) and charged to the reader | `oneGrantOneRequest`, `quotasHold` (`payer`); probe `two_requests` |
 | R-JOIN-8 | join requests are kept in a separate buffer with its own quota | the list `joins`, outside `bytes`; `joinsBounded` |
 | R-JOIN-8 | the number is bounded; on overflow the oldest is evicted | `joinsBounded`; probes `join_unbounded`, `join_drop_new`; scenario `joinOverflowTest` |
 | R-JOIN-8 | the relay makes no decisions about requests | `recvJoin` reads no content of a request |
-| B.10 ticket rule 1 | a ticket is valid while the Root of the current generation signed it and the checkpoint lists the relay | guard in `learnTicket` (`served`, generation of the latest root change record); `ticketOfCurrentRoot`; probe `old_ticket` |
-| B.10 ticket rule 2 | a relay keeps the ticket with the greatest pair (gen, no) and never accepts a smaller or equal one | `ticketOfCurrentRoot`; probe `ticket_rollback` |
-| B.10 ticket rule 3 | after a root change the relay serves under the previous limits until a ticket or a checkpoint of the new generation | guard: `learnRootChange` changes neither `served` nor the ticket; `checkpointTaken`; witness `witnessNewGenTicket` |
-| B.10 ticket rule 3 | after a root change it accepts no ticket of the old generation | `ticketOfCurrentRoot`; probe `old_ticket` |
-| B.10 ticket rule 4 | a valid checkpoint without the relay empties it | `unlistedEmpty`; probe `keep_unserved`; witnesses `witnessUnlisted`, `witnessUnlistedNewGen` |
 | B.10 accounting | whoever signed a stored object pays for it | `quotasHold` (`bytesMatch` with `payer`: a request is paid by its reader) |
 | B.10 accounting | control-plane objects are stored outside `bus_bytes` | abstraction: not modelled (header) |
 | B.10 accounting | calls, replies, refusals and stream chunks are not stored | `nothingTransient`; probe `store_call` |
@@ -169,15 +163,15 @@ obligations as for the other models: the initial state satisfies `IndInv`, every
 Because of that uniqueness, `indInit` draws the store from one slot per key (publications by source,
 channel and number; grants and key requests by source, channel and reader), and records are checked
 field by field. The instances are `tiny_ind` (the size of `tiny`, checked in CI) and `small_ind` (the
-size of `small`) for a long run. The step monitors (fair share, rule 1, grants kept, latest grant,
-ticket, sends) are covered too: `IndInv` requires `broken` to be empty, so every step from any state
+size of `small`) for a long run. The step monitors (fair share, eviction rule 1, grants kept, latest
+grant, sends) are covered too: `IndInv` requires `broken` to be empty, so every step from any state
 of `IndInv` must leave it empty.
 
-Rules 1 and 4 evict in rounds, each removing the oldest candidates. The store is within both limits
-before a new object arrives, every publication has a size of at least 1, and an object larger than
-the per-source limit is refused, so `SOURCE_BYTES` rounds always suffice; a store still over a limit
-after them has the object refused. Each round computes the usage of every source once. This keeps
-the steps that store objects small enough for Apalache at the size of `small`.
+Eviction rules 1 and 4 evict in rounds, each removing the oldest candidates. The store is within both
+limits before a new object arrives, every publication has a size of at least 1, and an object larger
+than the per-source limit is refused, so `SOURCE_BYTES` rounds always suffice; a store still over a
+limit after them has the object refused. Each round computes the usage of every source once. This
+keeps the steps that store objects small enough for Apalache at the size of `small`.
 
 The relay accounts by key slot: `bytes` holds, for each publication slot (source, channel, number)
 and each grant and key request slot (source, channel, reader, never the source itself), the bytes
@@ -189,8 +183,8 @@ depend on whether an object is present makes the solver enumerate the possible s
 over the 54 objects the store may hold at the size of `small` it does not finish, while the same
 bound over slot bytes held in the state takes seconds. The quota rules compare usages without
 multiplying two variables (a source above the average is a positive sum of differences), which
-keeps the arithmetic linear. Mutant `evict_other` gets `MAX_ARR` rounds of rule 1, since removing
-publications of other sources does not lower the usage of the payer.
+keeps the arithmetic linear. Mutant `evict_other` gets `MAX_ARR` rounds of eviction rule 1, since
+removing publications of other sources does not lower the usage of the payer.
 
 ## State view for TLC
 
@@ -240,7 +234,3 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `rela
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
-| 2026-11-23 | `f8f283d5cf95` (commit de117de) | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (25 workers) | 18 probes against `safety`, 11 witnesses on `tiny`, breadth-first until the first violation | 29 of 29 violated as expected, depth 2 to 10, 1.2 to 1.6 min each (compilation included), 39 min in total |
-| 2026-11-23 | `f8f283d5cf95`, inductive invariant `1e5cef2ee517` (commit de117de) | Apalache 0.62.4, `run-inductive.ps1 -Split`, maintainer's server | `small_ind`: init implies `IndInv`, `IndInv` and each of the 14 branches of the step imply `IndInv`, `IndInv` implies `safety` | 16 of 16 hold: `safety` holds in every reachable state of `small`; RecvGrant 198 min, RecvPub 176 min, RecvReq 60 min, LearnCp 10 min, every other check 2 to 4 min |
-| 2026-11-23 | `f8f283d5cf95`, view `f9fe1c1f5c12` (commit 279b046) | Apalache 0.62.4, `run-inductive.ps1 -Section bisim -Parallel 8`, maintainer's server (6 GB heap) | `tiny_bisim`, all pairs of states satisfying `Struct` | all 32 checks pass: init and the 14 step branches preserve `Struct` (1.0 to 1.5 min), equal views agree on `safety` (1.3 min), each of the 14 branches is answered with an equal view (1.8 to 2.5 min), both witnesses violated as expected; 7.0 min in total. TLC with the view is exact for `safety` |
-| 2026-11-24 | `f8f283d5cf95`, view `f9fe1c1f5c12` (commit 279b046) | TLC 1.7.4, `run-tlc.ps1 -View`, maintainer's server (54 workers) | `tiny`, exhaustive, `VIEW safetyView` | no error: 24,097,506 distinct states (263,984,749 generated), depth 17, 1 h 01 min; probability of a fingerprint collision 3.1E-4 (TLC's optimistic estimate), 3.4E-5 (from the actual fingerprints) |

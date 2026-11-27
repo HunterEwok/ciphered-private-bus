@@ -17,8 +17,6 @@
     "retain_all",
     "join_unbounded",
     "join_drop_new",
-    "old_ticket",
-    "ticket_rollback",
     "keep_unserved",
     "cp_rollback",
     "cp_number_only",
@@ -35,8 +33,7 @@
     "witnessRevokedPurged",
     "witnessUnlisted",
     "witnessUnlistedNewGen",
-    "witnessJoinEvicted",
-    "witnessNewGenTicket"
+    "witnessJoinEvicted"
   ],
   "inductive": {
     "instance": "small_ind",
@@ -52,10 +49,8 @@
       "stepRootRevoke",
       "stepRootUnlist",
       "stepRootChange",
-      "stepRootTicket",
       "stepLearnCp",
       "stepLearnRootChange",
-      "stepLearnTicket",
       "stepRecvJoin"
     ]
   },
@@ -141,13 +136,6 @@
         "steps": 1
       },
       {
-        "name": "Struct and safety and RootTicket imply Struct",
-        "init": "initSafe",
-        "step": "stepRootTicket",
-        "invariant": "structA",
-        "steps": 1
-      },
-      {
         "name": "Struct and safety and LearnCp imply Struct",
         "init": "initSafe",
         "step": "stepLearnCp",
@@ -158,13 +146,6 @@
         "name": "Struct and safety and LearnRootChange imply Struct",
         "init": "initSafe",
         "step": "stepLearnRootChange",
-        "invariant": "structA",
-        "steps": 1
-      },
-      {
-        "name": "Struct and safety and LearnTicket imply Struct",
-        "init": "initSafe",
-        "step": "stepLearnTicket",
         "invariant": "structA",
         "steps": 1
       },
@@ -246,13 +227,6 @@
         "steps": 2
       },
       {
-        "name": "RootTicket answered with an equal view",
-        "init": "initPair",
-        "step": "matchRootTicket",
-        "invariant": "matched",
-        "steps": 2
-      },
-      {
         "name": "LearnCp answered with an equal view",
         "init": "initPair",
         "step": "matchLearnCp",
@@ -263,13 +237,6 @@
         "name": "LearnRootChange answered with an equal view",
         "init": "initPair",
         "step": "matchLearnRootChange",
-        "invariant": "matched",
-        "steps": 2
-      },
-      {
-        "name": "LearnTicket answered with an equal view",
-        "init": "initPair",
-        "step": "matchLearnTicket",
         "invariant": "matched",
         "steps": 2
       },

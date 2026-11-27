@@ -31,11 +31,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   lossy mode, chunks with data, credit and "end" in both directions, the limit on open streams, and
   every event that closes a stream, with a network that replays and reorders chunks and a peer that
   may overrun its credit; thirteen probes, witnesses, fixed scenarios, and a CI job.
-- Quint model of the relay (`models/relay/`): publications with retention depth, key grants, key
-  requests and calls arriving with forged objects among them, quotas per source and per bus with the
-  eviction rules of Appendix B, Section B.10 (fair share), revocation of a device, removal of the relay
-  from the checkpoint, tickets across a root change, and the join request buffer; eighteen probes,
-  witnesses, fixed scenarios, and a CI job.
+- Quint model of the member relay (`models/relay/`): publications with retention depth, key grants,
+  key requests and calls arriving with forged objects among them, quotas per source and per bus with
+  the eviction rules of Appendix B, Section B.10 (fair share), revocation of a device, removal of the
+  relay from the checkpoint's `relays` list, also across a root change, and the join request buffer;
+  nineteen probes, witnesses, fixed scenarios, and a CI job.
 - Quint model of external relays (`models/extrelay/`): relay epochs of the root device, relay access
   objects ordered by root device and epoch with a stolen key of a replaced root device signing any
   epoch, tickets, bridges under a closed alias with the records a member asleep through a root change

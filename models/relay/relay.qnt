@@ -3,20 +3,23 @@
 //
 // Relay of Ciphered Private Bus (verification level V2).
 //
-// Scope: one relay serving one bus; what it accepts, stores, evicts, serves
-// and forgets. Publications with their retention depth, key grants, key
-// requests, calls, quotas per source and per bus with the eviction rules of
-// Appendix B, Section B.10, revocation of a device, removal of the relay from
-// the checkpoint, tickets across a root change, and the buffer of join
-// requests. Requirements: R-REL-2..8, R-JOIN-8, R-CH-12, B.10 rules;
-// properties S14 (fair share), S15, L5.
+// Scope: one member relay serving one bus; what it accepts, stores, evicts,
+// serves and forgets. Publications with their retention depth, key grants,
+// key requests, calls, quotas per source and per bus with the eviction rules
+// of Appendix B, Section B.10, revocation of a device, removal of the relay
+// from the checkpoint's `relays` list, checkpoints across a root change, and
+// the buffer of join requests. Requirements: R-REL-2..8, R-JOIN-8, R-CH-12,
+// B.10 accounting and eviction rules; properties S14 (fair share), S15, L5.
+// The external relay, with tickets and aliases, is models/extrelay; the
+// accounting rules are the same for both (B.10), with aliases in place of
+// devices.
 //
 // Abstractions:
 // - Signatures are perfect: an object either carries a valid signature of its
 //   signer or not (`ok`), and the relay can tell. The network delivers any
 //   object, forged or not, at any time and any number of times.
 // - Every device is a possible source and reader; devices are numbered, so
-//   "the smaller identifier" of rule 4 is the smaller number.
+//   "the smaller identifier" of eviction rule 4 is the smaller number.
 // - Sizes are small units; a grant and a key request take one unit. Blobs,
 //   padding and the clearing publication are not modelled; a blob counts as
 //   part of its publication's size.
@@ -24,9 +27,9 @@
 //   revoked devices and whether it still lists the relay; checkpoint numbers
 //   start over for the Root of a new generation (R-MEM-12). The Root's
 //   checkpoints are also numbered in the order they were issued (a ghost
-//   index), against which the relay's order of pairs is checked. The ticket
-//   is reduced to its pair (gen, no); its limits are the constants BUS_BYTES
-//   and SOURCE_BYTES. There is at most one root change.
+//   index), against which the relay's order of pairs is checked. The memory
+//   limits, set by the application on the relay device (B.10), are the
+//   constants BUS_BYTES and SOURCE_BYTES. There is at most one root change.
 // - What the relay sends is not kept: properties of a send are checked by a
 //   monitor when it happens. The order of what is served (grant first, then
 //   publications by number) is a delivery property (R-REL-11) and is checked
@@ -43,11 +46,11 @@ module relay {
   const MAX_NO: int         // highest publication number per channel
   const MAX_DEPTH: int      // highest retention depth
   const SIZES: Set[int]     // possible sizes of a publication
-  const SOURCE_BYTES: int   // per-source limit of the ticket
-  const BUS_BYTES: int      // per-bus limit of the ticket
+  const SOURCE_BYTES: int   // per-source limit
+  const BUS_BYTES: int      // per-bus limit
   const JOIN_MAX: int       // join requests the relay holds (R-JOIN-8)
   const MAX_ARR: int        // objects the relay may store over a run (its arrival counter)
-  const MAX_EVENTS: int     // revocations, root changes, tickets, joins, removal of the relay
+  const MAX_EVENTS: int     // revocations, root changes, joins, removal of the relay
   const MUTANT: str         // "none", or the name of a deliberate defect (R-VER-2)
 
   // --------------------------------------------------------------------- types
@@ -73,18 +76,16 @@ module relay {
   type Obj = { kind: str, src: int, ch: int, reader: int, no: int, gen: int, depth: int, size: int, ok: bool, arr: int }
 
   type Relay = {
-    served: bool,          // the latest checkpoint lists the relay
+    served: bool,          // the latest checkpoint lists the relay in `relays`
     cpNo: int,             // ghost: index of the checkpoint held
     cp: (int, int),        // pair (gen, no) of the checkpoint held
     revoked: Set[int],     // devices revoked under that checkpoint
     rootGen: int,          // generation of the latest root change record
-    tGen: int,             // pair (gen, no) of the ticket held
-    tNo: int,
     store: Set[Obj],       // publications, grants and key requests
     bytes: Bytes,          // bytes held per key slot (the relay's accounting)
     hi: (int, int) -> int, // highest publication number seen per (source, channel)
     dep: (int, int) -> int,// depth of that publication: it governs retention
-    arr: int,              // arrival counter (B.10 rule 5)
+    arr: int,              // arrival counter (B.10 eviction rule 5)
     joins: List[int],      // join requests, oldest first
     online: Set[int],      // connected devices
   }
@@ -92,10 +93,10 @@ module relay {
   // ----------------------------------------------------------------- variables
   var relay: Relay
   var cps: int -> Set[int]   // ghost: every checkpoint the Root issued, by number
-  // The Root: its generation, the number of its latest ticket, the index of
-  // its latest checkpoint, the index of the last checkpoint before the root
-  // change (0 before it), and whether the latest checkpoint lists the relay.
-  type Root = { gen: int, tNo: int, cpNo: int, chgAt: int, listed: bool }
+  // The Root: its generation, the index of its latest checkpoint, the index
+  // of the last checkpoint before the root change (0 before it), and whether
+  // the latest checkpoint lists the relay.
+  type Root = { gen: int, cpNo: int, chgAt: int, listed: bool }
   var root: Root
   var events: int
   var nextJoin: int          // ghost: number of join requests ever made
@@ -148,17 +149,19 @@ module relay {
   pure def hasGrant(st: Set[Obj], s: int, c: int, r: int): bool =
     st.exists(o => o.kind == "grant" and o.src == s and o.ch == c and o.reader == r)
 
-  // Rule 1: a source over its limit loses its own publications, the oldest of
-  // the same channel first, then the oldest by arrival in its other channels.
+  // Eviction rule 1: a source over its limit loses its own publications, the
+  // oldest of the same channel first, then the oldest by arrival in its other
+  // channels.
   // `keep` is the object being stored, which is not a candidate. A key request
   // is paid by its reader and belongs to no channel of the payer, so it passes
   // c = 0 and every publication of the payer is ordered by arrival only.
   // Each round removes the oldest candidates. The store is within the limits
   // before the new object arrives, every publication has a size of at least
-  // 1, and an object larger than SOURCE_BYTES is refused (rule 3), so
+  // 1, and an object larger than SOURCE_BYTES is refused (eviction rule 3), so
   // SOURCE_BYTES rounds always suffice; a source still over its limit after
   // them has the object refused (`ownOver` in `admit`).
-  // The order of rule 1: the same channel first, then the others, each by arrival.
+  // The order of eviction rule 1: the same channel first, then the others,
+  // each by arrival.
   pure def ruleOneKey(o: Obj, s: int, c: int): int =
     if (MUTANT == "evict_other" or (o.ch == c and o.src == s)) o.arr else o.arr + MAX_ARR
   // Mutant "evict_other" may remove publications of other sources first,
@@ -291,11 +294,11 @@ module relay {
 
   action init = all {
     relay' = {
-      served: true, cpNo: 1, cp: (1, 1), revoked: Set(), rootGen: 1, tGen: 1, tNo: 1, store: Set(), bytes: NO_BYTES,
+      served: true, cpNo: 1, cp: (1, 1), revoked: Set(), rootGen: 1, store: Set(), bytes: NO_BYTES,
       hi: tuples(DEVS, CHANS).mapBy(k => 0), dep: tuples(DEVS, CHANS).mapBy(k => 0), arr: 0, joins: List(), online: Set(),
     },
     cps' = Map(1 -> Set()),
-    root' = { gen: 1, tNo: 1, cpNo: 1, chgAt: 0, listed: true },
+    root' = { gen: 1, cpNo: 1, chgAt: 0, listed: true },
     events' = 0,
     nextJoin' = 0,
     broken' = Set(),
@@ -454,20 +457,19 @@ module relay {
     root.listed, not(cps.get(root.cpNo).contains(d)),
     eventWith(cps.put(root.cpNo + 1, cps.get(root.cpNo).union(Set(d))), { ...root, cpNo: root.cpNo + 1 }, nextJoin),
   }
-  // The Root removes the relay from the checkpoint (B.10 rule 4).
+  // The Root removes the relay from the checkpoint's `relays` list (R-REL-6).
   action rootUnlist = all {
     root.listed,
     eventWith(cps.put(root.cpNo + 1, cps.get(root.cpNo)), { ...root, cpNo: root.cpNo + 1, listed: false }, nextJoin),
   }
-  // A root change and a new ticket.
-  action rootChange = eventWith(cps, { ...root, gen: root.gen + 1, tNo: 0, chgAt: root.cpNo }, nextJoin)
-  action rootTicket = eventWith(cps, { ...root, tNo: root.tNo + 1 }, nextJoin)
+  // A root change.
+  action rootChange = eventWith(cps, { ...root, gen: root.gen + 1, chgAt: root.cpNo }, nextJoin)
 
   // A checkpoint reaches the relay. It accepts one of the root generation it
   // knows with a greater pair (gen, no), and drops any other (R-REL-7,
-  // R-MEM-12, B.10 rule 3). The relay's latest checkpoint is the only one
+  // R-MEM-12). The relay's latest checkpoint is the only one
   // whose relay list counts, so a checkpoint after `rootUnlist` removes it,
-  // also one of a new generation (B.10 rules 3 and 4). Mutants: "cp_rollback"
+  // also one of a new generation (R-REL-6). Mutants: "cp_rollback"
   // accepts any other pair, "cp_number_only" compares the numbers alone, and
   // "old_gen_cp" accepts a checkpoint of an older root generation.
   action learnCp(n: int): bool = {
@@ -497,8 +499,8 @@ module relay {
             .union(if (unlisted) Set("unlisted") else Set())
             .union(if (unlisted and c._1 > 1) Set("unlistedNewGen") else Set()))
       else
-        // B.10 rule 3: a checkpoint issued later, of the root generation the
-        // relay knows, is never dropped.
+        // R-REL-7, R-MEM-12: a checkpoint issued later, of the root generation
+        // the relay knows, is never dropped.
         commitWith(r, if (n > r.cpNo and c._1 == r.rootGen) Set("checkpointTaken") else Set(), Set()),
     }
   }
@@ -507,23 +509,6 @@ module relay {
   action learnRootChange = all {
     relay.rootGen < root.gen,
     commitWith({ ...relay, rootGen: root.gen }, Set(), Set()),
-  }
-
-  // A ticket (B.10 rules 2 and 3): accepted only with a greater pair and of
-  // the generation of the latest root change record. Mutant "old_ticket": a
-  // ticket of the old generation is accepted after a root change; mutant
-  // "ticket_rollback": a ticket with a smaller or equal pair is accepted. A relay
-  // that is no longer listed takes no tickets.
-  action learnTicket(g: int, n: int): bool = {
-    val r = relay
-    val greater = g > r.tGen or (g == r.tGen and n > r.tNo)
-    all {
-      r.served, g <= root.gen, (g < root.gen or n <= root.tNo), n >= 1,
-      greater or MUTANT == "ticket_rollback", g == r.rootGen or MUTANT == "old_ticket",
-      commitWith({ ...r, tGen: g, tNo: n },
-        if (g != r.rootGen or not(greater)) Set("ticketOfCurrentRoot") else Set(),
-        if (g > 1) Set("newGenTicket") else Set()),
-    }
   }
 
   // A join request (R-JOIN-8): kept in a buffer of JOIN_MAX, the oldest
@@ -563,10 +548,8 @@ module relay {
     nondet d = DEVS.oneOf() rootRevoke(d),
     rootUnlist,
     all { root.gen < 2, rootChange },
-    all { root.tNo < 2, rootTicket },
     nondet n = cps.keys().oneOf() learnCp(n),
     learnRootChange,
-    nondet g = 1.to(2).oneOf() nondet n = 1.to(2).oneOf() learnTicket(g, n),
     recvJoin,
   }
 
@@ -604,10 +587,10 @@ module relay {
   // S14, B.10: a source within its fair share never loses data because of
   // another source (checked at every eviction).
   val fairShare = not(broken.contains("fairShare"))
-  // R-REL-4, B.10 rule 1: a source over its own limit evicts only its own
-  // publications (checked at every eviction).
+  // R-REL-4, B.10 eviction rule 1: a source over its own limit evicts only
+  // its own publications (checked at every eviction).
   val evictsOnlyOwn = not(broken.contains("evictsOnlyOwn"))
-  // B.10 rule 2: a grant is never evicted to make room.
+  // B.10 eviction rule 2: a grant is never evicted to make room.
   val grantsKept = not(broken.contains("grantsKept"))
   // R-REL-3: a grant replaces the held one only with a generation not less
   // (checked at every replacement).
@@ -622,22 +605,19 @@ module relay {
     relay.store.filter(o => o.kind == "pub" and (o.src, o.ch) == k).size() <= relay.dep.get(k))
   // R-JOIN-8: the buffer is bounded and keeps the newest request.
   val joinsBounded = relay.joins.length() <= JOIN_MAX and not(broken.contains("newestJoinKept"))
-  // B.10 rules 2 and 3: a ticket is accepted only with a greater pair than
-  // the held one, and of the latest root generation the relay knows.
-  val ticketOfCurrentRoot = not(broken.contains("ticketOfCurrentRoot"))
-  // B.10 rule 4: a relay no longer listed stores nothing.
+  // R-REL-6: a relay no longer listed stores nothing.
   val unlistedEmpty = not(relay.served) implies (relay.store == Set() and relay.joins == List())
   // R-REL-7, R-MEM-12: the relay's checkpoint only moves forward in the
   // order the Root issued them, and only to one of the root generation the
   // relay knows (checked at every accepted checkpoint).
   val checkpointForward = not(broken.contains("checkpointForward"))
-  // B.10 rule 3: a checkpoint issued later, of the root generation the relay
-  // knows, is accepted (checked at every dropped checkpoint).
+  // R-REL-7, R-MEM-12: a checkpoint issued later, of the root generation the
+  // relay knows, is accepted (checked at every dropped checkpoint).
   val checkpointTaken = not(broken.contains("checkpointTaken"))
 
   val safety = onlyVerified and nothingTransient and servedOnlyGranted and revokedPurged and quotasHold
     and fairShare and evictsOnlyOwn and grantsKept and latestGrant and oneGrantOneRequest and retentionHolds and joinsBounded
-    and ticketOfCurrentRoot and unlistedEmpty and checkpointForward and checkpointTaken
+    and unlistedEmpty and checkpointForward and checkpointTaken
 
   // ------------------------------------------------- non-vacuity witnesses
   // Each witness is expected to be VIOLATED: the behaviour is reachable.
@@ -652,5 +632,4 @@ module relay {
   val witnessUnlisted = not(seen.contains("unlisted"))
   val witnessUnlistedNewGen = not(seen.contains("unlistedNewGen"))
   val witnessJoinEvicted = not(seen.contains("joinEvicted"))
-  val witnessNewGenTicket = not(seen.contains("newGenTicket"))
 }

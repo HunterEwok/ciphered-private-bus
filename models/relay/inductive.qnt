@@ -28,7 +28,7 @@ module inductive {
   val KEYS = tuples(DEVS, CHANS)
   val CPNOS = 1.to(MAX_EVENTS + 1)
   val TAGS = Set("ownEvicted", "busEvicted", "noVictim", "grantReplaced", "servedPub", "forwarded0",
-                 "requestAnswered", "revokedPurged", "unlisted", "unlistedNewGen", "joinEvicted", "newGenTicket", "refused",
+                 "requestAnswered", "revokedPurged", "unlisted", "unlistedNewGen", "joinEvicted", "refused",
                  "callForwarded", "callRefused")
 
   // What the relay can hold, field by field (membership of a record in a big
@@ -51,7 +51,7 @@ module inductive {
     0 <= ev, ev <= MAX_EVENTS, 0 <= nj,
     // every new checkpoint, root change and join request is one event
     (rt.cpNo - 1) + (rt.gen - 1) + nj <= ev,
-    1 <= rt.gen, rt.gen <= 2, 0 <= rt.tNo, rt.tNo <= 2, CPNOS.contains(rt.cpNo),
+    1 <= rt.gen, rt.gen <= 2, CPNOS.contains(rt.cpNo),
     // the index of the last checkpoint before the root change, 0 before it
     if (rt.gen == 1) rt.chgAt == 0 else (1 <= rt.chgAt and rt.chgAt <= rt.cpNo),
     c.keys() == CPNOS.filter(k => k <= rt.cpNo), c.keys().forall(k => c.get(k).subseteq(DEVS)),
@@ -62,7 +62,7 @@ module inductive {
     KEYS.forall(k => 0 <= r.hi.get(k) and r.hi.get(k) <= MAX_NO and 0 <= r.dep.get(k) and r.dep.get(k) <= MAX_DEPTH),
     r.joins.length() <= JOIN_MAX, r.joins.indices().forall(i => 1 <= r.joins.nth(i) and r.joins.nth(i) <= nj),
     r.online.subseteq(DEVS), r.revoked.subseteq(DEVS),
-    1 <= r.rootGen, r.rootGen <= rt.gen, 1 <= r.tGen, r.tGen <= 2, 1 <= r.tNo, r.tNo <= 2,
+    1 <= r.rootGen, r.rootGen <= rt.gen,
     // the relay's checkpoint is one the Root issued, the latest it accepted
     1 <= r.cpNo, r.cpNo <= rt.cpNo, r.revoked == c.get(r.cpNo),
     // its pair is that of the checkpoint, of a root generation the relay knows
@@ -108,10 +108,8 @@ module inductive {
   action stepRootRevoke = { nondet d = DEVS.oneOf() rootRevoke(d) }
   action stepRootUnlist = rootUnlist
   action stepRootChange = all { root.gen < 2, rootChange }
-  action stepRootTicket = all { root.tNo < 2, rootTicket }
   action stepLearnCp = { nondet n = cps.keys().oneOf() learnCp(n) }
   action stepLearnRootChange = learnRootChange
-  action stepLearnTicket = { nondet g = 1.to(2).oneOf() nondet n = 1.to(2).oneOf() learnTicket(g, n) }
   action stepRecvJoin = recvJoin
 
   // ------------------------------------------- an arbitrary state of IndInv
@@ -134,8 +132,6 @@ module inductive {
     nondet cpNo = CPNOS.oneOf()
     nondet revAll = setOfMaps(CPNOS, DEVS.powerset()).oneOf()
     nondet rootGen = 1.to(2).oneOf()
-    nondet tGen = 1.to(2).oneOf()
-    nondet tNo = 1.to(2).oneOf()
     nondet hi = setOfMaps(KEYS, 0.to(MAX_NO)).oneOf()
     nondet dep = setOfMaps(KEYS, 0.to(MAX_DEPTH)).oneOf()
     nondet arr = 0.to(MAX_ARR).oneOf()
@@ -143,7 +139,6 @@ module inductive {
     nondet jv = setOfMaps(1.to(JOIN_MAX), 1.to(MAX_EVENTS)).oneOf()
     nondet online = DEVS.powerset().oneOf()
     nondet rGen = 1.to(2).oneOf()
-    nondet rTNo = 0.to(2).oneOf()
     nondet rCpNo = CPNOS.oneOf()
     nondet chgAt = 0.to(MAX_EVENTS + 1).oneOf()
     nondet listed = Set(false, true).oneOf()
@@ -159,9 +154,9 @@ module inductive {
     val reqs = GSLOTS.filter(t => qBytes.get(t) == 1).map(t =>
       { kind: "req", src: t._1, ch: t._2, reader: t._3, no: 1, gen: 0, depth: 0, size: 0, ok: true, arr: qArr.get(t) })
     val c = CPNOS.filter(k => k <= rCpNo).mapBy(k => revAll.get(k))
-    val rt = { gen: rGen, tNo: rTNo, cpNo: rCpNo, chgAt: chgAt, listed: listed }
+    val rt = { gen: rGen, cpNo: rCpNo, chgAt: chgAt, listed: listed }
     val r = {
-      served: served, cpNo: cpNo, cp: cpAt(rt, cpNo), revoked: revAll.get(cpNo), rootGen: rootGen, tGen: tGen, tNo: tNo,
+      served: served, cpNo: cpNo, cp: cpAt(rt, cpNo), revoked: revAll.get(cpNo), rootGen: rootGen,
       store: pubs.union(grants).union(reqs), bytes: { pub: pBytes, grant: gBytes, req: qBytes }, hi: hi, dep: dep, arr: arr,
       joins: range(0, JOIN_MAX).foldl(List(), (l, i) => if (i < jl) l.append(jv.get(i + 1)) else l),
       online: online,

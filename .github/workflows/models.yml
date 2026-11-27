@@ -22,6 +22,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  step-coverage:
+    name: proof obligations cover every step branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare checks.json with the step actions of every proof file
+        run: python3 models/check_steps.py
+
   membership:
     name: membership (simulator)
     runs-on: ubuntu-latest

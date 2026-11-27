@@ -180,8 +180,8 @@ Obligations 1 to 3 run on one device. `IndInv` speaks of one node at a time, a n
 read only that node and the pool, and the other actions change no node (`nodeHearsHalted` has
 the effect of `nodeRecvHp` with a proof from the pool), so every step of a model with more
 devices preserves the invariant of each node exactly when the one-device steps do. With one
-device, `nodeAcceptData`, `nodeGrant` and `nodeHearsHalted` are never enabled and are not
-checked; the first two change no node. Two devices in one state put the arbitrary state of
+device, `nodeAcceptData`, `nodeGrant` and `nodeHearsHalted` are never enabled, which the proof
+checks for each of them; the first two change no node. Two devices in one state put the arbitrary state of
 obligation 2 beyond the solver's memory even at the smallest size. Obligation 4 runs on two devices.
 
 The instances are `conv_tiny_ind` and `conv_tiny_pair` (two generations, two numbers, checked in

@@ -11,7 +11,9 @@
 # IndInv implies safety. Apalache hands each check to one solver, which runs on
 # one core. With -Split the second obligation is checked branch by branch of
 # the step (the actions listed under "inductive.steps" in the model's
-# checks.json, which together are exactly the step), and up to
+# checks.json, which together are exactly the step, with those the instance
+# never enables under "inductive.disabledSteps", each checked to have no
+# transition from IndInv), and up to
 # -Parallel checks run at the same time. Each check gets its own Apalache
 # server at below-normal priority; together they use at most half of the
 # -Share of the memory as Java heap (the solver needs memory outside the heap
@@ -26,7 +28,8 @@
 # -Only runs a subset of the checks, to repeat those of an earlier run that
 # had no verdict: "init", "safety", an implied fact by name, or step branches named as in the progress
 # output (without "step"). Each obligation stands on its own, so the checks of
-# two runs of the same model and invariant hashes together make one result.
+# two runs of the same model and invariant hashes together make one result;
+# the summary of such a run says that it is partial and names its checks.
 #
 # -Main defaults to "inductive.instance" in checks.json.
 #
@@ -95,11 +98,16 @@ $env:QUINT_HOME = Join-Path $WorkDir "quint-home"
 $env:npm_config_cache = Join-Path $WorkDir "npm-cache"
 
 $quint = Join-Path $ModelsDir ("node_modules/.bin/" + $(if ($OnWindows) { "quint.cmd" } else { "quint" }))
-if (-not (Test-Path $quint)) {
+# Quint is installed again whenever models/package-lock.json changed since the
+# last install, so a run never uses an older Quint than the commit pins.
+$lockHash = (Get-FileHash -Algorithm SHA256 (Join-Path $ModelsDir "package-lock.json")).Hash
+$lockMark = Join-Path $ModelsDir "node_modules/.package-lock.sha256"
+if (-not (Test-Path $quint) -or -not (Test-Path $lockMark) -or (Get-Content $lockMark -Raw).Trim() -ne $lockHash) {
     Say "Installing Quint from models/package-lock.json"
     Push-Location $ModelsDir
     try { & npm ci --ignore-scripts | Out-Host } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+    Set-Content -Path $lockMark -Value $lockHash
 }
 
 $versions = Get-Content (Join-Path (Split-Path -Parent $ModelsDir) "tools/versions/versions.toml") -Raw
@@ -149,6 +157,11 @@ if ($Split) {
     foreach ($s in $Checks.steps) {
         $jobs += , @(("IndInv and {0} imply IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1, $Main)
     }
+    # Branches the instance never enables ("disabledSteps"): the check passes
+    # when no state of IndInv enables the branch.
+    foreach ($s in @($Checks.disabledSteps)) {
+        if ($s) { $jobs += , @(("{0} has no transition from IndInv" -f ($s -replace '^step', '')), "indInit", $s, "IndInv", 1, $Main, "disabled") }
+    }
 } else {
     $jobs += , @("IndInv and step imply IndInv", "indInit", "modelStep", "IndInv", 1, $Main)
 }
@@ -164,6 +177,7 @@ foreach ($x in @($Checks.extra)) {
 }
 # With powershell -File a list arrives as one string, "a,b".
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$totalJobs = $jobs.Count
 if ($Only.Count -gt 0) {
     $picked = @()
     $known = @()
@@ -351,7 +365,7 @@ $summary = @(
     "apalache: $apalache, $Parallel at a time, heap $heapGb GB each",
     "started: $($startedAll.ToString('u')), ended: $((Get-Date).ToString('u')), elapsed: $((Get-Date) - $startedAll)",
     ""
-) + $rows + @("", $(if ($failures -eq 0 -and $Checks.result) { "result: $($Checks.result)" } elseif ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
+) + $rows + @("", $(if ($Only.Count -gt 0) { "result: partial run, $($jobs.Count) of $totalJobs checks ($($Only -join ', ')), $(if ($failures -eq 0) { 'all as expected' } else { "$failures not as expected" }); a result only together with the other checks on the same hashes" } elseif ($failures -eq 0 -and $Checks.result) { "result: $($Checks.result)" } elseif ($failures -eq 0) { "result: safety holds in every reachable state$(if (@($Checks.implied | Where-Object { $_ }).Count -gt 0) { ', and IndInv implies ' + (@($Checks.implied) -join ', ') })" } else { "result: not proved" }))
 [System.IO.File]::WriteAllLines((Join-Path $RunDir "summary.txt"), $summary)
 Say "Summary ($(Join-Path $RunDir 'summary.txt')):"
 $summary | ForEach-Object { Write-Host "  $_" }

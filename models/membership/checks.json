@@ -70,6 +70,7 @@
     "probe": "conv_probe_need_next_ind",
     "safety": "modelSafetyRest",
     "parallel": 1,
+    "disabledSteps": ["stepAcceptData", "stepGrant", "stepHearsHalted"],
     "steps": [
       "stepRootAdmit",
       "stepRootChangeRights",

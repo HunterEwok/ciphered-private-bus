@@ -41,8 +41,11 @@ same view hash.
 
 **Inductive proof.** Apalache checks three obligations for an inductive invariant `IndInv`: the
 initial states satisfy it, it and one step of the model imply it in the next state, and it implies
-`safety`. Each step branch is checked separately (`-Split`). Together they prove that `safety` holds
-in every reachable state of the instance, at every depth, not only within a bounded number of steps.
+`safety`. Each step branch is checked separately (`-Split`); a branch the instance never enables is
+checked to have no transition. Together they prove that `safety` holds in every reachable state of the
+instance, at every depth, not only within a bounded number of steps. The branches come from
+`checks.json`, which the recorded hashes do not cover, so CI (`check_steps.py`) checks that they are
+exactly the step actions of the proof file and that these use every action of the model's step.
 
 **Probes and witnesses.** Each probe is the model with one deliberate defect; `safety` must fail on it
 (R-VER-2). Each witness is a property expected to fail on the correct model, showing that a behaviour

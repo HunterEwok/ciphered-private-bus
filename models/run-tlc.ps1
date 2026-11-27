@@ -172,12 +172,20 @@ $env:QUINT_HOME = Join-Path $WorkDir "quint-home"
 $env:npm_config_cache = Join-Path $WorkDir "npm-cache"
 
 $quint = Join-Path $ModelsDir ("node_modules/.bin/" + $(if ($OnWindows) { "quint.cmd" } else { "quint" }))
-if (-not (Test-Path $quint)) {
+# Quint is installed again whenever models/package-lock.json changed since the
+# last install, so a run never uses an older Quint than the commit pins.
+$lockHash = (Get-FileHash -Algorithm SHA256 (Join-Path $ModelsDir "package-lock.json")).Hash
+$lockMark = Join-Path $ModelsDir "node_modules/.package-lock.sha256"
+if (-not (Test-Path $quint) -or -not (Test-Path $lockMark) -or (Get-Content $lockMark -Raw).Trim() -ne $lockHash) {
     Say "Installing Quint from models/package-lock.json"
     Push-Location $ModelsDir
     try { Invoke-Native "npm" @("ci", "--ignore-scripts") | Out-Host } finally { Pop-Location }
     if ($script:NativeExit -ne 0) { $script:NativeErrors | Out-Host; throw "npm ci failed" }
+    Set-Content -Path $lockMark -Value $lockHash
 }
+$versions = Get-Content (Join-Path (Split-Path -Parent $ModelsDir) "tools/versions/versions.toml") -Raw
+if ($versions -notmatch '(?ms)^\[apalache\].*?^version\s*=\s*"([^"]+)"') { throw "No Apalache version in tools/versions/versions.toml" }
+$apalache = $Matches[1]
 
 $hash = Get-ModelHash
 $commit = "$(Invoke-Native "git" @("-C", $ModelDir, "rev-parse", "--short", "HEAD"))".Trim()
@@ -188,7 +196,7 @@ Say ("Model {0}, commit {1}, instance {2}, run folder {3}" -f $hash, $commit, $M
 
 # Compile the instance to TLA+.
 Say "Compiling to TLA+"
-$compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$Invariant")
+$compileArgs = @("compile", "--target=tlaplus", "--main=$Main", "--invariant=$Invariant", "--apalache-version=$apalache")
 if ($Temporal) { $compileArgs += "--temporal=$Temporal" }
 $compileArgs += $SourceFile
 Push-Location $ModelDir
@@ -206,8 +214,9 @@ $spec = Join-Path $RunDir "$Main.tla"
 [System.IO.File]::WriteAllLines($spec, $lines[$start..$end])
 
 # Apalache modules the compiled specification extends.
-$apalacheJar = Get-ChildItem -Path $env:QUINT_HOME -Recurse -Filter "apalache.jar" | Select-Object -First 1
-if (-not $apalacheJar) { throw "apalache.jar not found under $($env:QUINT_HOME)" }
+$apalacheJar = Get-ChildItem -Path $env:QUINT_HOME -Recurse -Filter "apalache.jar" |
+    Where-Object { $_.FullName -like "*apalache-dist-$apalache*" } | Select-Object -First 1
+if (-not $apalacheJar) { throw "apalache.jar $apalache not found under $($env:QUINT_HOME)" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($apalacheJar.FullName)
 try {

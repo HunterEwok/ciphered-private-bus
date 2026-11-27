@@ -20,6 +20,7 @@
     "instance": "small_ind",
     "smallInstance": "tiny_ind",
     "parallel": 2,
+    "disabledSteps": ["stepBadIssue"],
     "steps": [
       "stepPairHonest",
       "stepAdvJoiner",

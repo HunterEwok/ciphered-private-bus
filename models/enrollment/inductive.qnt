@@ -107,8 +107,8 @@ module inductive {
     badRequest(key, presence, name, t, p)
   }
   // Only the mutant acceptor_issues enables badIssue. Without it the branch
-  // has no transition at all, which Apalache reports as a deadlock, so the
-  // proof's list of branches in checks.json leaves it out.
+  // has no transition at all: checks.json lists it under disabledSteps, and
+  // the proof checks that no state of IndInv enables it.
   action stepBadIssue = { nondet key = KEYS.oneOf() badIssue(key) }
 
   // ------------------------------------------- an arbitrary state of IndInv

@@ -215,14 +215,14 @@ rule NodeAcceptHalt:
     let head = <bus, g, no> in
     [ !NodeRoot(D, bus, g, pk(xr)),
       In(<'halt', lbl, head, ra, sign(recmsg(lbl, head, ra), xr), rb, sign(recmsg(lbl, head, rb), xr)>) ]
-  --[ AcceptHalt(D, bus, g, lbl, head) ]->
+  --[ AcceptHalt(D, bus, g, lbl, head, ra, rb) ]->
     [ ]
 #else
 rule NodeAcceptHalt:
     let head = <bus, g, no> in
     [ !NodeRoot(D, bus, g, pk(xr)),
       In(<'halt', lbl, head, ra, sign(recmsg(lbl, head, ra), xr), rb, sign(recmsg(lbl, head, rb), xr)>) ]
-  --[ AcceptHalt(D, bus, g, lbl, head), Neq(ra, rb) ]->
+  --[ AcceptHalt(D, bus, g, lbl, head, ra, rb), Neq(ra, rb) ]->
     [ ]
 #endif
 
@@ -235,7 +235,7 @@ rule NodeAcceptPermanentHalt:
     in
     [ !NodeTrust(D, bus, pk(x1), pk(x2)),
       In(<'halt', 'cpb root change v1', head, ra, sign(ma, x1), sign(ma, x2), rb, sign(mb, x1), sign(mb, x2)>) ]
-  --[ AcceptPermanentHalt(D, bus, g), Neq(ra, rb) ]->
+  --[ AcceptPermanentHalt(D, bus, g, ra, rb), Neq(ra, rb) ]->
     [ ]
 
 /* ------------------------------------------------------------------ lemmas */
@@ -253,16 +253,16 @@ lemma executable:
 // records of one generation, with no key revealed.
 lemma executable_halt:
   exists-trace
-  "Ex D bus g lbl head #h.
-     AcceptHalt(D, bus, g, lbl, head) @ h
+  "Ex D bus g lbl head ra rb #h.
+     AcceptHalt(D, bus, g, lbl, head, ra, rb) @ h
      & (not Ex b x #k. RevealRoot(b, x) @ k)
      & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
      & (not Ex b #k. Quantum(b) @ k)"
 
 lemma executable_permanent_halt:
   exists-trace
-  "Ex D bus g #h.
-     AcceptPermanentHalt(D, bus, g) @ h
+  "Ex D bus g ra rb #h.
+     AcceptPermanentHalt(D, bus, g, ra, rb) @ h
      & (not Ex b x #k. RevealRoot(b, x) @ k)
      & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
      & (not Ex b #k. Quantum(b) @ k)"
@@ -316,24 +316,26 @@ lemma quantum_forges_records:
      & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)"
 
 // S8, R-MEM-8, Section 15.5: a halt proof convicts the root of the
-// generation in its head: it signed two records of one kind with that head.
-// No one else can make one without that root's key.
+// generation in its head: it signed, before the proof was accepted, the two
+// different records of one kind with that head that the proof carries. No
+// one else can make one without that root's key.
 lemma halt_proof_authentic:
-  "All D bus g lbl head #h.
-     AcceptHalt(D, bus, g, lbl, head) @ h
-     ==> (Ex ra rb #a #b. RootSigned(bus, g, lbl, head, ra) @ a
-            & RootSigned(bus, g, lbl, head, rb) @ b & not (ra = rb))
+  "All D bus g lbl head ra rb #h.
+     AcceptHalt(D, bus, g, lbl, head, ra, rb) @ h
+     ==> (Ex #a #b. RootSigned(bus, g, lbl, head, ra) @ a
+            & RootSigned(bus, g, lbl, head, rb) @ b & a < h & b < h & not (ra = rb))
        | (Ex #k. RevealRoot(bus, g) @ k & k < h)
        | (Ex #k. Quantum(bus) @ k & k < h)
        | ((Ex #k. RevealK1(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))"
 
 // S8, R-MEM-13, L6: a permanent halt proof convicts the recovery key: it
-// signed two root change records of one generation.
+// signed, before the proof was accepted, the two different root change
+// records of one generation that the proof carries.
 lemma permanent_halt_authentic:
-  "All D bus g #h.
-     AcceptPermanentHalt(D, bus, g) @ h
-     ==> (Ex ra rb #a #b. RcSigned(bus, <bus, g>, ra) @ a
-            & RcSigned(bus, <bus, g>, rb) @ b & not (ra = rb))
+  "All D bus g ra rb #h.
+     AcceptPermanentHalt(D, bus, g, ra, rb) @ h
+     ==> (Ex #a #b. RcSigned(bus, <bus, g>, ra) @ a
+            & RcSigned(bus, <bus, g>, rb) @ b & a < h & b < h & not (ra = rb))
        | ((Ex #k. RevealK1(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))
        | ((Ex #k. Quantum(bus) @ k & k < h) & (Ex #k. RevealK2(bus) @ k & k < h))"
 

@@ -75,6 +75,44 @@ Witnesses (`witness*`) state that a behaviour never happens and are expected to 
 data taken, credit added, a gap skipped in lossy mode, an opening refused at the limit, a stale chunk
 dropped, a stream closed by "reset nonces", by a chunk out of order, and by a chunk beyond the credit.
 
+## Requirement coverage
+
+Every normative sentence of the requirements in scope, and what in the model checks it: an invariant
+(with the probe that breaks it), a guard, or a stated abstraction. "Header" points to the abstractions
+listed at the top of [`streams.qnt`](streams.qnt).
+
+| Requirement | Sentence | Checked by |
+| --- | --- | --- |
+| R-STR-1 | a stream is opened by the reply to a call | guards: `targetOpen` opens the target's side, `commanderReply` the commander's |
+| R-STR-1 | the keys of the two directions come from the call's HPKE context with different labels | abstraction: the instance number `k` stands for the context, the direction for the label (header); the derivation is the Tamarin calls model's |
+| R-STR-2 | a chunk carries the direction bit, stream number, chunk number, flags, and the added credit | the record `Chunk`; `chunkBinding`; probe `no_dir` |
+| R-STR-2 | exactly one of the three flags is set; any other combination closes the stream | the field `kind` takes one of `data`, `credit`, `end`. A chunk with another combination can come only from a faulty peer and ends the stream like a chunk out of order (`witnessOrderClose`); it is not modelled separately |
+| R-STR-2 | the cipher nonce equals the chunk number | `chunkNumbersUnique`; probe `reuse_no` |
+| R-STR-2 | the chunk header is associated data | abstraction: a chunk cannot be forged or altered (header) |
+| R-STR-3 | the mode is named in the call | the field `mode` of `Call`, copied to both sides |
+| R-STR-3 | ordered: only the number one greater than the previous one; anything else closes the stream | `orderedInOrder`; probe `ordered_gap`; witness `witnessOrderClose` |
+| R-STR-3 | lossy: a number above the highest is taken, gaps are not filled, a lower or equal one is dropped silently | `lossyIncreasing`; probe `lossy_old`; witness `witnessLossyGap` |
+| R-STR-3 | credit does not apply in lossy mode; the recipient drops the excess | abstraction: in lossy mode no credit chunks are sent and the recipient takes what it can (header) |
+| R-STR-3 | a chunk of a stream the recipient does not have is dropped, changes no state, and causes no answer | `unknownIsDropped`; probes `unknown_opens`, `id_only`; scenario `staleChunkIsDroppedTest`; witness `witnessStaleDropped` |
+| R-STR-4 | a sender sends no more data than the credit granted to it | `senderWithinCredit`; probe `ignore_credit` |
+| R-STR-4 | each direction has its own credit | the fields `sendCredit` and `recvCredit` of each side |
+| R-STR-4 | the commander's initial credit travels in the call, the target's in the reply | `Call.credit`, `Reply.credit`; `creditSound` |
+| R-STR-4 | after that each side adds credit with credit chunks | `creditSound`; probe `credit_replay`; witness `witnessCreditAdded` |
+| R-STR-4 | a chunk with its header fits in one frame | abstraction: a data chunk carries one unit (header) |
+| R-STR-4 | exceeding the credit closes the stream | `creditRespected`; probe `no_credit_check`; witness `witnessCreditClose` |
+| R-STR-5 | an "end" chunk closes the stream | guards: `sendChunk` and `receive` remove the stream on `end` |
+| R-STR-5 | "link down" closes the streams | guard: `linkDown` empties both sides |
+| R-STR-5 | "reset nonces" closes the streams without traffic since the previous one | `resetOnlyIdle`; probe `reset_busy`; scenario `resetClosesOnlyIdleTest`; witness `witnessResetClosed` |
+| R-STR-5 | a halt of the bus closes the streams | `haltClosesStreams`; probe `halt_keeps` |
+| R-STR-5 | the revocation of either party closes the streams | `revocationClosesStreams`; probe `revoke_keeps` |
+| R-STR-6 | the number of open streams is bounded by the profile | `streamsBounded` |
+| R-STR-6 | opening beyond the limit is rejected with a result code, not by closing streams | `openKeepsStreams`; probe `evict`; witness `witnessTooMany` |
+| R-CORE-6 | open streams do not survive a reboot | guard: `reboot` empties the node's streams; scenario `staleChunkIsDroppedTest` (and probe `id_only`) |
+| R-KEY-9 | under one key the nonce equals the message number and never repeats | `chunkNumbersUnique`; probe `reuse_no` |
+| R-MEM-9 | a halted node closes its streams | `haltClosesStreams`; probe `halt_keeps`; a halted node opens, sends and takes nothing (guards) |
+
+R-STR-7 (a relay forwards chunks unchanged) is the relay's and is checked by a relay test.
+
 ## Inductive invariant
 
 [`inductive.qnt`](inductive.qnt) holds an inductive invariant `IndInv`; Apalache proves the same three

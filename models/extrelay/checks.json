@@ -1,0 +1,49 @@
+{
+  "tlcInstance": "tiny",
+  "witnessInstance": "tiny",
+  "probes": [
+    "no_new_epoch",
+    "epoch_only_order",
+    "no_rd_check",
+    "no_bridges",
+    "bridge_to_revoked",
+    "unlisted_bridges",
+    "keep_on_close",
+    "member_root_obj",
+    "hello_no_tree",
+    "ticket_rollback",
+    "bridge_without_records"
+  ],
+  "witnesses": [
+    "witnessBridgeFetched",
+    "witnessRevokedAndClosed",
+    "witnessReturned",
+    "witnessUnlisted",
+    "witnessRootChangeBridged",
+    "witnessAdmitted"
+  ],
+  "inductive": {
+    "instance": "small_ind",
+    "smallInstance": "tiny_ind",
+    "parallel": 1,
+    "disabledSteps": [
+      "stepRelayTicket"
+    ],
+    "steps": [
+      "stepAdmit",
+      "stepRevoke",
+      "stepUnlist",
+      "stepRootChange",
+      "stepNewRootDevice",
+      "stepBridges",
+      "stepRegister",
+      "stepClose",
+      "stepForge",
+      "stepRelayTicket",
+      "stepNodeCheckpoint",
+      "stepNodeAccess",
+      "stepNodeBridge",
+      "stepNodeUpload"
+    ]
+  }
+}

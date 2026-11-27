@@ -1025,9 +1025,9 @@ Appendix B, Section B.10.
 > epoch. A relay access object signed by a root device that its checkpoint no longer names is rejected.
 > A member never
 > sends the relay epoch secret, its link seed, or anything derived from them in the open.
-> *Serves:* S5, S18. *Verified by:* membership model (a new epoch follows every cleared bit; probe: the
-> key of a replaced root device issues a far-ahead epoch, and members must still return to the relays of
-> the new root device), Tamarin.
+> *Serves:* S5, S18. *Verified by:* external relay model (a new epoch follows every cleared bit and every
+> change of the `relays` list; probe: the key of a replaced root device issues a far-ahead epoch, and
+> members must still return to the relays of the new root device), Tamarin.
 
 > **R-REL-14.** For an external relay with identifier `RelayId`, the device aliases, the label aliases,
 > and the wrapping keys are derived from the relay epoch secret and `RelayId`; a member's link key is

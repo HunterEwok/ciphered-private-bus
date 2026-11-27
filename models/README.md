@@ -15,11 +15,12 @@ and what it rests on.
 | [enrollment](enrollment/) | with a proven view | `small_ind` | TLC |
 | [streams](streams/) | every state | `small_ind` | TLC |
 | [relay](relay/) | with a proven view | `small_ind` | TLC |
+| [extrelay](extrelay/) | every state | `small_ind` | TLC |
 
 ## How a result is obtained
 
 **Exhaustive TLC.** TLC explores every reachable state of the instance and checks `safety` in each.
-For streams it stores every state. For the other five TLC runs with a `VIEW`, which keeps the number
+For streams and extrelay it stores every state. For the other five TLC runs with a `VIEW`, which keeps the number
 of stored states, and with it the probability of a fingerprint collision (below), small: two states
 with the same view are stored once, and only the first one found is explored further. A view is not trusted on its own. Each `view.qnt` carries a
 proof, checked by Apalache on two copies A and B of the model, that the view is exact for `safety`:

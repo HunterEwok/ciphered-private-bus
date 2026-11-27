@@ -36,6 +36,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   eviction rules of Appendix B, Section B.10 (fair share), revocation of a device, removal of the relay
   from the checkpoint, tickets across a root change, and the join request buffer; eighteen probes,
   witnesses, fixed scenarios, and a CI job.
+- Quint model of external relays (`models/extrelay/`): relay epochs of the root device, relay access
+  objects ordered by root device and epoch with a stolen key of a replaced root device signing any
+  epoch, tickets, bridges under a closed alias with the records a member asleep through a root change
+  needs, relay hello admission by the members tree, and Root-signed objects from the root device only;
+  eleven probes, witnesses, fixed scenarios, an inductive invariant, and CI jobs.
 - Inductive invariant of the membership model (`models/membership/inductive.qnt`): Apalache
   proves its safety for every reachable state, in CI for two devices and in long runs for
   larger sizes. Runners for shared Windows machines: `run-tlc.ps1` (exhaustive TLC, and a

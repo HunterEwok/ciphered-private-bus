@@ -966,9 +966,11 @@ requirements of this list apply to a member relay unless they name an external r
 > *Serves:* L5. *Verified by:* relay model.
 
 > **R-REL-6.** A member relay deletes what it stores for a device that is revoked under its checkpoint,
-> and accepts nothing more for or from it. An external relay deletes by the closing ticket instead
+> and accepts nothing more for or from it. A member relay that accepts a checkpoint whose `relays` list
+> does not hold its device identifier deletes everything it stores for the bus, including buffered join
+> requests, and serves the bus no more. An external relay deletes by the closing ticket instead
 > (R-REL-19).
-> *Serves:* S5. *Verified by:* model.
+> *Serves:* S5. *Verified by:* relay model, external relay model.
 
 > **R-REL-7.** A member relay stores and serves on request the latest checkpoint it knows, passports,
 > sealing key claims, and the latest root change record. These are public bus data. An external relay

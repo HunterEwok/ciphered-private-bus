@@ -605,7 +605,8 @@ accounting rules are the same for both kinds of relay; for an external relay "bu
 An external relay has a P-256 signing key, one for all the buses it serves. The relay identifier is
 computed in the same way as a device identifier: `RelayId = SHA-256(encode(relay_key))[0..16]`. The
 Root enters this identifier into the `relays` list of the checkpoint. For a member relay, the list holds
-its device identifier.
+its device identifier; a member relay removed from the list deletes what it stores for the bus
+(R-REL-6).
 
 ### Derivations
 

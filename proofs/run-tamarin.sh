@@ -112,6 +112,9 @@ if ci:
     if unknown:
         sys.exit(f"checks.json: ci names unknown lemmas {unknown}")
     lemmas = checks["ci"]["lemmas"]
+    unknown = [d for d in checks["ci"]["probes"] if d not in checks["probes"]]
+    if unknown:
+        sys.exit(f"checks.json: ci names unknown probes {unknown}")
 for lemma in lemmas:
     if not lemma.endswith("_counterexample"):
         print(f"model|-|{lemma}|verified")
@@ -158,15 +161,17 @@ run_one() {
 
 verdict() {
   local lemma="$1" log="$2"
-  local line
+  local line status
   line=$(grep -E "^  $lemma \((all-traces|exists-trace)\): " "$log" | tail -1 || true)
+  status=$(sed -n 's/^prover exit status: //p' "$log" | tail -1)
+  # A verdict counts only from a prover that finished normally (R-VER-5).
+  [ "$status" = 0 ] || line=""
   case "$line" in
     *": verified"*) echo verified ;;
     *": falsified"*) echo falsified ;;
     *"analysis incomplete"*) echo "no verdict" ;;
     *)
-      local status cause
-      status=$(sed -n 's/^prover exit status: //p' "$log" | tail -1)
+      local cause
       case "$status" in
         124) cause="time limit (-t) reached" ;;
         137) cause="killed (SIGKILL), most likely by the kernel for lack of memory; see dmesg" ;;

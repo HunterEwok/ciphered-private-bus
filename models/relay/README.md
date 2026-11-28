@@ -273,3 +273,5 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `rela
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-28 | `d923972decdc` (commit 8dfd3dd) | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (16 workers, 19 GB heap) | 19 probes against `safety` at the sizes in the instances table, 11 witnesses on `tiny`, breadth-first until the first violation | 30 of 30 violated as expected, depth 2 to 10, 1.2 to 1.7 min each (compilation included), 42 min in total |
+| 2026-11-28 | `d923972decdc`, invariant `f3fb404024e5` (commit 8dfd3dd) | Apalache 0.62.4, `run-inductive.ps1 -Split -Parallel 1`, maintainer's server (15 GB heap) | `small_ind`, all states satisfying `IndInv` | all three obligations hold: init in 1.7 min, the 13 step branches in 3.0 to 279.7 min (`RecvPub` 279.7, `RecvGrant` 247.8, `RecvReq` 57.4, `LearnCp` 11.2, the others 3.0 to 4.1), `IndInv` implies `safety` in 3.3 min; 10 h 29 min in total. Safety holds in every reachable state of `small` |

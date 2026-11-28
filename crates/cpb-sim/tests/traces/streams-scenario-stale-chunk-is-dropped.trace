@@ -1,0 +1,51 @@
+model streams
+const max_streams=1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 
+commanderCall 1 ordered 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:ordered:1
+= done 
+targetOpen 1 ordered 1 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= pending 1:ordered:1
+= done 1
+commanderReply 1 1 1 1
+= node C halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= pending 
+= done 1
+sendChunk T 1 data 0
+= node C halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=1,mode=ordered,next=2,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= pending 
+= done 1
+reboot T
+= node C halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1
+commanderCall 2 ordered 1
+= node C halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 2:ordered:1
+= done 1
+targetOpen 2 ordered 1 1
+= node C halted=0 revoked=0 streams=1:k=1,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=2,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= pending 2:ordered:1
+= done 1,2
+commanderReply 2 1 1 1
+= node C halted=0 revoked=0 streams=1:k=2,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=2,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= pending 
+= done 1,2
+receive C t2c 1 1 1 data 0
+= node C halted=0 revoked=0 streams=1:k=2,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=2,mode=ordered,next=1,high=0,sc=1,rc=1,idle=0,got=1,granted=1,sent=0,recvd=0
+= pending 
+= done 1,2

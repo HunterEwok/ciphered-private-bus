@@ -168,6 +168,17 @@ impl RuleCode {
         "R-CH-15",
         "The requested part of the file does not exist.",
     );
+    /// A stream operation that does not fit the call or the mode of the stream.
+    pub const API_BAD_STREAM: Self = Self::new(
+        "api",
+        "bad-stream",
+        ErrorKind::InvalidArgument,
+        "R-STR-3",
+        "This operation does not fit the stream.",
+    );
+    /// The message of a reply is longer than 256 bytes.
+    pub const API_MESSAGE_TOO_LONG: Self =
+        Self::new("api", "message-too-long", ErrorKind::InvalidArgument, "R-CALL-10", "The reply message is too long.");
     /// The application part of the node info exceeds 4024 bytes.
     pub const API_APP_INFO_TOO_LARGE: Self = Self::new(
         "api",
@@ -257,6 +268,21 @@ impl RuleCode {
     pub const CALL_NOT_CONFIRMED: Self =
         Self::new("call", "not-confirmed", ErrorKind::Refused, "R-API-3", "The action was not confirmed by the user.");
 
+    // -------------------------------------------------------------------- streams
+
+    /// Opening a stream beyond the limit of open streams.
+    pub const STR_TOO_MANY: Self =
+        Self::new("str", "too-many", ErrorKind::Refused, "R-STR-6", "Too many transfers are open.");
+    /// Ordered mode: the data does not fit the credit the peer granted.
+    pub const STR_NO_CREDIT: Self =
+        Self::new("str", "no-credit", ErrorKind::Refused, "R-STR-4", "The other side is not ready for more data yet.");
+    /// Ordered mode: a chunk that is not the next one; the stream closes.
+    pub const STR_OUT_OF_ORDER: Self =
+        Self::new("str", "out-of-order", ErrorKind::Refused, "R-STR-3", "The transfer was interrupted.");
+    /// Ordered mode: the peer sent more than its credit; the stream closes.
+    pub const STR_OVER_CREDIT: Self =
+        Self::new("str", "over-credit", ErrorKind::Refused, "R-STR-4", "The transfer was interrupted.");
+
     // -------------------------------------------------------------------- storage
 
     /// The host reported a failed storage write.
@@ -276,6 +302,8 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::API_BUS_RESULT,
     RuleCode::API_BAD_BLOB,
     RuleCode::API_BAD_RANGE,
+    RuleCode::API_BAD_STREAM,
+    RuleCode::API_MESSAGE_TOO_LONG,
     RuleCode::API_APP_INFO_TOO_LARGE,
     RuleCode::MEM_NOT_MEMBER,
     RuleCode::MEM_BEHIND,
@@ -295,6 +323,10 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::CALL_STALE_EPOCH,
     RuleCode::CALL_NO_RIGHT,
     RuleCode::CALL_NOT_CONFIRMED,
+    RuleCode::STR_TOO_MANY,
+    RuleCode::STR_NO_CREDIT,
+    RuleCode::STR_OUT_OF_ORDER,
+    RuleCode::STR_OVER_CREDIT,
     RuleCode::STORE_FAILED,
 ];
 

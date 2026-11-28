@@ -9,3 +9,4 @@
 pub mod calls;
 pub mod channels;
 pub mod membership;
+pub mod streams;

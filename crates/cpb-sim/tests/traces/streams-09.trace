@@ -1,0 +1,306 @@
+model streams
+const max_streams=2
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 
+linkDown
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 
+commanderCall 1 lossy 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 
+linkDown
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 
+resetNonces C
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 
+targetOpen 1 lossy 0 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= pending 1:lossy:0
+= done 1
+commanderCall 2 lossy 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= pending 1:lossy:0,2:lossy:0
+= done 1
+sendChunk T 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0,2:lossy:0
+= done 1
+receive C t2c 1 1 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0,2:lossy:0
+= done 1
+targetOpen 2 lossy 0 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=2,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= pending 1:lossy:0,2:lossy:0
+= done 1,2
+sendChunk T 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=2,mode=lossy,next=2,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=1,recvd=0
+= pending 1:lossy:0,2:lossy:0
+= done 1,2
+sendChunk T 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0,2:lossy:0
+= done 1,2
+receive C t2c 1 2 2 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0,2:lossy:0
+= done 1,2
+receive C t2c 1 2 2 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0,2:lossy:0
+= done 1,2
+commanderReply 2 1 0 1
+= node C halted=0 revoked=0 streams=1:k=2,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 1,2
+commanderReply 1 1 0 1
+= node C halted=0 revoked=0 streams=1:k=1,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2
+sendChunk C 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2
+commanderCall 3 ordered 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 3:ordered:0
+= done 1,2
+targetOpen 3 ordered 0 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=0,rc=1,idle=0,got=0,granted=1,sent=0,recvd=0
+= pending 3:ordered:0
+= done 1,2,3
+commanderReply 3 1 1 1
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=0,rc=1,idle=0,got=0,granted=1,sent=0,recvd=0
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=0,rc=1,idle=0,got=0,granted=1,sent=0,recvd=0
+= pending 
+= done 1,2,3
+sendChunk T 1 credit 1
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=1:k=3,mode=ordered,next=2,high=0,sc=0,rc=2,idle=0,got=0,granted=2,sent=0,recvd=0
+= pending 
+= done 1,2,3
+sendChunk T 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=1,high=0,sc=1,rc=0,idle=0,got=1,granted=0,sent=0,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+sendChunk C 1 data 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=2,high=0,sc=0,rc=0,idle=0,got=1,granted=0,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=2,high=0,sc=0,rc=0,idle=0,got=1,granted=0,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=2,high=0,sc=0,rc=0,idle=0,got=1,granted=0,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=2,high=0,sc=0,rc=0,idle=0,got=1,granted=0,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+sendChunk C 1 credit 1
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=3,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 1 data 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=3,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=3,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=3,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=1:k=3,mode=ordered,next=3,high=0,sc=0,rc=1,idle=0,got=1,granted=1,sent=1,recvd=0
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+sendChunk C 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 3 1 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 1 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 3 1 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 3 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 1 1 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive T c2t 1 3 2 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 2 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 2 2 end 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3
+receive C t2c 1 3 1 credit 1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 1,2,3

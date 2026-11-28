@@ -9,8 +9,8 @@ For each model it takes two kinds of traces and writes them to crates/cpb-sim/te
 - every run of the model's fixed scenarios (scenarios.qnt), which reach each behaviour the
   witnesses name, converted with scenario2trace.py;
 - random traces of the `small` instance with a fixed seed: of the sampled traces it keeps a
-  small set that together reaches the most behaviours (the `seen` variable) and has the most
-  of the rarer actions, converted with itf2trace.py.
+  small set that together reaches the most behaviours (the `seen` variable and the actions
+  taken) and has the most of the rarer actions, converted with itf2trace.py.
 
 Run it from the repository root after `npm ci` in models/; the TypeScript backend of the
 pinned Quint needs no other download.
@@ -21,6 +21,7 @@ Usage: tools/sim/gen_traces.py
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,12 @@ MODELS = {
         "scenario_consts": "commanders=a root=r presence=a max_nonce=4 epochs=2",
         "rare": {"cmdReply": 4, "cmdStart": 2, "cmdMismatch": 2, "cmdEpoch": 1, "envChange": 1},
     },
+    "streams": {
+        "consts": "max_streams=2",
+        "scenario_consts": "max_streams=1",
+        "scenario_modules": ["scenarios", "scenarios_reset"],
+        "rare": {"commanderReply": 4, "sendChunk": 3, "overrun": 2, "resetNonces": 2},
+    },
 }
 
 
@@ -60,20 +67,23 @@ def sample(model: str, tmp: Path) -> list[Path]:
     return sorted(found, key=lambda p: int(p.stem.split("_")[1].split(".")[0]))
 
 
-def scenarios(model: str, consts: str, tmp: Path) -> None:
-    pattern = tmp / f"{model}_{{test}}_{{seq}}.itf.json"
-    subprocess.run(
-        ["npx", "quint", "test", f"{model}/scenarios.qnt", "--main=scenarios", "--backend=typescript", f"--seed={SEED}",
-         f"--out-itf={pattern}"],
-        cwd=ROOT / "models", check=True, stdout=subprocess.DEVNULL,
-    )
-    files = sorted(str(p) for p in tmp.glob(f"{model}_*Test_*.itf.json"))
-    subprocess.run(
-        [sys.executable, str(ROOT / "tools/sim/scenario2trace.py"), model,
-         str(ROOT / "models" / model / "scenarios.qnt"), consts, str(OUT), *files],
-        check=True,
-    )
-    print(f"{model}: {len(files)} scenario runs")
+def scenarios(model: str, consts: str, modules: list[str], tmp: Path) -> None:
+    count = 0
+    for module in modules:
+        pattern = tmp / f"{model}_{module}_{{test}}_{{seq}}.itf.json"
+        subprocess.run(
+            ["npx", "quint", "test", f"{model}/scenarios.qnt", f"--main={module}", "--backend=typescript",
+             f"--seed={SEED}", f"--out-itf={pattern}"],
+            cwd=ROOT / "models", check=True, stdout=subprocess.DEVNULL,
+        )
+        files = sorted(str(p) for p in tmp.glob(f"{model}_{module}_*Test_*.itf.json"))
+        subprocess.run(
+            [sys.executable, str(ROOT / "tools/sim/scenario2trace.py"), model,
+             str(ROOT / "models" / model / "scenarios.qnt"), consts, str(OUT), *files],
+            check=True, env={**os.environ, "SCENARIO_MODULE": module},
+        )
+        count += len(files)
+    print(f"{model}: {count} scenario runs")
 
 
 def profile(path: Path, rare: dict[str, int]) -> tuple[set[str], int]:
@@ -82,6 +92,8 @@ def profile(path: Path, rare: dict[str, int]) -> tuple[set[str], int]:
     seen_key = next(k for k in last if k.endswith("::seen"))
     seen = set(last[seen_key]["#set"])
     counts = Counter(s["mbt::actionTaken"] for s in states)
+    # The actions taken count as behaviours too, so every action of the model is replayed.
+    seen |= {f"action {a}" for a in counts}
     return seen, sum(w * counts[a] for a, w in rare.items())
 
 
@@ -106,7 +118,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
         for model, spec in MODELS.items():
-            scenarios(model, spec["scenario_consts"], tmp)
+            scenarios(model, spec["scenario_consts"], spec.get("scenario_modules", ["scenarios"]), tmp)
             paths = sample(model, tmp)
             for i, p in enumerate(select(paths, spec["rare"])):
                 subprocess.run(

@@ -2,18 +2,20 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts the scenario runs of the channels and calls models into replay traces.
+"""Converts the scenario runs of the channels, calls and streams models into replay traces.
 
 `quint test --out-itf` writes the states of a run but not the actions that led to them, so
-the actions are read from the run's `.then(...)` steps in scenarios.qnt. Only the main
-`scenarios` module is read; the probe modules are deliberately broken models.
+the actions are read from the run's `.then(...)` steps in scenarios.qnt. The module named by
+SCENARIO_MODULE is read, `scenarios` by default; the probe modules are deliberately broken
+models.
 
-Usage: scenario2trace.py MODEL SCENARIOS_QNT INSTANCE_CONSTANTS OUT_DIR ITF_FILE...
+Usage: [SCENARIO_MODULE=NAME] scenario2trace.py MODEL SCENARIOS_QNT INSTANCE_CONSTANTS OUT_DIR ITF_FILE...
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -107,7 +109,7 @@ class Parser:
 
 
 def main_module(text: str) -> str:
-    start = text.index("module scenarios {")
+    start = text.index("module " + os.environ.get("SCENARIO_MODULE", "scenarios") + " {")
     depth = 0
     for j in range(start, len(text)):
         if text[j] == "{":
@@ -122,7 +124,11 @@ def main_module(text: str) -> str:
 def runs(module: str) -> tuple[dict, dict]:
     vals: dict = {}
     for m in re.finditer(r"^\s*val (\w+) = (\{[^\n]*\})\s*$", module, re.M):
-        vals[m.group(1)] = Parser(m.group(2), vals).value()
+        try:
+            vals[m.group(1)] = Parser(m.group(2), vals).value()
+        except KeyError:
+            # A value built from an action's parameter is not a constant of the scenario.
+            continue
     out: dict = {}
     for m in re.finditer(r"run (\w+) =(.*?)(?=\n\s*(?://|run |val |$))", module, re.S):
         body = m.group(2)
@@ -132,7 +138,7 @@ def runs(module: str) -> tuple[dict, dict]:
             while depth:
                 depth += {"(": 1, ")": -1}.get(body[j], 0)
                 j += 1
-            steps.append(Parser(body[t.end():j - 1], vals).call())
+            steps.append(body[t.end():j - 1])
         out[m.group(1)] = steps
     return vals, out
 
@@ -141,8 +147,39 @@ def b(x: bool) -> str:
     return "1" if x else "0"
 
 
-def line(model: str, call: tuple[str, list], prev: dict, cur: dict, pre: str) -> str:
-    n, a = call
+def stream_line(text: str, vals: dict, cur: dict, pre: str) -> str:
+    """A step of the streams scenarios. Their arguments read the state (`nodes.get(...)`,
+    `replyTo(k)`), so the values those stand for are taken from the state the step reached."""
+    v = itf2trace.val
+    n = re.match(r"\w+", text).group(0)
+    if n == "startCall":
+        k = int(re.search(r"\((\d+)\)", text).group(1))
+        c = v(cur[pre + "pending"])[k]
+        return f"commanderCall {k} {c['mode']} {c['credit']}"
+    if n == "targetOpen":
+        c = Parser(text, vals).call()[1][0]
+        return itf2trace.st_open(c["k"], c["mode"], c["credit"], cur, pre)
+    if n == "commanderReply":
+        k = int(re.search(r"replyTo\((\d+)\)", text).group(1))
+        r = [x for x in v(cur[pre + "replies"]) if x["k"] == k][0]
+        return f"commanderReply {k} {r['sid']} {r['credit']} {b(r['ok'])}"
+    if n == "sendChunk":
+        m = re.match(r'sendChunk\("(\w)", (\d+), .*, "(\w+)", (\d+)\)$', text)
+        return f"sendChunk {m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}"
+    if n == "receive":
+        a = Parser(text, vals).call()[1]
+        return f"receive {a[0]} {itf2trace.st_chunk(a[1])}"
+    if n in ("resetNonces", "halt", "learnRevoked", "reboot"):
+        return f"{n} {Parser(text, vals).call()[1][0]}"
+    if n == "linkDown":
+        return n
+    raise SystemExit(f"unsupported step {text}")
+
+
+def line(model: str, text: str, vals: dict, prev: dict, cur: dict, pre: str) -> str:
+    if model == "streams":
+        return stream_line(text, vals, cur, pre)
+    n, a = Parser(text, vals).call()
     v = itf2trace.val
     if model == "channels":
         if n == "sourceGrantTo":
@@ -190,10 +227,10 @@ def line(model: str, call: tuple[str, list], prev: dict, cur: dict, pre: str) ->
 
 def main() -> None:
     model, qnt, consts, out_dir = sys.argv[1:5]
-    _, scen = runs(main_module(Path(qnt).read_text()))
-    state = itf2trace.ch_state if model == "channels" else itf2trace.cl_state
+    vals, scen = runs(main_module(Path(qnt).read_text()))
+    state = itf2trace.STATE[model]
     for itf in sys.argv[5:]:
-        test = re.match(rf"{model}_(\w+?)_\d+\.itf\.json", Path(itf).name).group(1)
+        test = re.match(rf"{model}_(?:\w+_)?([A-Za-z0-9]+)_\d+\.itf\.json", Path(itf).name).group(1)
         states = json.loads(Path(itf).read_text())["states"]
         steps = scen[test]
         # A run that ends with a disabled action (`.fail()`) ends in an empty state; the
@@ -206,7 +243,7 @@ def main() -> None:
         pre = next(k for k in states[0] if not k.startswith(("#", "mbt::"))).rsplit("::", 1)[0] + "::"
         lines = [f"model {model}", f"const {consts}"] + state(states[0], pre)
         for call, prev, cur in zip(steps, states, states[1:]):
-            lines.append(line(model, call, prev, cur, pre))
+            lines.append(line(model, call, vals, prev, cur, pre))
             lines += state(cur, pre)
         name = re.sub(r"(?<!^)(?=[A-Z])", "-", test).lower().removesuffix("-test")
         Path(out_dir, f"{model}-scenario-{name}.trace").write_text("\n".join(lines) + "\n", encoding="utf-8")

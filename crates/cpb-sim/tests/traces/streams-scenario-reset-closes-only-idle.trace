@@ -1,0 +1,36 @@
+model streams
+const max_streams=1
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 
+= done 
+commanderCall 1 lossy 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 
+targetOpen 1 lossy 0 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=1,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=0,recvd=0
+= pending 1:lossy:0
+= done 1
+resetNonces T
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=1,high=0,sc=0,rc=0,idle=1,got=0,granted=0,sent=0,recvd=0
+= pending 1:lossy:0
+= done 1
+sendChunk T 1 data 0
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=2,high=0,sc=0,rc=0,idle=0,got=0,granted=0,sent=1,recvd=0
+= pending 1:lossy:0
+= done 1
+resetNonces T
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=1:k=1,mode=lossy,next=2,high=0,sc=0,rc=0,idle=1,got=0,granted=0,sent=1,recvd=0
+= pending 1:lossy:0
+= done 1
+resetNonces T
+= node C halted=0 revoked=0 streams=
+= node T halted=0 revoked=0 streams=
+= pending 1:lossy:0
+= done 1

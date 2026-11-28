@@ -6,14 +6,16 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobInfo, BlobWriteId, BusState, CallId, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId,
-    HostAnswer, HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO, MAX_BLOB_SEGMENTS, MAX_DATA,
-    MAX_NAME, Member, OwnerOperation, Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode,
+    Action, BlobInfo, BlobWriteId, BusState, CallId, CallKey, CallOutcome, Channel, DEFAULT_INITIAL_CREDIT, DeviceId,
+    ErrorMode, Event, FetchId, HostAnswer, HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO,
+    MAX_BLOB_SEGMENTS, MAX_DATA, MAX_INITIAL_CREDIT, MAX_MESSAGE, MAX_NAME, MAX_STREAM_DATA, Member, OwnerOperation,
+    Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
 };
 
 use crate::engine::calls::{CallBody, CmdRights, Commander, Next, SigKey, Target, Verdict};
 use crate::engine::channels::{Accepted, Grant, Pub, Reader, Source};
 use crate::engine::membership::{Change, Checkpoint, Passport, Root, View};
+use crate::engine::streams::{Chunk, Kind, Received, SendError, Side, Table, Taken};
 use crate::rng::Rng;
 
 /// Profile parameters the simulator uses (Section 13.2).
@@ -27,15 +29,38 @@ pub struct Profile {
     pub retained_epochs: u32,
     /// Bytes of blob per segment, before encryption.
     pub blob_segment: u32,
+    /// Open streams per node, 0 to 256 (R-STR-6).
+    pub max_streams: u16,
+    /// Bytes of data per stream chunk.
+    pub stream_chunk: u32,
+    /// Lossy mode: bytes of stream data the core holds for the application; a chunk that
+    /// does not fit is dropped (R-STR-3).
+    pub stream_buffer: u32,
 }
 
 /// The default segment: the 4096-byte segment frame of Section 13.2, less the 38-byte frame
 /// header and the 16-byte authentication tag (Appendix B, Section B.7).
 pub const DEFAULT_BLOB_SEGMENT: u32 = 4096 - 38 - 16;
 
+/// The default data of a stream chunk: the 4096-byte chunk frame of Section 13.2, less the
+/// 46-byte chunk header and the 16-byte authentication tag (Appendix B, Section B.7).
+pub const DEFAULT_STREAM_CHUNK: u32 = 4096 - 46 - 16;
+
+/// The default limit of open streams per node (Section 13.2).
+pub const DEFAULT_MAX_STREAMS: u16 = 8;
+
 impl Default for Profile {
     fn default() -> Self {
-        Self { max_depth: 16, number_block: 16, retained_epochs: 4, blob_segment: DEFAULT_BLOB_SEGMENT }
+        Self {
+            max_depth: 16,
+            number_block: 16,
+            retained_epochs: 4,
+            blob_segment: DEFAULT_BLOB_SEGMENT,
+            max_streams: DEFAULT_MAX_STREAMS,
+            stream_chunk: DEFAULT_STREAM_CHUNK,
+            // What an ordered stream holds under the default initial credit.
+            stream_buffer: DEFAULT_INITIAL_CREDIT,
+        }
     }
 }
 
@@ -43,20 +68,64 @@ impl Default for Profile {
 /// boundary, and every rule is checked on these values directly.
 #[derive(Clone, Debug)]
 pub(crate) enum Body {
-    Hello { passport: Option<Passport>, epoch: u32 },
+    Hello {
+        passport: Option<Passport>,
+        epoch: u32,
+    },
     Checkpoint(Checkpoint),
     Passport(Passport),
     Get,
-    Grant { channel: Channel, grant: Grant },
-    KeyRequest { channel: Channel },
-    Publication { channel: Channel, publication: Pub },
+    Grant {
+        channel: Channel,
+        grant: Grant,
+    },
+    KeyRequest {
+        channel: Channel,
+    },
+    Publication {
+        channel: Channel,
+        publication: Pub,
+    },
     NonceRequest,
-    Nonce { nonce: u64, refusal: Option<u64> },
-    StaleEpoch { epoch: u32, call: u64 },
-    Call { body: CallBody, args: Vec<u8> },
-    Reply { call: u64, code: ResultCode, data: Vec<u8>, next: u64 },
-    BlobGet { channel: Channel, number: u64, segment: u32 },
-    BlobSegment { channel: Channel, number: u64, segment: u32, data: Vec<u8>, last: bool },
+    Nonce {
+        nonce: u64,
+        refusal: Option<u64>,
+    },
+    StaleEpoch {
+        epoch: u32,
+        call: u64,
+    },
+    Call {
+        body: CallBody,
+        args: Vec<u8>,
+        stream: Option<StreamRequest>,
+    },
+    /// `stream` is the stream number and the target's initial credit (R-CALL-10).
+    Reply {
+        call: u64,
+        code: ResultCode,
+        message: String,
+        data: Vec<u8>,
+        next: u64,
+        stream: Option<(u32, u32)>,
+    },
+    Chunk {
+        from_commander: bool,
+        sid: u32,
+        chunk: Chunk,
+    },
+    BlobGet {
+        channel: Channel,
+        number: u64,
+        segment: u32,
+    },
+    BlobSegment {
+        channel: Channel,
+        number: u64,
+        segment: u32,
+        data: Vec<u8>,
+        last: bool,
+    },
 }
 
 impl Body {
@@ -81,6 +150,7 @@ impl Body {
             Self::Reply { .. } => "Reply",
             Self::BlobGet { .. } => "BlobGet",
             Self::BlobSegment { .. } => "BlobSegment",
+            Self::Chunk { .. } => "StreamChunk",
         }
     }
 }
@@ -172,6 +242,27 @@ struct Incoming {
     commander: DeviceId,
     call: u64,
     next: u64,
+    stream: Option<StreamRequest>,
+}
+
+/// This node's part in a stream.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Role {
+    Commander,
+    Target,
+}
+
+/// An open stream as the application knows it.
+#[derive(Clone, Copy, Debug)]
+struct Open {
+    peer: DeviceId,
+    role: Role,
+    sid: u32,
+    mode: StreamMode,
+    /// The link that carries the stream: the peer, or the relay toward it (R-STR-5).
+    via: DeviceId,
+    /// Bytes delivered as events the application has not taken yet.
+    held: u64,
 }
 
 /// A simulated node.
@@ -205,6 +296,9 @@ pub(crate) struct Node {
     /// Blobs of own retained publications, as host storage holds them.
     blobs: BTreeMap<(Channel, u64), Vec<u8>>,
     fetches: BTreeMap<FetchId, Fetch>,
+    /// Stream state by peer and role; the application's handles are in `open`.
+    tables: BTreeMap<(DeviceId, Role), Table>,
+    open: BTreeMap<StreamId, Open>,
 }
 
 fn too_large(n: usize) -> Result<(), Report> {
@@ -248,6 +342,8 @@ impl Node {
             drafts: BTreeMap::new(),
             blobs: BTreeMap::new(),
             fetches: BTreeMap::new(),
+            tables: BTreeMap::new(),
+            open: BTreeMap::new(),
         };
         n.refresh_target();
         n
@@ -287,6 +383,8 @@ impl Node {
                 cmd.queue.clear();
             }
             self.fetches.clear();
+            // A halted node closes its streams (R-MEM-9).
+            self.close_streams(|_| true, Some(StreamEnd::Halted));
         }
     }
 
@@ -388,6 +486,11 @@ impl Node {
         for t in gone {
             self.fail_target(t, &CallOutcome::Unknown);
         }
+        // The revocation of either party closes their streams (R-STR-5).
+        let me_valid = self.own_passport().is_some();
+        let invalid: BTreeSet<DeviceId> =
+            self.open.values().map(|o| o.peer).filter(|p| !me_valid || self.view.valid(*p).is_none()).collect();
+        self.close_streams(|o| invalid.contains(&o.peer), Some(StreamEnd::Revoked));
     }
 
     /// Applies a checkpoint and a passport made by this node's Root (R-MEM-3).
@@ -855,7 +958,8 @@ impl Node {
         if let Some(b) = body {
             cur.stage = Stage::Sent;
             let args = cur.inv.args.clone();
-            self.send(t, Body::Call { body: b, args });
+            let stream = cur.inv.options.stream;
+            self.send(t, Body::Call { body: b, args, stream });
         } else {
             cur.stage = Stage::AwaitNonce;
             self.send(t, Body::NonceRequest);
@@ -863,8 +967,10 @@ impl Node {
     }
 
     fn resend(&mut self, t: DeviceId, body: CallBody) {
-        let args = self.cmds.get(&t).and_then(|c| c.current.as_ref()).map(|c| c.inv.args.clone()).unwrap_or_default();
-        self.send(t, Body::Call { body, args });
+        let cur = self.cmds.get(&t).and_then(|c| c.current.as_ref());
+        let args = cur.map(|c| c.inv.args.clone()).unwrap_or_default();
+        let stream = cur.and_then(|c| c.inv.options.stream);
+        self.send(t, Body::Call { body, args, stream });
     }
 
     fn on_nonce(&mut self, from: DeviceId, nonce: u64, refusal: Option<u64>) {
@@ -902,14 +1008,29 @@ impl Node {
         }
     }
 
-    fn on_reply(&mut self, from: DeviceId, call: u64, code: ResultCode, data: Vec<u8>, next: u64) {
-        let done = self.cmds.get_mut(&from).is_some_and(|c| c.engine.on_reply(call, next));
-        if done {
-            self.finish(from, CallOutcome::Replied { code, data });
+    fn on_reply(&mut self, from: DeviceId, r: ReplyIn) {
+        let done = self.cmds.get_mut(&from).is_some_and(|c| c.engine.on_reply(r.call, r.next));
+        if !done {
+            return;
         }
+        let asked = self.cmds.get(&from).and_then(|c| c.current.as_ref()).and_then(|c| c.inv.options.stream);
+        // The reply opens the commander's side (R-STR-1); a stale side under the same number
+        // is replaced.
+        let stream = match (asked, r.stream) {
+            (Some(req), Some((sid, credit))) if self.view.valid(from).is_some() => {
+                let side = Side::new(r.call, req.mode, u64::from(credit), u64::from(req.credit));
+                let stale = self.tables.entry((from, Role::Commander)).or_default().open_as(sid, side);
+                if stale.is_some() {
+                    self.forget_stream(from, Role::Commander, sid, Some(StreamEnd::Replaced));
+                }
+                Some(self.remember_stream(from, Role::Commander, sid, req.mode))
+            }
+            _ => None,
+        };
+        self.finish(from, CallOutcome::Replied { code: r.code, message: r.message, data: r.data, stream });
     }
 
-    fn on_call(&mut self, m: &Msg, body: &CallBody, args: Vec<u8>) {
+    fn on_call(&mut self, m: &Msg, body: &CallBody, args: Vec<u8>, stream: Option<StreamRequest>) {
         if body.cmd != m.from {
             self.reject(RuleCode::CALL_NO_SLOT, format!("call body names {}", body.cmd));
             return;
@@ -926,27 +1047,194 @@ impl Node {
             }
             Verdict::Consumed { ok: false, next } => {
                 self.reject(RuleCode::CALL_NO_RIGHT, format!("action {} from {}", body.act.number(), m.from));
-                self.send(m.from, Body::Reply { call: body.id, code: ResultCode::NO_RIGHT, data: Vec::new(), next });
+                self.send_reply(m.from, body.id, ResultCode::NO_RIGHT, next);
             }
             Verdict::Consumed { ok: true, next } => {
                 if self.handlers.contains(&body.act) {
                     let id = IncomingId(self.fresh_id());
-                    self.incoming.insert(id, Incoming { commander: m.from, call: body.id, next });
+                    self.incoming.insert(id, Incoming { commander: m.from, call: body.id, next, stream });
+                    let signed_by = match body.key {
+                        SigKey::Device => CallKey::Device,
+                        SigKey::Presence => CallKey::Presence,
+                        SigKey::Root => CallKey::Root,
+                    };
                     self.events.push_back(Event::IncomingCall {
                         id,
                         commander: m.from,
                         action: body.act,
-                        confirmed: body.key != SigKey::Device,
+                        signed_by,
                         args,
+                        stream,
                     });
                 } else {
-                    self.send(
-                        m.from,
-                        Body::Reply { call: body.id, code: ResultCode::NOT_SERVED, data: Vec::new(), next },
-                    );
+                    self.send_reply(m.from, body.id, ResultCode::NOT_SERVED, next);
                 }
             }
         }
+    }
+
+    /// A reply the core gives itself: a bus result code and nothing else.
+    fn send_reply(&mut self, to: DeviceId, call: u64, code: ResultCode, next: u64) {
+        let body = Body::Reply { call, code, message: String::new(), data: Vec::new(), next, stream: None };
+        self.send(to, body);
+    }
+
+    // ------------------------------------------------------------------- streams
+
+    /// Open streams plus the calls that asked for one and await their reply: what counts
+    /// toward the limit of R-STR-6.
+    fn stream_load(&self) -> usize {
+        let pending = self
+            .cmds
+            .values()
+            .flat_map(|c| c.queue.iter().chain(c.current.as_ref().map(|cur| &cur.inv)))
+            .filter(|i| i.options.stream.is_some())
+            .count();
+        self.open.len().saturating_add(pending)
+    }
+
+    fn stream_room(&self) -> bool {
+        self.stream_load() < usize::from(self.profile.max_streams)
+    }
+
+    /// The link a stream with `peer` runs over: the direct link, or the first member relay.
+    fn via(&self, peer: DeviceId) -> DeviceId {
+        if self.links.contains(&peer) {
+            return peer;
+        }
+        let relay = self.links.iter().find(|l| self.view.valid(**l).is_some_and(|p| p.rights.relay));
+        relay.copied().unwrap_or(peer)
+    }
+
+    fn remember_stream(&mut self, peer: DeviceId, role: Role, sid: u32, mode: StreamMode) -> StreamId {
+        let id = StreamId(self.fresh_id());
+        let via = self.via(peer);
+        self.open.insert(id, Open { peer, role, sid, mode, via, held: 0 });
+        id
+    }
+
+    fn stream_of(&self, peer: DeviceId, role: Role, sid: u32) -> Option<StreamId> {
+        self.open.iter().find(|(_, o)| o.peer == peer && o.role == role && o.sid == sid).map(|(id, _)| *id)
+    }
+
+    /// Drops the handle of a stream the engine has closed, and tells the application why.
+    fn forget_stream(&mut self, peer: DeviceId, role: Role, sid: u32, reason: Option<StreamEnd>) {
+        let Some(id) = self.stream_of(peer, role, sid) else { return };
+        self.open.remove(&id);
+        if let Some(reason) = reason {
+            self.events.push_back(Event::StreamClosed { stream: id, reason });
+        }
+    }
+
+    /// Closes every stream that matches; without a reason the application is not told.
+    fn close_streams(&mut self, which: impl Fn(&Open) -> bool, reason: Option<StreamEnd>) {
+        let ids: Vec<(StreamId, Open)> = self.open.iter().filter(|(_, o)| which(o)).map(|(i, o)| (*i, *o)).collect();
+        for (id, o) in ids {
+            if let Some(t) = self.tables.get_mut(&(o.peer, o.role)) {
+                t.streams.remove(&o.sid);
+            }
+            self.open.remove(&id);
+            if let Some(reason) = reason {
+                self.events.push_back(Event::StreamClosed { stream: id, reason });
+            }
+        }
+    }
+
+    fn on_chunk(&mut self, from: DeviceId, from_commander: bool, sid: u32, chunk: &Chunk) {
+        let role = if from_commander { Role::Target } else { Role::Commander };
+        let taken = self.tables.get_mut(&(from, role)).map_or(Taken::Unknown, |t| t.receive(sid, chunk));
+        let got = match taken {
+            // No such stream: dropped without a state change and without an answer (R-STR-3).
+            Taken::Unknown => {
+                self.note(&format!("dropped a chunk of an unknown stream {sid} from {from}"));
+                return;
+            }
+            Taken::Stream(got) => got,
+        };
+        let Some(id) = self.stream_of(from, role, sid) else { return };
+        match got {
+            Received::Data(data) => {
+                let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
+                let buffer = u64::from(self.profile.stream_buffer);
+                let Some(o) = self.open.get_mut(&id) else { return };
+                if o.mode == StreamMode::Lossy && o.held.saturating_add(len) > buffer {
+                    // Lossy mode has no credit: the recipient drops the excess (R-STR-3).
+                    self.note(&format!("dropped a chunk of lossy stream {sid} from {from}: the buffer is full"));
+                    return;
+                }
+                o.held = o.held.saturating_add(len);
+                self.events.push_back(Event::StreamData { stream: id, data });
+            }
+            Received::Credit(added) => self.events.push_back(Event::StreamCredit { stream: id, added }),
+            Received::Dropped => {}
+            Received::End => self.forget_stream(from, role, sid, Some(StreamEnd::Ended)),
+            Received::OutOfOrder => {
+                self.reject(RuleCode::STR_OUT_OF_ORDER, format!("stream {sid} from {from}, chunk {}", chunk.no));
+                self.forget_stream(from, role, sid, Some(StreamEnd::OutOfOrder));
+            }
+            Received::OverCredit => {
+                self.reject(RuleCode::STR_OVER_CREDIT, format!("stream {sid} from {from}, chunk {}", chunk.no));
+                self.forget_stream(from, role, sid, Some(StreamEnd::OverCredit));
+            }
+        }
+    }
+
+    /// The relay on the stream's path refused a chunk: it does not serve streams (R-STR-7,
+    /// `RelayRefusal` code 4). The refusal arrives on the link that carries the stream, so
+    /// the side closes as it does when that link goes down.
+    pub(crate) fn stream_refused(&mut self, relay: DeviceId, peer: DeviceId, from_commander: bool, sid: u32) {
+        let role = if from_commander { Role::Commander } else { Role::Target };
+        self.close_streams(
+            |o| o.peer == peer && o.role == role && o.sid == sid && o.via == relay,
+            Some(StreamEnd::RelayRefused),
+        );
+    }
+
+    fn stream_send(&mut self, id: StreamId, kind: Kind) -> Result<(), Report> {
+        self.halted_err()?;
+        let unknown = || Report::new(RuleCode::API_UNKNOWN_ID, format!("stream {}", id.0));
+        let o = *self.open.get(&id).ok_or_else(unknown)?;
+        let end = kind == Kind::End;
+        let sent = self.tables.get_mut(&(o.peer, o.role)).ok_or_else(unknown)?.send(o.sid, kind);
+        let chunk = sent.map_err(|e| match e {
+            None => unknown(),
+            Some(SendError::NoCredit) => {
+                Report::new(RuleCode::STR_NO_CREDIT, format!("stream {}: the peer granted less", id.0))
+            }
+            Some(SendError::LossyCredit) => {
+                Report::new(RuleCode::API_BAD_STREAM, format!("stream {} is lossy and has no credit", id.0))
+            }
+            Some(SendError::Exhausted) => {
+                Report::new(RuleCode::API_BAD_STREAM, format!("stream {}: the chunk numbers are used up", id.0))
+            }
+        })?;
+        if end {
+            self.open.remove(&id);
+        }
+        self.send(o.peer, Body::Chunk { from_commander: o.role == Role::Commander, sid: o.sid, chunk });
+        Ok(())
+    }
+
+    pub(crate) fn stream_write(&mut self, id: StreamId, data: &[u8]) -> Result<(), Report> {
+        if data.is_empty() {
+            return Err(Report::new(RuleCode::API_BAD_STREAM, "a data chunk carries at least one byte"));
+        }
+        let limit = MAX_STREAM_DATA.min(usize::try_from(self.profile.stream_chunk).unwrap_or(usize::MAX));
+        if data.len() > limit {
+            return Err(Report::new(RuleCode::API_DATA_TOO_LARGE, format!("{} bytes, limit {limit}", data.len())));
+        }
+        self.stream_send(id, Kind::Data(data.to_vec()))
+    }
+
+    pub(crate) fn stream_grant(&mut self, id: StreamId, bytes: u32) -> Result<(), Report> {
+        if bytes == 0 {
+            return Err(Report::new(RuleCode::API_BAD_STREAM, "a credit chunk adds at least one byte"));
+        }
+        self.stream_send(id, Kind::Credit(bytes))
+    }
+
+    pub(crate) fn stream_end(&mut self, id: StreamId) -> Result<(), Report> {
+        self.stream_send(id, Kind::End)
     }
 
     // ------------------------------------------------------------------ dispatch
@@ -972,6 +1260,8 @@ impl Node {
 
     pub(crate) fn link_down(&mut self, peer: DeviceId) {
         self.links.remove(&peer);
+        // Link down closes the streams the link carried (R-STR-5).
+        self.close_streams(|o| o.via == peer, Some(StreamEnd::LinkDown));
     }
 
     fn on_hello(&mut self, m: &Msg, passport: Option<&Passport>, epoch: u32) {
@@ -1032,10 +1322,19 @@ impl Node {
             },
             Body::Nonce { nonce, refusal } => self.on_nonce(m.from, *nonce, *refusal),
             Body::StaleEpoch { epoch, call } => self.on_stale_epoch(m.from, *epoch, *call),
-            Body::Call { body, args } => self.on_call(m, body, args.clone()),
-            Body::Reply { call, code, data, next } => {
-                self.on_reply(m.from, *call, *code, data.clone(), *next);
+            Body::Call { body, args, stream } => self.on_call(m, body, args.clone(), *stream),
+            Body::Reply { call, code, message, data, next, stream } => {
+                let r = ReplyIn {
+                    call: *call,
+                    code: *code,
+                    message: message.clone(),
+                    data: data.clone(),
+                    next: *next,
+                    stream: *stream,
+                };
+                self.on_reply(m.from, r);
             }
+            Body::Chunk { from_commander, sid, chunk } => self.on_chunk(m.from, *from_commander, *sid, chunk),
             Body::BlobGet { channel, number, segment } => {
                 if self.sender(m).is_some() {
                     self.on_blob_get(m.from, *channel, *number, *segment);
@@ -1057,6 +1356,14 @@ impl Node {
         self.target.reset();
         for cmd in self.cmds.values_mut() {
             cmd.engine.learn(0);
+        }
+        // A stream without traffic since the previous such event closes (R-STR-5).
+        let keys: Vec<(DeviceId, Role)> = self.tables.keys().copied().collect();
+        for (peer, role) in keys {
+            let idle = self.tables.get_mut(&(peer, role)).map(Table::reset_period).unwrap_or_default();
+            for sid in idle {
+                self.forget_stream(peer, role, sid, Some(StreamEnd::Idle));
+            }
         }
         self.note("reset nonces");
     }
@@ -1093,6 +1400,11 @@ impl Node {
         self.blobs.clear();
         self.drafts.clear();
         self.fetches.clear();
+        // Open streams do not survive a reboot (R-CORE-6).
+        self.tables.clear();
+        self.open.clear();
+        // Events the application has not taken were in RAM too.
+        self.events.clear();
         self.links.clear();
         self.outbox.clear();
         self.note("reboot");
@@ -1243,6 +1555,12 @@ impl Node {
         if options.as_root && self.view.checkpoint.root_device != self.id {
             return Err(Report::new(RuleCode::API_NOT_ROOT, format!("{} is not the root device", self.id)));
         }
+        if let Some(req) = options.stream {
+            check_credit(req.mode, req.credit)?;
+            if !self.stream_room() {
+                return Err(self.too_many_streams());
+            }
+        }
         let call = CallId(self.fresh_id());
         let cmd = self.cmds.entry(t).or_default();
         cmd.queue.push_back(Invocation { call, action, args: args.to_vec(), options });
@@ -1250,17 +1568,82 @@ impl Node {
         Ok(call)
     }
 
-    pub(crate) fn reply(&mut self, id: IncomingId, code: ResultCode, data: &[u8]) -> Result<(), Report> {
+    fn too_many_streams(&self) -> Report {
+        Report::new(
+            RuleCode::STR_TOO_MANY,
+            format!("{} streams, limit {}", self.stream_load(), self.profile.max_streams),
+        )
+    }
+
+    fn check_reply(code: ResultCode, message: &str, data: &[u8]) -> Result<(), Report> {
         if !code.allowed_in_reply() {
             return Err(Report::new(RuleCode::API_BUS_RESULT, format!("result code {}", code.0)));
         }
-        too_large(data.len())?;
-        let inc = self
-            .incoming
-            .remove(&id)
-            .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("incoming {}", id.0)))?;
-        self.send(inc.commander, Body::Reply { call: inc.call, code, data: data.to_vec(), next: inc.next });
+        if message.len() > MAX_MESSAGE {
+            return Err(Report::new(
+                RuleCode::API_MESSAGE_TOO_LONG,
+                format!("{} bytes, limit {MAX_MESSAGE}", message.len()),
+            ));
+        }
+        too_large(data.len())
+    }
+
+    fn take_incoming(&mut self, id: IncomingId) -> Result<Incoming, Report> {
+        self.incoming.remove(&id).ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("incoming {}", id.0)))
+    }
+
+    pub(crate) fn reply(&mut self, id: IncomingId, code: ResultCode, message: &str, data: &[u8]) -> Result<(), Report> {
+        Self::check_reply(code, message, data)?;
+        let inc = self.take_incoming(id)?;
+        let body = Body::Reply {
+            call: inc.call,
+            code,
+            message: message.to_owned(),
+            data: data.to_vec(),
+            next: inc.next,
+            stream: None,
+        };
+        self.send(inc.commander, body);
         Ok(())
+    }
+
+    pub(crate) fn reply_with_stream(
+        &mut self,
+        id: IncomingId,
+        code: ResultCode,
+        message: &str,
+        data: &[u8],
+        credit: u32,
+    ) -> Result<StreamId, Report> {
+        Self::check_reply(code, message, data)?;
+        let unknown = || Report::new(RuleCode::API_UNKNOWN_ID, format!("incoming {}", id.0));
+        let req = self
+            .incoming
+            .get(&id)
+            .ok_or_else(unknown)?
+            .stream
+            .ok_or_else(|| Report::new(RuleCode::API_BAD_STREAM, "the call asked for no stream"))?;
+        check_credit(req.mode, credit)?;
+        let inc = self.take_incoming(id)?;
+        // Opening beyond the limit is refused with a result code; existing streams stay
+        // (R-STR-6).
+        let room = self.stream_room();
+        let side = Side::new(inc.call, req.mode, u64::from(req.credit), u64::from(credit));
+        let Some(sid) = self.tables.entry((inc.commander, Role::Target)).or_default().open(side, room) else {
+            self.send_reply(inc.commander, inc.call, ResultCode::TOO_MANY_STREAMS, inc.next);
+            return Err(self.too_many_streams());
+        };
+        let stream = self.remember_stream(inc.commander, Role::Target, sid, req.mode);
+        let body = Body::Reply {
+            call: inc.call,
+            code,
+            message: message.to_owned(),
+            data: data.to_vec(),
+            next: inc.next,
+            stream: Some((sid, credit)),
+        };
+        self.send(inc.commander, body);
+        Ok(stream)
     }
 
     pub(crate) fn register_action(&mut self, a: Action) {
@@ -1324,6 +1707,12 @@ impl Node {
 
     pub(crate) fn poll_event(&mut self) -> Option<Event> {
         let e = self.events.pop_front();
+        // The application took stream data: the core no longer holds it.
+        if let Some(Event::StreamData { stream, data }) = &e {
+            if let Some(o) = self.open.get_mut(stream) {
+                o.held = o.held.saturating_sub(u64::try_from(data.len()).unwrap_or(u64::MAX));
+            }
+        }
         // The application took a segment: the fetch moves on.
         if let Some(Event::BlobSegment { fetch, .. }) = &e {
             if self.fetches.get(fetch).is_some_and(|f| f.wait == FetchWait::Application) {
@@ -1433,6 +1822,28 @@ fn digest(key: u64, blob: &[u8]) -> [u8; 32] {
         chunk.copy_from_slice(&h.to_be_bytes());
     }
     out
+}
+
+/// The initial credit a side names: none in lossy mode, and at most the bound of Section
+/// 13.2 in ordered mode (R-STR-3, R-STR-4).
+fn check_credit(mode: StreamMode, credit: u32) -> Result<(), Report> {
+    match mode {
+        StreamMode::Lossy if credit != 0 => Err(Report::new(RuleCode::API_BAD_STREAM, "a lossy stream has no credit")),
+        StreamMode::Ordered if credit > MAX_INITIAL_CREDIT => {
+            Err(Report::new(RuleCode::API_BAD_STREAM, format!("initial credit {credit}, limit {MAX_INITIAL_CREDIT}")))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// A reply as it arrives.
+struct ReplyIn {
+    call: u64,
+    code: ResultCode,
+    message: String,
+    data: Vec<u8>,
+    next: u64,
+    stream: Option<(u32, u32)>,
 }
 
 fn app_channel(ch: Channel) -> Result<(), Report> {

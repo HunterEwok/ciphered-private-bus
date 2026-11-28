@@ -42,6 +42,15 @@ pub const MAX_ACTION: u8 = 64;
 /// the application part it takes at most 68 bytes, and the key and the byte string header of
 /// the application part take 4 more: 4096 - 68 - 4 = 4024.
 pub const MAX_APP_INFO: usize = 4024;
+/// Largest data of one stream chunk, in bytes: a 16384-byte frame less the 46-byte chunk
+/// header and the 16-byte authentication tag (Appendix B, Section B.7).
+pub const MAX_STREAM_DATA: usize = 16384 - 46 - 16;
+/// Largest initial credit of a stream, in bytes (Section 13.2).
+pub const MAX_INITIAL_CREDIT: u32 = 1 << 20;
+/// The default initial credit of a stream, in bytes: four default chunks (Section 13.2).
+pub const DEFAULT_INITIAL_CREDIT: u32 = 16 << 10;
+/// Largest message of a reply, in bytes of UTF-8 (Appendix B, Section B.6).
+pub const MAX_MESSAGE: usize = 256;
 /// Highest number of segments of a blob: the segment number is a 4-byte AEAD nonce
 /// (Appendix B, Section B.5).
 pub const MAX_BLOB_SEGMENTS: u32 = 0x7fff_ffff;
@@ -239,6 +248,66 @@ pub struct IncomingId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct HostRequestId(pub u64);
 
+/// A stream, as returned when a call or its reply opens one (R-STR-1).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct StreamId(pub u64);
+
+/// The mode of a stream, named in the call (R-STR-3).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum StreamMode {
+    /// Every chunk arrives, in order, and each side sends only within the credit the other
+    /// side granted.
+    Ordered,
+    /// Chunks may be lost; a late chunk is dropped; there is no credit.
+    Lossy,
+}
+
+/// A request to open a stream with a call.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StreamRequest {
+    /// The mode.
+    pub mode: StreamMode,
+    /// The commander's initial credit: how many bytes the target may send before the
+    /// commander grants more, up to [`MAX_INITIAL_CREDIT`]. Zero in lossy mode.
+    pub credit: u32,
+}
+
+/// Why a stream closed (R-STR-5).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum StreamEnd {
+    /// The peer sent the "end" chunk.
+    Ended,
+    /// The peer opened another stream under the same number, so it had closed this one.
+    Replaced,
+    /// The link went down.
+    LinkDown,
+    /// The relay that carries the stream does not serve streams (R-STR-7).
+    RelayRefused,
+    /// No traffic between two "reset nonces" events.
+    Idle,
+    /// The node halted.
+    Halted,
+    /// The peer is no longer a valid member.
+    Revoked,
+    /// Ordered mode: a chunk arrived out of order (`str/out-of-order`).
+    OutOfOrder,
+    /// Ordered mode: the peer sent more than the credit it was granted (`str/over-credit`).
+    OverCredit,
+    /// The peer sent a chunk whose flags name no single meaning (R-STR-2).
+    BadChunk,
+}
+
+/// The key that signed a call (R-CALL-4).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CallKey {
+    /// The commander's device key: an automatic action.
+    Device,
+    /// The commander's user-presence key: the user confirmed this call on the commander.
+    Presence,
+    /// The root key: the owner confirmed this call on the root device.
+    Root,
+}
+
 /// A call result code (R-CALL-11): 0..255 belong to the bus, 256..65535 to the application.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ResultCode(pub u16);
@@ -277,8 +346,12 @@ pub enum CallOutcome {
     Replied {
         /// The result code.
         code: ResultCode,
+        /// The target's message: text for a log, not data; empty if the target sent none.
+        message: String,
         /// The result data.
         data: Vec<u8>,
+        /// The stream the reply opened, if the call asked for one and the target agreed.
+        stream: Option<StreamId>,
     },
     /// The outcome is unknown: the call may or may not have been executed (L7, R-CALL-13).
     Unknown,
@@ -294,6 +367,8 @@ pub struct InvokeOptions {
     pub idempotent: bool,
     /// Sign with the root key; only on the root device (R-CALL-4).
     pub as_root: bool,
+    /// Ask the target to open a stream with its reply (R-STR-1).
+    pub stream: Option<StreamRequest>,
 }
 
 /// What the core asks the host to do. The host answers after asking the user.
@@ -398,10 +473,34 @@ pub enum Event {
         commander: DeviceId,
         /// The action.
         action: Action,
-        /// Whether the action is confirmation-class for this commander.
-        confirmed: bool,
+        /// The key that signed the call. The target's passport decides which key an action
+        /// needs; the root key has the right to every action.
+        signed_by: CallKey,
         /// The arguments.
         args: Vec<u8>,
+        /// The stream the commander asks for; [`LocalApi::reply_with_stream`] opens it.
+        stream: Option<StreamRequest>,
+    },
+    /// Data arrived on a stream.
+    StreamData {
+        /// The stream.
+        stream: StreamId,
+        /// The bytes of one chunk.
+        data: Vec<u8>,
+    },
+    /// The peer granted more credit: this side may send that many more bytes.
+    StreamCredit {
+        /// The stream.
+        stream: StreamId,
+        /// The bytes added.
+        added: u32,
+    },
+    /// A stream closed for a reason other than this side's own "end".
+    StreamClosed {
+        /// The stream.
+        stream: StreamId,
+        /// Why.
+        reason: StreamEnd,
     },
     /// A call made by this node ended.
     CallFinished {
@@ -463,8 +562,6 @@ pub struct BusState {
 }
 
 /// The operations of R-API-2.
-///
-/// Streams arrive in a later version of this trait.
 pub trait LocalApi {
     /// Publishes `data` on an own channel with retention `depth` (R-CH-10) and returns the
     /// publication number. Empty data at depth 1 or more clears the channel.
@@ -559,10 +656,12 @@ pub trait LocalApi {
     /// `api/reserved-channel`, `mem/halted`.
     fn rotate_channel_key(&mut self, channel: Channel) -> Result<(), Report>;
 
-    /// Invokes an action on a target. The outcome arrives as [`Event::CallFinished`].
+    /// Invokes an action on a target. The outcome arrives as [`Event::CallFinished`]. With
+    /// [`InvokeOptions::stream`] the call asks the target to open a stream.
     ///
     /// # Errors
-    /// `api/data-too-large`, `api/not-root`, `mem/halted`.
+    /// `api/data-too-large`, `api/not-root`, `api/bad-stream` for credit in lossy mode,
+    /// `str/too-many` at this node's own limit of streams, `mem/halted`.
     fn invoke(
         &mut self,
         target: DeviceId,
@@ -571,11 +670,52 @@ pub trait LocalApi {
         options: InvokeOptions,
     ) -> Result<CallId, Report>;
 
-    /// Replies to an incoming call.
+    /// Replies to an incoming call. `message` is text for the commander's log, up to
+    /// [`MAX_MESSAGE`] bytes, or empty (R-CALL-10).
     ///
     /// # Errors
-    /// `api/unknown-id`, `api/bus-result`, `api/data-too-large`.
-    fn reply(&mut self, call: IncomingId, code: ResultCode, data: &[u8]) -> Result<(), Report>;
+    /// `api/unknown-id`, `api/bus-result`, `api/data-too-large`, `api/message-too-long`.
+    fn reply(&mut self, call: IncomingId, code: ResultCode, message: &str, data: &[u8]) -> Result<(), Report>;
+
+    /// Replies to an incoming call that asked for a stream and opens the stream. `credit` is
+    /// how many bytes the commander may send before this side grants more; zero in lossy
+    /// mode. At the limit of open streams the core replies "too many streams" itself and
+    /// existing streams stay (R-STR-6).
+    ///
+    /// # Errors
+    /// `api/unknown-id`, `api/bad-stream` if the call asked for no stream or the credit does
+    /// not fit the mode, `str/too-many`, and the errors of [`LocalApi::reply`].
+    fn reply_with_stream(
+        &mut self,
+        call: IncomingId,
+        code: ResultCode,
+        message: &str,
+        data: &[u8],
+        credit: u32,
+    ) -> Result<StreamId, Report>;
+
+    /// Sends one chunk of data, 1 to [`MAX_STREAM_DATA`] bytes or the profile's smaller
+    /// limit. In ordered mode the data must fit the credit the peer granted; otherwise
+    /// nothing is sent and the application waits for [`Event::StreamCredit`] (R-STR-4).
+    ///
+    /// # Errors
+    /// `api/unknown-id` for a closed stream, `api/data-too-large`, `api/bad-stream` for
+    /// empty data, `str/no-credit`.
+    fn stream_write(&mut self, stream: StreamId, data: &[u8]) -> Result<(), Report>;
+
+    /// Grants the peer credit for `bytes` more, in ordered mode (R-STR-4). The application
+    /// grants what it is ready to receive, so the credit it has out bounds what the core
+    /// holds for it.
+    ///
+    /// # Errors
+    /// `api/unknown-id`, `api/bad-stream` for a lossy stream or zero bytes.
+    fn stream_grant(&mut self, stream: StreamId, bytes: u32) -> Result<(), Report>;
+
+    /// Ends a stream with the "end" chunk (R-STR-5).
+    ///
+    /// # Errors
+    /// `api/unknown-id`.
+    fn stream_end(&mut self, stream: StreamId) -> Result<(), Report>;
 
     /// Registers this node as the handler of an action; calls to other actions are answered
     /// "action not served".

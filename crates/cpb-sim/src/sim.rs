@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
     Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestId,
-    IncomingId, InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights,
+    IncomingId, InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights, StreamId,
 };
 
 use crate::engine::membership::{Root, View};
-use crate::node::{Msg, Node, Profile};
+use crate::node::{Body, Msg, Node, Profile};
 use crate::rng::Rng;
 
 /// The environment variable that overrides the error mode (R-ERR-3).
@@ -39,6 +39,8 @@ pub struct Config {
     pub faults: Faults,
     /// The error mode; `None` follows the build type and `CPB_ERRORS` (R-ERR-3).
     pub mode: Option<ErrorMode>,
+    /// Relays do not serve streams: they refuse every stream chunk (R-STR-7).
+    pub relays_refuse_streams: bool,
 }
 
 /// Why a run stopped before the bus went quiet.
@@ -232,6 +234,16 @@ impl Sim {
             .collect()
     }
 
+    /// Loses every message in flight while the links stay up, and returns how many there
+    /// were: a deterministic loss, where [`Faults::loss_permille`] is a random one.
+    pub fn lose_in_flight(&mut self) -> usize {
+        let n = self.queue.len();
+        for hop in self.queue.drain(..) {
+            self.log.push(format!("{} lost {} to {}", hop.from, hop.msg.body.kind(), hop.to));
+        }
+        n
+    }
+
     /// The device goes to sleep: all its links drop until [`Sim::wake`].
     pub fn sleep(&mut self, d: DeviceId) {
         let peers = self.peers(d);
@@ -333,6 +345,15 @@ impl Sim {
         if hop.to == hop.msg.to {
             if let Some(n) = self.nodes.get_mut(&hop.to) {
                 n.handle(&hop.msg);
+            }
+        } else if let (true, Body::Chunk { from_commander, sid, .. }) =
+            (self.config.relays_refuse_streams, &hop.msg.body)
+        {
+            // The relay answers with its refusal, code 4, on the link the chunk came from.
+            let (relay, peer, from_commander, sid) = (hop.to, hop.msg.to, *from_commander, *sid);
+            self.log.push(format!("{relay} refused a stream chunk from {}: streams not served", hop.from));
+            if let Some(n) = self.nodes.get_mut(&hop.from) {
+                n.stream_refused(relay, peer, from_commander, sid);
             }
         } else if self.links.contains(&edge(hop.to, hop.msg.to)) {
             // A member relay forwards without modification (R-CH-4).
@@ -480,9 +501,36 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.invoke(target, action, args, options)).unwrap_or(Err(e))
     }
 
-    fn reply(&mut self, call: IncomingId, code: ResultCode, data: &[u8]) -> Result<(), Report> {
+    fn reply(&mut self, call: IncomingId, code: ResultCode, message: &str, data: &[u8]) -> Result<(), Report> {
         let e = self.gone();
-        self.with(|n| n.reply(call, code, data)).unwrap_or(Err(e))
+        self.with(|n| n.reply(call, code, message, data)).unwrap_or(Err(e))
+    }
+
+    fn reply_with_stream(
+        &mut self,
+        call: IncomingId,
+        code: ResultCode,
+        message: &str,
+        data: &[u8],
+        credit: u32,
+    ) -> Result<StreamId, Report> {
+        let e = self.gone();
+        self.with(|n| n.reply_with_stream(call, code, message, data, credit)).unwrap_or(Err(e))
+    }
+
+    fn stream_write(&mut self, stream: StreamId, data: &[u8]) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.stream_write(stream, data)).unwrap_or(Err(e))
+    }
+
+    fn stream_grant(&mut self, stream: StreamId, bytes: u32) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.stream_grant(stream, bytes)).unwrap_or(Err(e))
+    }
+
+    fn stream_end(&mut self, stream: StreamId) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.stream_end(stream)).unwrap_or(Err(e))
     }
 
     fn register_action(&mut self, action: Action) {

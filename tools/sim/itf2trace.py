@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts Quint ITF traces of the channels and calls models into replay traces.
+"""Converts Quint ITF traces of the channels, calls and streams models into replay traces.
 
 A replay trace is plain text: a header with the instance constants, then for every step of
 the model one line with the action and its arguments, followed by lines with the projected
@@ -137,11 +137,69 @@ def cl_step(st: dict, pre: str) -> str:
     raise SystemExit(f"unknown calls action {a}")
 
 
+# -------------------------------------------------------------------------- streams
+
+def st_chunk(c: dict) -> str:
+    return "{} {} {} {} {} {}".format(c["dir"], c["sid"], c["k"], c["no"], c["kind"], c["credit"])
+
+
+def st_state(st: dict, pre: str) -> list[str]:
+    out = []
+    for p, n in sorted(val(st[pre + "nodes"]).items()):
+        sides = ";".join(
+            "{}:k={},mode={},next={},high={},sc={},rc={},idle={},got={},granted={},sent={},recvd={}".format(
+                sid, s["k"], s["mode"], s["next"], s["high"], s["sendCredit"], s["recvCredit"], b(s["idle"]),
+                s["got"], s["granted"], s["sent"], s["recvd"])
+            for sid, s in sorted(n["streams"].items()))
+        out.append(f"= node {p} halted={b(n['halted'])} revoked={b(n['peerRevoked'])} streams={sides}")
+    pending = val(st[pre + "pending"])
+    out.append("= pending " + ",".join(f"{k}:{c['mode']}:{c['credit']}" for k, c in sorted(pending.items())))
+    out.append("= done " + ",".join(str(k) for k in sorted(val(st[pre + "done"]))))
+    return out
+
+
+def st_open(k: int, mode: str, credit: int, cur: dict, pre: str) -> str:
+    """The target's step: its own initial credit is read from the side it opened."""
+    sides = [s for s in val(cur[pre + "nodes"])["T"]["streams"].values() if s["k"] == k]
+    return f"targetOpen {k} {mode} {credit} {sides[0]['recvCredit'] if sides else 0}"
+
+
+def st_step(st: dict, pre: str) -> str:
+    a = st["mbt::actionTaken"]
+    p = {k: v["value"] for k, v in st["mbt::nondetPicks"].items() if v["tag"] == "Some"}
+    if a == "commanderCall":
+        k = val(st[pre + "nextK"]) - 1
+        c = val(st[pre + "pending"])[k]
+        return f"{a} {k} {c['mode']} {c['credit']}"
+    if a == "targetOpen":
+        c = val(p["c"])
+        return st_open(c["k"], c["mode"], c["credit"], st, pre)
+    if a == "commanderReply":
+        r = val(p["r"])
+        return f"{a} {r['k']} {r['sid']} {r['credit']} {b(r['ok'])}"
+    if a == "sendChunk":
+        add = val(p["add"]) if p["kind"] == "credit" else 0
+        return f"{a} {p['p']} {val(p['sid'])} {p['kind']} {add}"
+    if a == "overrun":
+        return f"{a} {p['p']} {val(p['sid'])}"
+    if a == "receive":
+        return f"{a} {p['p']} {st_chunk(val(p['ch']))}"
+    if a in ("resetNonces", "halt", "learnRevoked", "reboot"):
+        return f"{a} {p['p']}"
+    if a == "linkDown":
+        return a
+    raise SystemExit(f"unknown streams action {a}")
+
+
+STATE = {"channels": ch_state, "calls": cl_state, "streams": st_state}
+STEP = {"channels": ch_step, "calls": cl_step, "streams": st_step}
+
+
 def main() -> None:
     model, consts, out_file, itf_file = sys.argv[1:5]
     states = json.load(open(itf_file))["states"]
     pre = next(k for k in states[0] if not k.startswith(("#", "mbt::"))).rsplit("::", 1)[0] + "::"
-    state, step = (ch_state, ch_step) if model == "channels" else (cl_state, cl_step)
+    state, step = STATE[model], STEP[model]
     lines = [f"model {model}", f"const {consts}"]
     lines += state(states[0], pre)
     # The action that led to state i is recorded in state i.

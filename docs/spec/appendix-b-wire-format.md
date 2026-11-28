@@ -867,7 +867,7 @@ notice that a call target is unreachable: that is code 5 of this message.
 | No. | Field | Type | Notes |
 | --- | --- | --- | --- |
 | 1 | `bus` | bstr(32) | On a member link |
-| 2 | `ref` | bstr(32) | Identifier of the rejected object: SHA-256(encode(body)) for an envelope, SHA-256(encode(header)) for a publication and a grant, `call_id` for a call, SHA-256 of the encoded `Relayed` message at an external relay |
+| 2 | `ref` | bstr(32) | Identifier of the rejected object: SHA-256(encode(body)) for an envelope, SHA-256(encode(header)) for a publication and a grant, `call_id` for a call, SHA-256 of the 46-byte chunk header for a stream chunk (Section B.7), SHA-256 of the encoded `Relayed` message at an external relay |
 | 3 | `code` | uint | 1 source quota exhausted, 2 object larger than the quota, 3 bus not served, 4 streams not served, 5 call target not connected (R-CALL-12) |
 | 4 | `bus_alias` | bstr(16) | On an external relay link, in place of field 1 |
 

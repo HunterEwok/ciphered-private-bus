@@ -3,7 +3,7 @@
 
 //! Trace equivalence with the Quint models (verification level V3 for the simulator).
 //!
-//! Each file in `tests/traces` is a trace of the `channels` or `calls` model, converted from
+//! Each file in `tests/traces` is a trace of the `channels`, `calls` or `streams` model, converted from
 //! the Informal Trace Format by `tools/sim/itf2trace.py`. The test feeds every action to the
 //! model engine and checks, after every step, that the engine's state projected onto the
 //! model's variables equals the state the model reached. A mismatch names the file, the step
@@ -23,9 +23,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use cpb_api::{Action, ActionSet, DeviceId};
+use cpb_api::{Action, ActionSet, DeviceId, StreamMode};
 use cpb_sim::engine::calls::{CallBody, CmdRights, Commander, SigKey, Target};
 use cpb_sim::engine::channels::{Grant, Pub, Reader, Source};
+use cpb_sim::engine::streams::{Chunk, Kind, Side, Table};
 
 /// Model device names become device identifiers; the order of the names is kept.
 fn dev(name: &str) -> DeviceId {
@@ -338,6 +339,7 @@ impl Calls {
 enum Engine {
     Channels(Channels),
     Calls(Calls),
+    Streams(Streams),
 }
 
 impl Engine {
@@ -345,6 +347,7 @@ impl Engine {
         match self {
             Self::Channels(e) => e.project(),
             Self::Calls(e) => e.project(),
+            Self::Streams(e) => e.project(),
         }
     }
 
@@ -352,6 +355,181 @@ impl Engine {
         match self {
             Self::Channels(e) => e.step(a),
             Self::Calls(e) => e.step(a),
+            Self::Streams(e) => e.step(a),
+        }
+    }
+}
+
+// ------------------------------------------------------------------------- streams
+
+/// One party of the streams model: its streams with the peer and the two flags.
+#[derive(Default)]
+struct Party {
+    table: Table,
+    halted: bool,
+    revoked: bool,
+}
+
+/// The streams model: commander `C` and target `T`. A model unit of data is a chunk of one
+/// byte, and a unit of credit is one byte.
+struct Streams {
+    limit: usize,
+    c: Party,
+    t: Party,
+    pending: BTreeMap<u64, (StreamMode, u64)>,
+    done: BTreeSet<u64>,
+}
+
+fn mode_of(m: &str) -> StreamMode {
+    match m {
+        "ordered" => StreamMode::Ordered,
+        "lossy" => StreamMode::Lossy,
+        other => panic!("unknown mode {other}"),
+    }
+}
+
+fn mode_name(m: StreamMode) -> &'static str {
+    match m {
+        StreamMode::Ordered => "ordered",
+        StreamMode::Lossy => "lossy",
+    }
+}
+
+impl Streams {
+    fn new(c: &BTreeMap<String, String>) -> Self {
+        Self {
+            limit: c["max_streams"].parse().unwrap(),
+            c: Party::default(),
+            t: Party::default(),
+            pending: BTreeMap::new(),
+            done: BTreeSet::new(),
+        }
+    }
+
+    fn party(&mut self, p: &str) -> &mut Party {
+        match p {
+            "C" => &mut self.c,
+            "T" => &mut self.t,
+            other => panic!("unknown party {other}"),
+        }
+    }
+
+    fn project(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (name, p) in [("C", &self.c), ("T", &self.t)] {
+            let sides: Vec<String> = p
+                .table
+                .streams
+                .iter()
+                .map(|(sid, s)| {
+                    format!(
+                        "{sid}:k={},mode={},next={},high={},sc={},rc={},idle={},got={},granted={},sent={},recvd={}",
+                        s.k,
+                        mode_name(s.mode),
+                        s.next,
+                        s.high,
+                        s.send_credit,
+                        s.recv_credit,
+                        bit(s.idle),
+                        s.got,
+                        s.granted,
+                        s.sent,
+                        s.recvd
+                    )
+                })
+                .collect();
+            out.push(format!(
+                "= node {name} halted={} revoked={} streams={}",
+                bit(p.halted),
+                bit(p.revoked),
+                sides.join(";")
+            ));
+        }
+        let pending: Vec<String> =
+            self.pending.iter().map(|(k, (m, c))| format!("{k}:{}:{c}", mode_name(*m))).collect();
+        out.push(format!("= pending {}", pending.join(",")));
+        let done: Vec<String> = self.done.iter().map(u64::to_string).collect();
+        out.push(format!("= done {}", done.join(",")));
+        out
+    }
+
+    fn step(&mut self, a: &[&str]) {
+        let n = |i: usize| -> u64 { a[i].parse().unwrap() };
+        let sid = |i: usize| -> u32 { a[i].parse().unwrap() };
+        match a[0] {
+            "commanderCall" => {
+                // Whether the commander has room is its own check before it calls; the model's
+                // scenarios start calls without it.
+                self.pending.insert(n(1), (mode_of(a[2]), n(3)));
+            }
+            "targetOpen" => {
+                assert!(!self.t.halted && !self.t.revoked && !self.done.contains(&n(1)), "open not enabled");
+                let room = self.t.table.streams.len() < self.limit;
+                let _ = self.t.table.open(Side::new(n(1), mode_of(a[2]), n(3), n(4)), room);
+                self.done.insert(n(1));
+            }
+            "commanderReply" => {
+                let (mode, credit) = self.pending.remove(&n(1)).expect("the reply answers a pending call");
+                if a[4] == "1" && !self.c.halted && !self.c.revoked {
+                    let _ = self.c.table.open_as(sid(2), Side::new(n(1), mode, n(3), credit));
+                }
+            }
+            "sendChunk" => {
+                let kind = match a[3] {
+                    "data" => Kind::Data(vec![0]),
+                    "credit" => Kind::Credit(a[4].parse().unwrap()),
+                    "end" => Kind::End,
+                    other => panic!("unknown kind {other}"),
+                };
+                let p = self.party(a[1]);
+                assert!(!p.halted, "send not enabled");
+                p.table.send(sid(2), kind).expect("the model sent this chunk");
+            }
+            // A faulty peer sends data without credit: its own side only takes the number.
+            "overrun" => {
+                let s = self.party(a[1]).table.streams.get_mut(&sid(2)).expect("the stream is open");
+                assert!(s.mode == StreamMode::Ordered && s.send_credit == 0, "overrun not enabled");
+                s.next += 1;
+                s.idle = false;
+            }
+            "receive" => {
+                let from_commander = a[2] == "c2t";
+                assert_eq!(from_commander, a[1] == "T", "a party takes only its peer's direction");
+                let kind = match a[6] {
+                    "data" => Kind::Data(vec![0]),
+                    "credit" => Kind::Credit(a[7].parse().unwrap()),
+                    "end" => Kind::End,
+                    other => panic!("unknown kind {other}"),
+                };
+                let chunk = Chunk { k: n(4), no: a[5].parse().unwrap(), kind };
+                let p = self.party(a[1]);
+                assert!(!p.halted, "receive not enabled");
+                let _ = p.table.receive(sid(3), &chunk);
+            }
+            "resetNonces" => {
+                let _ = self.party(a[1]).table.reset_period();
+            }
+            "halt" => {
+                let p = self.party(a[1]);
+                p.halted = true;
+                let _ = p.table.close_all();
+            }
+            "learnRevoked" => {
+                let p = self.party(a[1]);
+                p.revoked = true;
+                let _ = p.table.close_all();
+            }
+            "reboot" => {
+                let _ = self.party(a[1]).table.close_all();
+                if a[1] == "C" {
+                    self.pending.clear();
+                }
+            }
+            "linkDown" => {
+                let _ = self.c.table.close_all();
+                let _ = self.t.table.close_all();
+            }
+            other => panic!("unknown streams action {other}"),
         }
     }
 }
@@ -375,6 +553,7 @@ fn replay(path: &Path) -> usize {
     let mut engine = match model {
         "channels" => Engine::Channels(Channels::new(&c)),
         "calls" => Engine::Calls(Calls::new(&c, &initial)),
+        "streams" => Engine::Streams(Streams::new(&c)),
         other => panic!("unknown model {other}"),
     };
     assert_eq!(engine.project(), initial, "{}: initial state", path.display());
@@ -402,6 +581,6 @@ fn engines_follow_the_model_traces() {
         total += replay(f);
         models.insert(fs::read_to_string(f).unwrap().lines().next().unwrap().to_string());
     }
-    assert!(models.len() == 2, "traces of both models are present: {models:?}");
+    assert!(models.len() == 3, "traces of the three models are present: {models:?}");
     assert!(total > 500, "only {total} steps replayed");
 }

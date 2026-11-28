@@ -60,15 +60,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 - Local application interface crate `cpb-api` (R-API-2): the `LocalApi` trait, non-blocking and
   without callbacks, events through `poll_event`; blobs written in pieces and fetched by segment,
+  streams opened by a call and its reply with data, credit, "end" and the reason a stream closed,
+  the message of a reply, the key that signed an incoming call,
   the application part of the node info, membership change events and the root device in the bus
   state; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
   release modes (R-ERR-2, R-ERR-3).
 - In-memory bus simulator `cpb-sim` for application authors: several nodes in one process behind
-  `LocalApi`, an engine written from the channels and calls models and Section 6, a deterministic
-  harness with loss, duplication, reordering, sleeping and rebooting nodes and a member relay, owner
-  operations, host requests for user confirmation, and the `CPB_ERRORS` override. Interface tests and
-  a replay of 35 model traces (every scenario run of the two models and 20 random traces) with equal
-  state after every step; `tools/sim/gen_traces.py` regenerates the traces, and a CI job checks that
+  `LocalApi`, an engine written from the channels, calls and streams models and Section 6, a
+  deterministic harness with loss, duplication, reordering, sleeping and rebooting nodes and a member
+  relay that may refuse streams, owner operations, host requests for user confirmation, and the
+  `CPB_ERRORS` override. Interface tests and a replay of 47 model traces (every scenario run of the
+  three models and 30 random traces) with equal state after every step; `tools/sim/gen_traces.py` regenerates the traces, and a CI job checks that
   they match the current models.
 
 ### Changed
@@ -79,6 +81,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   report (also in R-CORE-2); R-CALL-8 makes a commander forget its
   held nonces on its own "reset nonces"; Appendix B, Section B.9 keeps the rule code list in
   `cpb-api`.
+- Specification: R-API-2 names the stream operations, the message of a reply, the key that signed
+  an incoming call, and the report of why a stream closed; a relay that does not serve streams
+  answers a chunk with `RelayRefusal` code 4, whose `ref` is the hash of the chunk header, and the
+  sender closes its side as on "link down" (R-STR-7, Appendix B, Section B.10); the channel number row
+  of Section 13.1 says which numbers belong to the application. Reason: the interface was narrower
+  than the rules it serves, and the refusal of a stream reached no one.
 - Specification: the blob key is 32 random bytes per blob carried in the publication content
   (field 5), and a blob segment authenticates only its last-segment flag (R-CH-3, R-CH-15, R-FMT-10,
   Appendix B, Sections B.1, B.5, B.7, B.8). A reader delivers verified segments in order, and a blob

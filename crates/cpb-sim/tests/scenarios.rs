@@ -13,10 +13,11 @@
 )]
 
 use cpb_api::{
-    Action, ActionSet, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
-    InvokeOptions, LocalApi, MAX_APP_INFO, OwnerOperation, Permit, Readers, ResultCode, Rights, RuleCode,
+    Action, ActionSet, CallKey, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
+    InvokeOptions, LocalApi, MAX_APP_INFO, MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Permit, Readers,
+    ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
 };
-use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, Faults, Sim};
+use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, DEFAULT_STREAM_CHUNK, Faults, Profile, Sim};
 
 const ROOT: DeviceId = DeviceId::from_u64(1);
 const A: DeviceId = DeviceId::from_u64(2);
@@ -468,16 +469,16 @@ fn command_setup() -> Sim {
     sim
 }
 
-fn serve(sim: &mut Sim, code: ResultCode) -> Vec<bool> {
-    let mut confirmed = Vec::new();
+fn serve(sim: &mut Sim, code: ResultCode) -> Vec<CallKey> {
+    let mut keys = Vec::new();
     for e in sim.drain_events(B) {
-        if let Event::IncomingCall { id, confirmed: c, .. } = e {
-            confirmed.push(c);
-            sim.node(B).unwrap().reply(id, code, b"ok").unwrap();
+        if let Event::IncomingCall { id, signed_by, .. } = e {
+            keys.push(signed_by);
+            sim.node(B).unwrap().reply(id, code, "", b"ok").unwrap();
         }
     }
     sim.settle().unwrap();
-    confirmed
+    keys
 }
 
 #[test]
@@ -485,10 +486,15 @@ fn an_automatic_call_executes_and_replies() {
     let mut sim = command_setup();
     sim.node(A).unwrap().invoke(B, act(1), b"on", InvokeOptions::default()).unwrap();
     sim.settle().unwrap();
-    assert_eq!(serve(&mut sim, ResultCode::DONE), vec![false]);
+    assert_eq!(serve(&mut sim, ResultCode::DONE), vec![CallKey::Device]);
     assert_eq!(
         outcomes(&sim.drain_events(A)),
-        vec![CallOutcome::Replied { code: ResultCode::DONE, data: b"ok".to_vec() }]
+        vec![CallOutcome::Replied {
+            code: ResultCode::DONE,
+            message: String::new(),
+            data: b"ok".to_vec(),
+            stream: None
+        }]
     );
     // The reply carried the next nonce: the second call takes one round trip.
     sim.node(A).unwrap().invoke(B, act(1), b"off", InvokeOptions::default()).unwrap();
@@ -534,7 +540,7 @@ fn a_confirmation_call_needs_the_user() {
         .unwrap();
     sim.node(A).unwrap().answer_host(req, HostAnswer::Approve).unwrap();
     sim.settle().unwrap();
-    assert_eq!(serve(&mut sim, ResultCode::DONE), vec![true]);
+    assert_eq!(serve(&mut sim, ResultCode::DONE), vec![CallKey::Presence]);
     assert!(matches!(outcomes(&sim.drain_events(A))[..], [CallOutcome::Replied { .. }]));
 
     // Declined by the user: the call is not sent.
@@ -704,4 +710,389 @@ fn owner_operations_need_the_root_key_confirmation() {
     sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Refuse).unwrap();
     sim.settle().unwrap();
     assert!(sim.node(A).unwrap().state().members.iter().any(|m| m.device == B));
+}
+
+// ------------------------------------------------------------------------- streams
+
+fn with_stream(mode: StreamMode, credit: u32) -> InvokeOptions {
+    InvokeOptions { stream: Some(StreamRequest { mode, credit }), ..InvokeOptions::default() }
+}
+
+/// A calls action 1 of B and asks for a stream; B opens it. Returns both ends.
+fn open_stream(sim: &mut Sim, mode: StreamMode, a_credit: u32, b_credit: u32) -> (StreamId, StreamId) {
+    sim.node(A).unwrap().invoke(B, act(1), b"", with_stream(mode, a_credit)).unwrap();
+    sim.settle().unwrap();
+    let mut at_b = None;
+    for e in sim.drain_events(B) {
+        if let Event::IncomingCall { id, stream, .. } = e {
+            assert_eq!(stream, Some(StreamRequest { mode, credit: a_credit }));
+            at_b = Some(sim.node(B).unwrap().reply_with_stream(id, ResultCode::DONE, "", b"", b_credit).unwrap());
+        }
+    }
+    sim.settle().unwrap();
+    let at_a = sim.drain_events(A).into_iter().find_map(|e| match e {
+        Event::CallFinished { outcome: CallOutcome::Replied { code: ResultCode::DONE, stream, .. }, .. } => stream,
+        _ => None,
+    });
+    (at_a.expect("the reply opens the commander's side"), at_b.expect("the target opened its side"))
+}
+
+fn stream_data(events: &[Event], stream: StreamId) -> Vec<Vec<u8>> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::StreamData { stream: s, data } if *s == stream => Some(data.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn closed(events: &[Event], stream: StreamId) -> Option<StreamEnd> {
+    events.iter().find_map(|e| match e {
+        Event::StreamClosed { stream: s, reason } if *s == stream => Some(*reason),
+        _ => None,
+    })
+}
+
+#[test]
+fn an_ordered_stream_carries_data_within_credit() {
+    let mut sim = command_setup();
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 8, 4);
+    // A may send what B granted: four bytes.
+    sim.node(A).unwrap().stream_write(sa, b"abcd").unwrap();
+    let e = sim.node(A).unwrap().stream_write(sa, b"e").unwrap_err();
+    assert_eq!(e.code(), RuleCode::STR_NO_CREDIT);
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"abcd".to_vec()]);
+    // B grants three more, and A learns it.
+    sim.node(B).unwrap().stream_grant(sb, 3).unwrap();
+    sim.settle().unwrap();
+    assert!(sim.drain_events(A).contains(&Event::StreamCredit { stream: sa, added: 3 }));
+    sim.node(A).unwrap().stream_write(sa, b"efg").unwrap();
+    // The other direction has its own credit: eight bytes from A.
+    sim.node(B).unwrap().stream_write(sb, b"12345678").unwrap();
+    assert_eq!(sim.node(B).unwrap().stream_write(sb, b"9").unwrap_err().code(), RuleCode::STR_NO_CREDIT);
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"efg".to_vec()]);
+    assert_eq!(stream_data(&sim.drain_events(A), sa), vec![b"12345678".to_vec()]);
+    // The "end" chunk closes both sides; the side that ended gets no event.
+    sim.node(A).unwrap().stream_end(sa).unwrap();
+    sim.settle().unwrap();
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::Ended));
+    assert!(sim.drain_events(A).is_empty());
+    assert_eq!(sim.node(A).unwrap().stream_write(sa, b"x").unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    assert_eq!(sim.node(B).unwrap().stream_write(sb, b"x").unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+#[test]
+fn stream_operations_check_their_arguments() {
+    let mut sim = command_setup();
+    let mut a = sim.node(A).unwrap();
+    // A lossy stream has no credit, and the initial credit is bounded.
+    let e = a.invoke(B, act(1), b"", with_stream(StreamMode::Lossy, 1)).unwrap_err();
+    assert_eq!(e.code(), RuleCode::API_BAD_STREAM);
+    let e = a.invoke(B, act(1), b"", with_stream(StreamMode::Ordered, MAX_INITIAL_CREDIT + 1)).unwrap_err();
+    assert_eq!(e.code(), RuleCode::API_BAD_STREAM);
+    // A call that asked for no stream cannot be answered with one, and stays to be answered.
+    a.invoke(B, act(1), b"", InvokeOptions::default()).unwrap();
+    sim.settle().unwrap();
+    for e in sim.drain_events(B) {
+        if let Event::IncomingCall { id, stream, .. } = e {
+            assert_eq!(stream, None);
+            let mut b = sim.node(B).unwrap();
+            assert_eq!(
+                b.reply_with_stream(id, ResultCode::DONE, "", b"", 0).unwrap_err().code(),
+                RuleCode::API_BAD_STREAM
+            );
+            b.reply(id, ResultCode::DONE, "", b"").unwrap();
+        }
+    }
+    sim.settle().unwrap();
+    assert!(matches!(outcomes(&sim.drain_events(A))[..], [CallOutcome::Replied { stream: None, .. }]));
+    // The target may also answer a stream request with a plain reply: no stream opens.
+    sim.node(A).unwrap().invoke(B, act(1), b"", with_stream(StreamMode::Ordered, 16)).unwrap();
+    sim.settle().unwrap();
+    serve(&mut sim, ResultCode::DECLINED);
+    assert!(matches!(
+        outcomes(&sim.drain_events(A))[..],
+        [CallOutcome::Replied { code: ResultCode::DECLINED, stream: None, .. }]
+    ));
+    // Chunk sizes and kinds.
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Lossy, 0, 0);
+    let mut a = sim.node(A).unwrap();
+    assert_eq!(a.stream_write(sa, b"").unwrap_err().code(), RuleCode::API_BAD_STREAM);
+    let big = vec![0u8; usize::try_from(DEFAULT_STREAM_CHUNK).unwrap() + 1];
+    assert_eq!(a.stream_write(sa, &big).unwrap_err().code(), RuleCode::API_DATA_TOO_LARGE);
+    assert_eq!(a.stream_grant(sa, 0).unwrap_err().code(), RuleCode::API_BAD_STREAM);
+    assert_eq!(a.stream_grant(sa, 8).unwrap_err().code(), RuleCode::API_BAD_STREAM);
+    assert_eq!(a.stream_end(StreamId(u64::MAX)).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    // The refused operations sent nothing: the stream still works.
+    a.stream_write(sa, &big[1..]).unwrap();
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb).len(), 1);
+}
+
+#[test]
+fn a_lossy_stream_drops_what_does_not_fit() {
+    let profile = Profile { stream_buffer: 8, ..Profile::default() };
+    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Release), profile, ..Config::default() }, ROOT);
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
+    let permit = Permit { commander: A, automatic: ActionSet::of(&[act(1)]), confirmation: ActionSet::EMPTY };
+    sim.admit(B, Rights::MEMBER, false, vec![permit]);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    sim.node(B).unwrap().register_action(act(1));
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Lossy, 0, 0);
+    // No credit: A sends as it likes. B holds eight bytes for its application and drops the
+    // third chunk.
+    for chunk in [b"aaaa", b"bbbb", b"cccc"] {
+        sim.node(A).unwrap().stream_write(sa, chunk).unwrap();
+    }
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"aaaa".to_vec(), b"bbbb".to_vec()]);
+    // The application took them, so there is room again; the stream stays open after a loss.
+    sim.node(A).unwrap().stream_write(sa, b"dddd").unwrap();
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"dddd".to_vec()]);
+}
+
+#[test]
+fn opening_beyond_the_limit_keeps_existing_streams() {
+    let profile = Profile { max_streams: 1, ..Profile::default() };
+    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Release), profile, ..Config::default() }, ROOT);
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
+    let permit = Permit { commander: A, automatic: ActionSet::of(&[act(1)]), confirmation: ActionSet::EMPTY };
+    sim.admit(B, Rights::MEMBER, false, vec![permit]);
+    sim.link(ROOT, B);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    sim.node(B).unwrap().register_action(act(1));
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    // A is at its own limit: the call is not sent.
+    let e = sim.node(A).unwrap().invoke(B, act(1), b"", with_stream(StreamMode::Ordered, 4)).unwrap_err();
+    assert_eq!(e.code(), RuleCode::STR_TOO_MANY);
+    // The root device has room and calls with the root key; B is at its limit and answers
+    // with the result code (R-STR-6).
+    let options = InvokeOptions { as_root: true, ..with_stream(StreamMode::Ordered, 4) };
+    sim.node(ROOT).unwrap().invoke(B, act(1), b"", options).unwrap();
+    sim.settle().unwrap();
+    for e in sim.drain_events(ROOT) {
+        if let Event::HostRequest { id, kind: HostRequestKind::SignWithRootKey { .. } } = e {
+            sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Approve).unwrap();
+        }
+    }
+    sim.settle().unwrap();
+    for e in sim.drain_events(B) {
+        if let Event::IncomingCall { id, signed_by, .. } = e {
+            assert_eq!(signed_by, CallKey::Root);
+            let e = sim.node(B).unwrap().reply_with_stream(id, ResultCode::DONE, "", b"", 4).unwrap_err();
+            assert_eq!(e.code(), RuleCode::STR_TOO_MANY);
+        }
+    }
+    sim.settle().unwrap();
+    assert!(matches!(
+        outcomes(&sim.drain_events(ROOT))[..],
+        [CallOutcome::Replied { code: ResultCode::TOO_MANY_STREAMS, stream: None, .. }]
+    ));
+    // The stream that was open is untouched.
+    sim.node(A).unwrap().stream_write(sa, b"abcd").unwrap();
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"abcd".to_vec()]);
+}
+
+#[test]
+fn a_stream_closes_with_its_link() {
+    let mut sim = command_setup();
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    sim.unlink(A, B);
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::LinkDown));
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::LinkDown));
+    assert_eq!(sim.node(A).unwrap().stream_write(sa, b"x").unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+#[test]
+fn a_stream_runs_through_a_relay() {
+    let mut sim = Sim::new(config(ErrorMode::Release), ROOT);
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
+    let permit = Permit { commander: A, automatic: ActionSet::of(&[act(1)]), confirmation: ActionSet::EMPTY };
+    sim.admit(B, Rights::MEMBER, false, vec![permit]);
+    sim.admit(RELAY, Rights { relay: true, ..Rights::default() }, false, Vec::new());
+    for d in [A, B, RELAY] {
+        sim.link(ROOT, d);
+    }
+    sim.settle().unwrap();
+    for d in [A, B, RELAY] {
+        sim.unlink(ROOT, d);
+    }
+    sim.link(A, RELAY);
+    sim.link(B, RELAY);
+    sim.settle().unwrap();
+    sim.node(B).unwrap().register_action(act(1));
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    sim.node(A).unwrap().stream_write(sa, b"abcd").unwrap();
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb), vec![b"abcd".to_vec()]);
+    // A loses its link to the relay and closes its side. B's link is up, so B learns
+    // nothing yet: its side closes at the second quiet "reset nonces" (R-STR-5).
+    sim.unlink(A, RELAY);
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::LinkDown));
+    assert!(sim.drain_events(B).is_empty());
+    sim.reset_nonces(B);
+    assert!(sim.drain_events(B).is_empty());
+    sim.reset_nonces(B);
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::Idle));
+}
+
+#[test]
+fn a_relay_may_refuse_streams() {
+    let mut sim =
+        Sim::new(Config { mode: Some(ErrorMode::Release), relays_refuse_streams: true, ..Config::default() }, ROOT);
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
+    let permit = Permit { commander: A, automatic: ActionSet::of(&[act(1)]), confirmation: ActionSet::EMPTY };
+    sim.admit(B, Rights::MEMBER, false, vec![permit]);
+    sim.admit(RELAY, Rights { relay: true, ..Rights::default() }, false, Vec::new());
+    for d in [A, B, RELAY] {
+        sim.link(ROOT, d);
+    }
+    sim.settle().unwrap();
+    for d in [A, B, RELAY] {
+        sim.unlink(ROOT, d);
+    }
+    sim.link(A, RELAY);
+    sim.link(B, RELAY);
+    sim.settle().unwrap();
+    sim.node(B).unwrap().register_action(act(1));
+    // The call and its reply pass: the relay refuses only stream chunks.
+    let (sa, _) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    sim.node(A).unwrap().stream_write(sa, b"abcd").unwrap();
+    sim.settle().unwrap();
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::RelayRefused));
+    assert!(sim.drain_events(B).is_empty());
+}
+
+#[test]
+fn reset_nonces_closes_only_an_idle_stream() {
+    let mut sim = command_setup();
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Lossy, 0, 0);
+    sim.reset_nonces(B);
+    // Traffic since the previous reset keeps the stream.
+    sim.node(A).unwrap().stream_write(sa, b"x").unwrap();
+    sim.settle().unwrap();
+    sim.reset_nonces(B);
+    assert_eq!(closed(&sim.drain_events(B), sb), None);
+    sim.reset_nonces(B);
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::Idle));
+    // A chunk for the stream B no longer has is dropped without an answer (R-STR-3).
+    sim.node(A).unwrap().stream_write(sa, b"y").unwrap();
+    sim.settle().unwrap();
+    assert!(sim.drain_events(B).is_empty());
+    assert!(sim.drain_events(A).is_empty());
+}
+
+#[test]
+fn revocation_closes_the_streams_of_both_parties() {
+    let mut sim = command_setup();
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    assert!(sim.revoke(A));
+    sim.settle().unwrap();
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::Revoked));
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::Revoked));
+}
+
+#[test]
+fn a_lost_chunk_closes_an_ordered_stream_and_not_a_lossy_one() {
+    let mut sim = Sim::new(config(ErrorMode::Debug), ROOT);
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
+    let permit = Permit { commander: A, automatic: ActionSet::of(&[act(1)]), confirmation: ActionSet::EMPTY };
+    sim.admit(B, Rights::MEMBER, false, vec![permit]);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    sim.node(B).unwrap().register_action(act(1));
+    let (oa, ob) = open_stream(&mut sim, StreamMode::Ordered, 8, 8);
+    let (la, lb) = open_stream(&mut sim, StreamMode::Lossy, 0, 0);
+    sim.drain_events(B);
+    // The first chunk of each stream is lost on the link.
+    sim.node(A).unwrap().stream_write(oa, b"1").unwrap();
+    sim.node(A).unwrap().stream_write(la, b"1").unwrap();
+    assert_eq!(sim.lose_in_flight(), 2);
+    sim.node(A).unwrap().stream_write(oa, b"2").unwrap();
+    sim.node(A).unwrap().stream_write(la, b"2").unwrap();
+    sim.settle().unwrap();
+    let events = sim.drain_events(B);
+    // Ordered: the chunk is not the next one, so the stream closes (R-STR-3).
+    assert_eq!(closed(&events, ob), Some(StreamEnd::OutOfOrder));
+    assert!(stream_data(&events, ob).is_empty());
+    assert!(events.iter().any(|e| matches!(e, Event::Rejected(r) if r.code() == RuleCode::STR_OUT_OF_ORDER)));
+    // Lossy: the gap is not filled and the stream goes on.
+    assert_eq!(closed(&events, lb), None);
+    assert_eq!(stream_data(&events, lb), vec![b"2".to_vec()]);
+}
+
+#[test]
+fn a_new_stream_replaces_a_stale_side() {
+    let mut sim = command_setup();
+    let (sa, sb) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    // B closes its side after a quiet period; A is not told.
+    sim.reset_nonces(B);
+    sim.reset_nonces(B);
+    assert_eq!(closed(&sim.drain_events(B), sb), Some(StreamEnd::Idle));
+    // A's own "reset nonces" makes its next call start with a nonce request (R-CALL-8).
+    sim.reset_nonces(A);
+    // B numbers the next stream the same, so A's stale side is replaced by the new one.
+    sim.node(A).unwrap().invoke(B, act(1), b"", with_stream(StreamMode::Ordered, 4)).unwrap();
+    sim.settle().unwrap();
+    let mut sb2 = None;
+    for e in sim.drain_events(B) {
+        if let Event::IncomingCall { id, .. } = e {
+            sb2 = Some(sim.node(B).unwrap().reply_with_stream(id, ResultCode::DONE, "", b"", 4).unwrap());
+        }
+    }
+    sim.settle().unwrap();
+    let events = sim.drain_events(A);
+    assert_eq!(closed(&events, sa), Some(StreamEnd::Replaced));
+    let sa2 = events.iter().find_map(|e| match e {
+        Event::CallFinished { outcome: CallOutcome::Replied { stream, .. }, .. } => *stream,
+        _ => None,
+    });
+    let (sa2, sb2) = (sa2.unwrap(), sb2.unwrap());
+    assert_ne!(sa2, sa);
+    sim.node(A).unwrap().stream_write(sa2, b"new").unwrap();
+    sim.settle().unwrap();
+    assert_eq!(stream_data(&sim.drain_events(B), sb2), vec![b"new".to_vec()]);
+}
+
+#[test]
+fn a_reboot_loses_the_streams_without_an_answer() {
+    let mut sim = command_setup();
+    let (sa, _) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
+    // B reboots; its links drop, so A closes its side with the link.
+    sim.reboot(B);
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::LinkDown));
+    assert!(sim.drain_events(B).iter().all(|e| !matches!(e, Event::StreamClosed { .. })));
+}
+
+#[test]
+fn a_reply_carries_a_message_for_the_log() {
+    let mut sim = command_setup();
+    sim.node(A).unwrap().invoke(B, act(1), b"", InvokeOptions::default()).unwrap();
+    sim.settle().unwrap();
+    for e in sim.drain_events(B) {
+        if let Event::IncomingCall { id, .. } = e {
+            let mut b = sim.node(B).unwrap();
+            let long = "x".repeat(MAX_MESSAGE + 1);
+            let e = b.reply(id, ResultCode::BAD_ARGUMENTS, &long, b"").unwrap_err();
+            assert_eq!(e.code(), RuleCode::API_MESSAGE_TOO_LONG);
+            b.reply(id, ResultCode::BAD_ARGUMENTS, "level must be 0..100", b"").unwrap();
+        }
+    }
+    sim.settle().unwrap();
+    assert_eq!(
+        outcomes(&sim.drain_events(A)),
+        vec![CallOutcome::Replied {
+            code: ResultCode::BAD_ARGUMENTS,
+            message: String::from("level must be 0..100"),
+            data: Vec::new(),
+            stream: None,
+        }]
+    );
 }

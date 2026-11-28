@@ -20,8 +20,8 @@
 //! Errors follow R-ERR-2 and R-ERR-3: the mode follows the build type and is overridden by the
 //! environment variable `CPB_ERRORS=debug|release` or by [`Config::mode`].
 //!
-//! Version 0.x, milestone M1: membership without enrollment, channels, calls. Enrollment, root
-//! change, halt propagation, streams and power loss at every step arrive in M2.
+//! Version 0.x: membership without enrollment, channels, calls and streams. Enrollment, root
+//! change, halt propagation and power loss at every step arrive next.
 //!
 //! ```
 //! use cpb_api::{Channel, DeviceId, Event, LocalApi, Rights};
@@ -50,5 +50,5 @@ mod node;
 mod rng;
 mod sim;
 
-pub use node::{DEFAULT_BLOB_SEGMENT, Profile};
+pub use node::{DEFAULT_BLOB_SEGMENT, DEFAULT_MAX_STREAMS, DEFAULT_STREAM_CHUNK, Profile};
 pub use sim::{Config, ERROR_MODE_VAR, Faults, NodeApi, Sim, StepLimit};

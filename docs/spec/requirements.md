@@ -935,7 +935,11 @@ has not yet consumed.
 > *Serves:* S14. *Verified by:* model.
 
 > **R-STR-7.** A relay forwards stream chunks without modification and MAY refuse to serve streams at
-> all.
+> all. It then answers a chunk with its refusal (Appendix B, `RelayRefusal`, code 4). The refusal
+> arrives on the link that carries the stream, so the sender closes its side as on "link down"
+> (R-STR-5) and reports the reason to the application. Forwarding a chunk costs a relay no more than
+> forwarding a call; the right to refuse exists because a stream has no size a quota could bound in
+> advance, and a relay may belong to a third party.
 > *Serves:* S15. *Verified by:* relay test.
 
 ## 11. Relays
@@ -1193,15 +1197,21 @@ Appendix B, Section B.10.
 > subscribe to a channel; set the readers of its own channel (a list of devices, or all valid members
 > with the read right; a key request from a device outside the list is not answered); ask for a new
 > key of its own channel (R-CH-5, R-CH-6); invoke an action
-> (with a flag stating whether it is idempotent, R-CALL-13); reply to a call; register an action handler;
-> write and read a stream; set the node name and the application node info (the core publishes both to
+> (with a flag stating whether it is idempotent, R-CALL-13, and optionally a stream request with the
+> mode and the initial credit, R-CALL-3); reply to a call with a result code, an optional message and
+> data (R-CALL-10), and with the target's initial credit if the reply opens the requested stream;
+> register an action handler; write to a stream, grant credit on it, end it, and read its data and the
+> credit the peer granted (R-STR-4); set the node name and the application node info (the core publishes both to
 > channel 0, R-CH-16); read the bus state. The bus state is a snapshot without side effects: bus
 > identifier, root generation, checkpoint number, root device, halted flag, known valid members with
 > their rights, permits and whether they have a user-presence key (the values the owner's "change"
 > operation takes), connected links, core memory usage. The snapshot contains no secrets. After accepting a
 > checkpoint or a passport the core reports a membership change with the root generation and the
 > checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
-> members with the read right. Subscribing delivers the channel's retained publications at once. On the
+> members with the read right. Subscribing delivers the channel's retained publications at once. With a
+> call the core delivers the key that signed it: the device key, the user-presence key, or the root key
+> (R-CALL-4). When a stream closes for any reason other than the application's own "end", the core
+> reports the reason (R-STR-2 to R-STR-7). On the
 > root device the interface also gives the owner's operations, each confirmed through the root key
 > (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and
 > revoke a device (R-MEM-4).
@@ -1276,7 +1286,7 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Actions per device | 64 | An action set is exactly 8 bytes, so a permit has a constant size. An application with more commands uses arguments. The set is not encoded as an integer: 64 bits do not fit the integer limit. | Chosen |
 | Device name | up to 64 bytes of UTF-8 | The owner sees the name when confirming; it must fit one line on screen. 64 bytes are 64 Latin letters, 32 Cyrillic letters, or 21 CJK characters. | Chosen |
 | Bus system channels | 0 .. 15 | One is in use: channel 0 for node info. The other 15 are reserved for future needs of the bus; the number occupies one byte in any case. | Chosen |
-| Application channel number | 0 .. 65535 | The number is not visible outside, only its hash in the label, so its size costs nothing. Every retained channel occupies recipient memory; an application needs no more than 65 thousand. | Chosen |
+| Channel number | 0 .. 65535; 16 and above belong to the application (R-CH-16) | The number is not visible outside, only its hash in the label, so its size costs nothing. Every retained channel occupies recipient memory; an application needs no more than 65 thousand. | Chosen |
 | Frame | body up to 16384 bytes, 2-byte big-endian length | Every participant must accept a root change record (8046 bytes, about 7.9 KiB, because of the K2 signature) and a checkpoint with the largest bitmap (6432 bytes, about 6.3 KiB, today, and 14225 bytes, about 13.9 KiB, with a post-quantum root signature; computed in Appendix B, Section B.9). The nearest power of two is 16384. No object needs more: a publication takes up to 4.3 KiB, a key grant 1.4 KiB, and streams and blobs are cut into chunks. The limit is therefore the same for everyone and not part of the passport. A TLS record has the same size. A length up to 16384 fits in 2 bytes. On an external relay link every frame travels inside a wrapped object, so the largest stream chunk or blob segment there is shorter by the wrapping overhead (Appendix B, Section B.10); every map object fits with room to spare. | Computed |
 | Pairing short code | 6 decimal digits | CPace allows one guess per attempt. The probability of guessing is the number of attempts divided by 10^6: 3 in a million with three attempts. This matches Bluetooth numeric comparison. After the attempts are exhausted the code changes. | Computed |
 | QR secret | 16 bytes | 128 bits; brute force is impossible, no attempt limit is needed. | Computed |

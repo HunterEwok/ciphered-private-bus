@@ -588,8 +588,9 @@ Decisions that writing out the fields required:
    `HaltProof`, which can be verified, rather than with a word that has to be trusted. Code 5 "too many
    streams" was added per R-STR-6.
 
-The list of rule codes (`area/rule`) is published together with the test vectors at gate G2: every
-code needs a vector, and writing the list without the vectors would mean writing it twice.
+The list of rule codes (`area/rule`) is kept in one place, `crates/cpb-api/src/codes.rs`, which the
+simulator, the core and the vectors all use. It holds the codes of the interface, membership, channel,
+call and storage rules; gate G2 adds the codes of the format layer and one vector per code.
 
 ## B.10. Relays: Tickets, Wrapping, and Quotas
 

@@ -831,8 +831,11 @@ has not yet consumed.
 > *Serves:* S14. *Verified by:* model.
 
 > **R-CALL-8.** The host event "reset nonces" erases all slots. The host raises it from its own uptime
-> counter with the period set by the profile. A reboot erases the slots by itself.
-> *Serves:* S10. *Verified by:* model (nondeterministic event).
+> counter with the period set by the profile. A reboot erases the slots by itself. In the same event a
+> node, as a commander, forgets the nonces it holds for targets with no call in flight, so its next call
+> starts with a nonce request: a held nonce older than the period has most likely been erased at the
+> target, and a call over it would end with the outcome unknown (R-CALL-13).
+> *Serves:* S10. *Verified by:* model (nondeterministic event), simulator.
 
 > **R-CALL-9.** The reply is encrypted with a key exported from the HPKE context of this call ([RFC9180],
 > Section 5.3), with the hash of the call body as associated data. The reply carries no separate
@@ -1174,7 +1177,11 @@ Appendix B, Section B.10.
 > write and read a stream; set the node name (the core publishes it to channel 0, R-CH-16); read the bus
 > state. The bus state is a snapshot without side effects: bus identifier, root generation, checkpoint
 > number, halted flag, known valid members with their rights, connected links, core memory usage. The
-> snapshot contains no secrets.
+> snapshot contains no secrets. Until the application sets them, the readers of a channel are all valid
+> members with the read right. Subscribing delivers the channel's retained publications at once. On the
+> root device the interface also gives the owner's operations, each confirmed through the root key
+> (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and
+> revoke a device (R-MEM-4).
 > *Serves:* scope. *Verified by:* interface test.
 
 > **R-API-3.** A confirmation-class action always goes through the effect "sign with the presence key"
@@ -1362,10 +1369,16 @@ Work proceeds to the next phase only after the gate of the previous phase has pa
 | --- | --- | --- |
 | G0 | This specification and its threat model agreed; Appendix B written | No open questions that would change the format. |
 | G1 | State machine model and cryptographic models | TLC and Apalache pass at the stated sizes, all Tamarin lemmas are proven, all probes fire. |
+| S | Application simulator (`cpb-sim`) and the Rust shape of the local interface (`cpb-api`) | The simulator replays the traces of the channels, calls, membership, enrollment and streams models with equal state after every step, and the interface tests of R-API-2 pass against it. |
 | G2 | Format: description, vectors, two decoders | R-VER-6 is met; every error code has a vector. |
 | G3 | Core | Passes the model traces, the simulator, Kani, fuzzing, and mutation testing. |
 | G4 | Application library and relay | End-to-end scenarios on two platforms, one of them of the ESP32 class. |
 | G5 | First application profile outside this repository | The application is built on the public interfaces only; nothing was added to the bus for its sake. |
+
+Gate S follows G1 and does not gate G2 to G4: it gives application authors a bus to build profiles on
+before the core exists. Profile work toward G5 may start once S has passed; G5 itself still follows G4.
+The simulator is the deterministic harness of R-VER-7 with an engine taken from the models; at G3 the
+core is added as a second engine of the same harness, and the two run on the same seeds.
 
 Closing G0 records this specification and Appendix B as the reference baseline but does not freeze the
 format: the model (G1) and the vectors (G2) exist to find errors in it. After G0 the format changes only

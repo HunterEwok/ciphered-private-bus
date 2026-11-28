@@ -102,7 +102,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   limitation L9). Section 15.7 describes the ways an application may let the owner learn a
   fingerprint, with an invitation issued by the root device among them. R-JOIN-1
   and R-JOIN-5 describe the core, not screens, and R-ARC-7 states what an observer of a link sees
-  transport instead of recommending one.
+  instead of recommending a transport.
 - Specification: the right to accept join requests is removed. Any valid member pairs with a joiner
   and sends its join request; the passport rights are read, publish and relay (Sections 6.1 and 7,
   R-JOIN-4, R-API-2; Appendix B, Sections B.3 and B.11). Reason: admission depends only on the check

@@ -3,7 +3,7 @@
 
 //! Trace equivalence with the Quint models (verification level V3 for the simulator).
 //!
-//! Each file in `tests/traces` is a trace of the `channels`, `calls` or `streams` model, converted from
+//! Each file in `tests/traces` is a trace of the `channels`, `calls`, `streams` or `enrollment` model, converted from
 //! the Informal Trace Format by `tools/sim/itf2trace.py`. The test feeds every action to the
 //! model engine and checks, after every step, that the engine's state projected onto the
 //! model's variables equals the state the model reached. A mismatch names the file, the step
@@ -26,6 +26,7 @@ use std::path::Path;
 use cpb_api::{Action, ActionSet, DeviceId, StreamMode};
 use cpb_sim::engine::calls::{CallBody, CmdRights, Commander, SigKey, Target};
 use cpb_sim::engine::channels::{Grant, Pub, Reader, Source};
+use cpb_sim::engine::enrollment::{Attempts, Buffer, Payload, Request};
 use cpb_sim::engine::streams::{Chunk, Kind, Side, Table};
 
 /// Model device names become device identifiers; the order of the names is kept.
@@ -340,6 +341,7 @@ enum Engine {
     Channels(Channels),
     Calls(Calls),
     Streams(Streams),
+    Enrollment(Enrollment),
 }
 
 impl Engine {
@@ -348,6 +350,7 @@ impl Engine {
             Self::Channels(e) => e.project(),
             Self::Calls(e) => e.project(),
             Self::Streams(e) => e.project(),
+            Self::Enrollment(e) => e.project(),
         }
     }
 
@@ -356,6 +359,7 @@ impl Engine {
             Self::Channels(e) => e.step(a),
             Self::Calls(e) => e.step(a),
             Self::Streams(e) => e.step(a),
+            Self::Enrollment(e) => e.step(a),
         }
     }
 }
@@ -534,6 +538,168 @@ impl Streams {
     }
 }
 
+// ---------------------------------------------------------------------- enrollment
+
+/// The enrollment model: the engine counts the attempts, makes the join requests and checks
+/// the joiner's signature at the Root; the harness keeps the model's ghost state (the
+/// sessions and what was sent in them) and plays the owner, who confirms a request only if
+/// its key is the key of the device in front of them (R-JOIN-7).
+struct Enrollment {
+    presence: BTreeSet<String>,
+    tid: u64,
+    /// Session transcript to (joiner, acceptor).
+    sessions: BTreeMap<u64, (String, String)>,
+    current: BTreeMap<String, u64>,
+    joiner: BTreeMap<String, Attempts>,
+    acceptor: BTreeMap<String, BTreeMap<String, Attempts>>,
+    sent: BTreeSet<(Payload, String)>,
+    inbox: Buffer,
+    passports: BTreeSet<String>,
+}
+
+fn pres_name(p: Option<DeviceId>) -> String {
+    p.map_or_else(|| "none".to_string(), name)
+}
+
+fn pres_of(text: &str) -> Option<DeviceId> {
+    (text != "none").then(|| dev(text))
+}
+
+fn payload_of(text: &str) -> Payload {
+    let f: Vec<&str> = text.split(':').collect();
+    Payload { key: dev(f[0]), presence: pres_of(f[1]), name: f[2].to_string(), tid: f[3].parse().unwrap() }
+}
+
+fn payload_text(p: &Payload) -> String {
+    format!("{}:{}:{}:{}", name(p.key), pres_name(p.presence), p.name, p.tid)
+}
+
+fn request_of(text: &str) -> Request {
+    let (head, signed) = text.split_once('/').unwrap();
+    let f: Vec<&str> = head.split(':').collect();
+    Request {
+        key: dev(f[0]),
+        presence: pres_of(f[1]),
+        name: f[2].to_string(),
+        tid: f[3].parse().unwrap(),
+        signed: payload_of(signed),
+        acceptor: dev(f[4]),
+    }
+}
+
+fn request_text(r: &Request) -> String {
+    let head = format!("{}:{}:{}:{}:{}", name(r.key), pres_name(r.presence), r.name, r.tid, name(r.acceptor));
+    format!("{head}/{}", payload_text(&r.signed))
+}
+
+impl Enrollment {
+    fn new(c: &BTreeMap<String, String>) -> Self {
+        let limit: u8 = c["limit"].parse().unwrap();
+        let joiners = list(&c["joiners"]);
+        Self {
+            presence: list(&c["presence"]).into_iter().collect(),
+            tid: 0,
+            sessions: BTreeMap::new(),
+            current: joiners.iter().map(|j| (j.clone(), 0)).collect(),
+            joiner: joiners.iter().map(|j| (j.clone(), Attempts::new(limit))).collect(),
+            acceptor: list(&c["acceptors"])
+                .into_iter()
+                .map(|a| (a, joiners.iter().map(|j| (j.clone(), Attempts::new(limit))).collect()))
+                .collect(),
+            sent: BTreeSet::new(),
+            inbox: Buffer::new(usize::MAX),
+            passports: BTreeSet::new(),
+        }
+    }
+
+    fn project(&self) -> Vec<String> {
+        let mut out = vec![format!("= tid {}", self.tid)];
+        for (j, t) in &self.current {
+            out.push(format!("= joiner {j} tries={} current={t}", self.joiner[j].used()));
+        }
+        for (a, m) in &self.acceptor {
+            let tries: Vec<String> = m.iter().map(|(j, n)| format!("{j}={}", n.used())).collect();
+            out.push(format!("= acceptor {a} {}", tries.join(",")));
+        }
+        let mut sent: Vec<String> = self.sent.iter().map(|(p, to)| format!("{}>{to}", payload_text(p))).collect();
+        sent.sort();
+        out.push(format!("= sent {}", sent.join(",")));
+        let mut inbox: Vec<String> = self.inbox.iter().map(request_text).collect();
+        inbox.sort();
+        out.push(format!("= inbox {}", inbox.join(",")));
+        let passports: Vec<String> = self.passports.iter().cloned().collect();
+        out.push(format!("= passports {}", passports.join(",")));
+        out
+    }
+
+    fn session(&mut self, joiner: &str, acceptor: &str) {
+        self.sessions.insert(self.tid, (joiner.to_string(), acceptor.to_string()));
+    }
+
+    fn step(&mut self, a: &[&str]) {
+        match a[0] {
+            "pairHonest" => {
+                assert!(self.joiner.get_mut(a[1]).unwrap().take(), "the joiner's code is spent");
+                // The compromised acceptor keeps no count.
+                if let Some(m) = self.acceptor.get_mut(a[2]) {
+                    assert!(m.get_mut(a[1]).unwrap().take(), "the acceptor's code is spent");
+                }
+                self.tid += 1;
+                self.session(a[1], a[2]);
+                self.current.insert(a[1].to_string(), self.tid);
+            }
+            "advPairJoiner" => {
+                assert!(self.joiner.get_mut(a[1]).unwrap().take(), "the joiner's code is spent");
+                self.tid += 1;
+                if a[2] == "1" {
+                    self.session(a[1], "adv");
+                    self.current.insert(a[1].to_string(), self.tid);
+                }
+            }
+            "advPairAcceptor" => {
+                let counted = self.acceptor.get_mut(a[1]).unwrap().get_mut(a[2]).unwrap().take();
+                assert!(counted, "the acceptor's code is spent");
+                self.tid += 1;
+                if a[3] == "1" {
+                    self.session("adv", a[1]);
+                }
+            }
+            "joinerSend" => {
+                let tid = self.current[a[1]];
+                let to = self.sessions[&tid].1.clone();
+                let presence = self.presence.contains(a[1]).then(|| dev(a[1]));
+                let p = Payload { key: dev(a[1]), presence, name: a[1].to_string(), tid };
+                self.sent.insert((p, to));
+            }
+            "acceptorRequest" => {
+                let r = Request::from_session(a[2].parse().unwrap(), dev(a[1]), &payload_of(a[3]));
+                self.inbox.receive(r.expect("the payload is of this session")).expect("the signature covers it");
+            }
+            "badRequest" => {
+                let signed = payload_of(a[5]);
+                let r = Request {
+                    key: dev(a[1]),
+                    presence: pres_of(a[2]),
+                    name: a[3].to_string(),
+                    tid: a[4].parse().unwrap(),
+                    signed,
+                    acceptor: dev("c"),
+                };
+                // The Root drops a request the joiner's signature does not cover.
+                let _dropped = self.inbox.receive(r);
+            }
+            "rootAdmit" => {
+                let r = request_of(a[1]);
+                assert!(self.inbox.iter().any(|x| *x == r), "the request is in the inbox");
+                assert!(r.signature_ok());
+                assert_eq!(r.key, dev(a[2]), "the owner compared the fingerprints");
+                self.passports.insert(format!("{}:{}:{}", name(r.key), pres_name(r.presence), r.name));
+            }
+            other => panic!("unknown enrollment action {other}"),
+        }
+    }
+}
+
 /// Splits a trace into its header, the initial state, and the steps with their states.
 fn replay(path: &Path) -> usize {
     let text = fs::read_to_string(path).unwrap();
@@ -554,6 +720,7 @@ fn replay(path: &Path) -> usize {
         "channels" => Engine::Channels(Channels::new(&c)),
         "calls" => Engine::Calls(Calls::new(&c, &initial)),
         "streams" => Engine::Streams(Streams::new(&c)),
+        "enrollment" => Engine::Enrollment(Enrollment::new(&c)),
         other => panic!("unknown model {other}"),
     };
     assert_eq!(engine.project(), initial, "{}: initial state", path.display());
@@ -581,6 +748,6 @@ fn engines_follow_the_model_traces() {
         total += replay(f);
         models.insert(fs::read_to_string(f).unwrap().lines().next().unwrap().to_string());
     }
-    assert!(models.len() == 3, "traces of the three models are present: {models:?}");
+    assert!(models.len() == 4, "traces of the four models are present: {models:?}");
     assert!(total > 500, "only {total} steps replayed");
 }

@@ -13,9 +13,10 @@
 )]
 
 use cpb_api::{
-    Action, ActionSet, CallKey, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
-    InvokeOptions, LocalApi, MAX_APP_INFO, MAX_APP_TAG, MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Permit,
-    Readers, ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
+    Action, ActionSet, CallKey, CallOutcome, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, Fingerprint,
+    HostAnswer, HostRequestKind, InvokeOptions, JoinRequestId, LocalApi, MAX_APP_INFO, MAX_APP_TAG, MAX_INITIAL_CREDIT,
+    MAX_MESSAGE, OwnerOperation, Paired, PairingCode, Permit, Readers, ResultCode, Rights, RuleCode, StreamEnd,
+    StreamId, StreamMode, StreamRequest,
 };
 use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, DEFAULT_STREAM_CHUNK, Faults, Profile, Sim};
 
@@ -388,11 +389,11 @@ fn node_info_reaches_every_member() {
 fn membership_changes_are_announced() {
     let mut sim = triangle(ErrorMode::Release);
     sim.drain_events(A);
-    let before = sim.node(A).unwrap().state();
+    let before = sim.node(A).unwrap().state().unwrap();
     assert_eq!(before.root_device, ROOT);
     sim.admit(RELAY, Rights::READER, false, Vec::new());
     sim.settle().unwrap();
-    let after = sim.node(A).unwrap().state();
+    let after = sim.node(A).unwrap().state().unwrap();
     let announced: Vec<(u32, u32)> = sim
         .drain_events(A)
         .into_iter()
@@ -411,16 +412,16 @@ fn the_root_application_changes_one_right_and_keeps_the_permits() {
     let mut sim = command_setup();
     sim.settle().unwrap();
     // Read B as the bus shows it, change one right, write the rest back.
-    let b = sim.node(ROOT).unwrap().state().members.into_iter().find(|m| m.device == B).unwrap();
+    let b = sim.node(ROOT).unwrap().state().unwrap().members.into_iter().find(|m| m.device == B).unwrap();
     assert_eq!(b.permits.len(), 1);
     assert_eq!(b.permits[0].commander, A);
-    let a = sim.node(ROOT).unwrap().state().members.into_iter().find(|m| m.device == A).unwrap();
+    let a = sim.node(ROOT).unwrap().state().unwrap().members.into_iter().find(|m| m.device == A).unwrap();
     assert!(a.presence && !b.presence);
     let rights = Rights { relay: true, ..b.rights };
     let id = sim.node(ROOT).unwrap().change_member(B, rights, b.presence, b.permits.clone()).unwrap();
     sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Approve).unwrap();
     sim.settle().unwrap();
-    let after = sim.node(A).unwrap().state().members.into_iter().find(|m| m.device == B).unwrap();
+    let after = sim.node(A).unwrap().state().unwrap().members.into_iter().find(|m| m.device == B).unwrap();
     assert!(after.rights.relay);
     assert_eq!(after.permits, b.permits);
 }
@@ -698,10 +699,10 @@ fn owner_operations_need_the_root_key_confirmation() {
         matches!(e, Event::HostRequest { id: x, kind: HostRequestKind::SignMembership { device, operation: OwnerOperation::Change } } if x == id && device == B)
     });
     assert!(asked);
-    let before = sim.node(B).unwrap().state().checkpoint;
+    let before = sim.node(B).unwrap().state().unwrap().checkpoint;
     sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Approve).unwrap();
     sim.settle().unwrap();
-    assert!(sim.node(B).unwrap().state().checkpoint > before);
+    assert!(sim.node(B).unwrap().state().unwrap().checkpoint > before);
     sim.node(A).unwrap().invoke(B, act(1), b"", InvokeOptions::default()).unwrap();
     sim.settle().unwrap();
     assert!(matches!(outcomes(&sim.drain_events(A))[..], [CallOutcome::Replied { code: ResultCode::NO_RIGHT, .. }]));
@@ -709,7 +710,7 @@ fn owner_operations_need_the_root_key_confirmation() {
     let id = sim.node(ROOT).unwrap().revoke(B).unwrap();
     sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Refuse).unwrap();
     sim.settle().unwrap();
-    assert!(sim.node(A).unwrap().state().members.iter().any(|m| m.device == B));
+    assert!(sim.node(A).unwrap().state().unwrap().members.iter().any(|m| m.device == B));
 }
 
 // ------------------------------------------------------------------------- streams
@@ -1143,4 +1144,265 @@ fn the_root_signs_application_data_and_every_node_verifies_it() {
         bad[0] ^= 1;
         assert_eq!(node.verify_app_data("settings", settings, &bad).unwrap_err().code(), RuleCode::MEM_APP_SIGNATURE);
     }
+}
+
+// ------------------------------------------------------------------ enrollment
+
+const NEW: DeviceId = DeviceId::from_u64(9);
+
+/// Root and an acceptor A, linked; NEW is not on the bus and is linked to `near`.
+fn before_pairing(near: DeviceId, profile: Profile) -> Sim {
+    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), profile, ..Config::default() }, ROOT);
+    sim.admit(A, Rights { accept: true, ..Rights::MEMBER }, false, Vec::new());
+    sim.link(ROOT, A);
+    assert!(sim.add_device(NEW, true));
+    sim.link(near, NEW);
+    sim.settle().unwrap();
+    sim.drain_events(ROOT);
+    sim.drain_events(A);
+    sim
+}
+
+fn pairing_results(events: &[Event]) -> Vec<Result<Paired, RuleCode>> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::PairingFinished { result, .. } => Some(result.clone().map_err(|r| r.code())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn join_requests(events: &[Event]) -> Vec<(JoinRequestId, DeviceId, String, DeviceId, Fingerprint, bool)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::JoinRequested { request, device, name, acceptor, fingerprint, presence } => {
+                Some((*request, *device, name.clone(), *acceptor, *fingerprint, *presence))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_member(sim: &mut Sim, at: DeviceId, d: DeviceId) -> bool {
+    sim.node(at).unwrap().state().is_some_and(|s| s.members.iter().any(|m| m.device == d))
+}
+
+/// The owner confirms the admission on the root device.
+fn admit(sim: &mut Sim, request: JoinRequestId, rights: Rights) {
+    let host = sim.node(ROOT).unwrap().admit(request, rights, Vec::new()).unwrap();
+    let asked = sim.drain_events(ROOT);
+    assert!(asked.iter().any(|e| matches!(
+        e,
+        Event::HostRequest { id, kind: HostRequestKind::SignMembership { device, operation: OwnerOperation::Admit } }
+            if *id == host && *device == NEW
+    )));
+    sim.node(ROOT).unwrap().answer_host(host, HostAnswer::Approve).unwrap();
+    sim.settle().unwrap();
+}
+
+#[test]
+fn a_device_joins_through_an_acceptor() {
+    let mut sim = before_pairing(A, Profile::default());
+    // Before pairing the device has no bus: no state, and bus operations are refused.
+    assert!(sim.node(NEW).unwrap().state().is_none());
+    assert_eq!(sim.node(NEW).unwrap().publish(CH, b"x", 1).unwrap_err().code(), RuleCode::API_NO_BUS);
+    sim.node(NEW).unwrap().set_name("kitchen display").unwrap();
+
+    // The acceptor shows a short code; the person enters it on the new device.
+    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+    assert!(matches!(code, PairingCode::Short(n) if n <= 999_999));
+    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+
+    let shown = sim.node(NEW).unwrap().device_fingerprint();
+    let bus = sim.node(ROOT).unwrap().state().unwrap().bus;
+    assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Ok(Paired::Joiner { bus })]);
+    let at_acceptor = pairing_results(&sim.drain_events(A));
+    assert_eq!(at_acceptor, vec![Ok(Paired::Acceptor { name: "kitchen display".into(), fingerprint: shown })]);
+    // Paired is not admitted: the device knows the bus and is not a member (R-JOIN-6).
+    assert!(sim.node(NEW).unwrap().state().is_some());
+    assert!(!is_member(&mut sim, NEW, NEW));
+    assert!(!is_member(&mut sim, ROOT, NEW));
+
+    // The Root shows the name, the acceptor and the fingerprint the joiner shows (R-JOIN-5).
+    let requests = join_requests(&sim.drain_events(ROOT));
+    assert_eq!(requests.len(), 1);
+    let (request, device, name, acceptor, fingerprint, presence) = requests[0].clone();
+    assert_eq!((device, name.as_str(), acceptor, presence), (NEW, "kitchen display", A, true));
+    assert_eq!(fingerprint, shown);
+    assert_eq!(shown.to_string().len(), 23);
+
+    admit(&mut sim, request, Rights::MEMBER);
+    for at in [ROOT, A, NEW] {
+        assert!(is_member(&mut sim, at, NEW), "at {at}");
+    }
+    let state = sim.node(NEW).unwrap().state().unwrap();
+    assert_eq!(state.fingerprint, sim.node(ROOT).unwrap().state().unwrap().fingerprint);
+    let me = state.members.into_iter().find(|m| m.device == NEW).unwrap();
+    assert!(me.presence && me.rights == Rights::MEMBER);
+    // The new member announces the name it proposed (R-CH-16).
+    sim.node(A).unwrap().subscribe(NEW, Channel::NODE_INFO).unwrap();
+    sim.settle().unwrap();
+    assert!(sim.drain_events(A).iter().any(|e| matches!(
+        e, Event::NodeInfo { device, name, .. } if *device == NEW && name == "kitchen display"
+    )));
+    // The request is answered: it cannot be used again.
+    let again = sim.node(ROOT).unwrap().admit(request, Rights::MEMBER, Vec::new());
+    assert_eq!(again.unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+#[test]
+fn the_root_pairs_a_device_itself_and_the_joiner_may_show_the_code() {
+    let mut sim = before_pairing(ROOT, Profile::default());
+    // Only the joiner has a screen: it shows a QR code and the Root takes it (R-JOIN-9).
+    let (_, code) = sim.node(NEW).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    assert!(matches!(code, PairingCode::Qr(_)));
+    sim.settle().unwrap();
+    sim.node(ROOT).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    let requests = join_requests(&sim.drain_events(ROOT));
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].3, ROOT);
+    admit(&mut sim, requests[0].0, Rights::READER);
+    assert!(is_member(&mut sim, NEW, NEW));
+}
+
+#[test]
+fn a_declined_request_admits_nobody() {
+    let mut sim = before_pairing(A, Profile::default());
+    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    let request = join_requests(&sim.drain_events(ROOT))[0].0;
+    // Only the root device answers a request.
+    assert_eq!(sim.node(A).unwrap().decline_join(request).unwrap_err().code(), RuleCode::API_NOT_ROOT);
+    assert_eq!(
+        sim.node(A).unwrap().admit(request, Rights::MEMBER, Vec::new()).unwrap_err().code(),
+        RuleCode::API_NOT_ROOT
+    );
+    // The owner starts to admit and declines at the root key: nothing is signed.
+    let host = sim.node(ROOT).unwrap().admit(request, Rights::MEMBER, Vec::new()).unwrap();
+    sim.node(ROOT).unwrap().answer_host(host, HostAnswer::Refuse).unwrap();
+    sim.settle().unwrap();
+    assert!(!is_member(&mut sim, ROOT, NEW));
+    sim.node(ROOT).unwrap().decline_join(request).unwrap();
+    assert_eq!(sim.node(ROOT).unwrap().decline_join(request).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    sim.settle().unwrap();
+    assert!(!is_member(&mut sim, NEW, NEW));
+}
+
+/// Another code of the same form; different `k` below a million give different codes.
+fn wrong(code: PairingCode, k: u8) -> PairingCode {
+    match code {
+        PairingCode::Short(n) => PairingCode::Short(n.wrapping_add(u32::from(k)).checked_rem(1_000_000).unwrap()),
+        PairingCode::Qr(mut b) => {
+            b[0] ^= k;
+            PairingCode::Qr(b)
+        }
+    }
+}
+
+#[test]
+fn a_shown_code_allows_a_bounded_number_of_runs() {
+    let mut sim = before_pairing(A, Profile::default());
+    let (pairing, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+    let mut left = Vec::new();
+    for bad in [wrong(code, 1), wrong(code, 2), wrong(code, 3)] {
+        sim.node(NEW).unwrap().enter_pairing_code(bad).unwrap();
+        sim.settle().unwrap();
+        assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(RuleCode::JOIN_WRONG_CODE)]);
+        left.extend(sim.drain_events(A));
+    }
+    // Two failed runs leave the code armed; the third spends it (R-JOIN-3).
+    let attempts: Vec<u8> = left
+        .iter()
+        .filter_map(|e| match e {
+            Event::PairingAttemptFailed { pairing: p, attempts_left } if *p == pairing => Some(*attempts_left),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attempts, vec![2, 1]);
+    assert_eq!(pairing_results(&left), vec![Err(RuleCode::JOIN_ATTEMPTS)]);
+    // The right code comes too late: nobody answers, and no request is made.
+    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    assert!(sim.node(NEW).unwrap().state().is_none());
+    assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
+}
+
+#[test]
+fn an_entered_code_is_refused_after_its_runs() {
+    let mut sim = before_pairing(A, Profile { pairing_attempts: 2, ..Profile::default() });
+    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+    // The person enters the same wrong code twice on the new device.
+    let typo = wrong(code, 1);
+    for expected in [RuleCode::JOIN_WRONG_CODE, RuleCode::JOIN_ATTEMPTS] {
+        sim.node(NEW).unwrap().enter_pairing_code(typo).unwrap();
+        sim.settle().unwrap();
+        assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(expected)]);
+    }
+    // The new device counted its runs with that code and refuses it (R-JOIN-3).
+    assert_eq!(sim.node(NEW).unwrap().enter_pairing_code(typo).unwrap_err().code(), RuleCode::JOIN_ATTEMPTS);
+    // Another code starts its own count.
+    sim.node(NEW).unwrap().enter_pairing_code(wrong(code, 2)).unwrap();
+}
+
+#[test]
+fn pairing_arguments_and_rights_are_checked() {
+    let mut sim = before_pairing(A, Profile::default());
+    sim.admit(B, Rights::MEMBER, false, Vec::new());
+    sim.settle().unwrap();
+    // A member without the accept right does not pair (R-JOIN-4).
+    assert_eq!(sim.node(B).unwrap().show_pairing_code(CodeForm::Qr).unwrap_err().code(), RuleCode::JOIN_NO_RIGHT);
+    let bad = sim.node(A).unwrap().enter_pairing_code(PairingCode::Short(1_000_000));
+    assert_eq!(bad.unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
+    let (pairing, _) = sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    // One pairing at a time.
+    assert_eq!(sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap_err().code(), RuleCode::JOIN_BUSY);
+    sim.node(A).unwrap().cancel_pairing(pairing).unwrap();
+    assert_eq!(sim.node(A).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+}
+
+#[test]
+fn a_relay_holds_join_requests_while_the_root_is_away() {
+    let profile = Profile { join_buffer: 1, ..Profile::default() };
+    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), profile, ..Config::default() }, ROOT);
+    sim.admit(A, Rights { accept: true, ..Rights::MEMBER }, false, Vec::new());
+    sim.admit(RELAY, Rights { relay: true, ..Rights::MEMBER }, false, Vec::new());
+    sim.link(A, RELAY);
+    sim.add_device(NEW, false);
+    sim.add_device(B, false);
+    sim.link(A, NEW);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    for d in [NEW, B] {
+        let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+        sim.node(d).unwrap().enter_pairing_code(code).unwrap();
+        sim.settle().unwrap();
+        assert!(sim.node(d).unwrap().state().is_some(), "{d} paired");
+    }
+    // The Root comes back to the relay: of two requests the relay kept the newest (R-JOIN-8).
+    sim.link(ROOT, RELAY);
+    sim.settle().unwrap();
+    let requests = join_requests(&sim.drain_events(ROOT));
+    assert_eq!(requests.iter().map(|r| r.1).collect::<Vec<_>>(), vec![B]);
+    assert!(sim.log().iter().any(|l| l.contains("evicted the oldest join request")));
+}
+
+#[test]
+fn a_reboot_forgets_a_pairing_in_progress() {
+    let mut sim = before_pairing(A, Profile::default());
+    let (pairing, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+    sim.reboot(A);
+    assert_eq!(sim.node(A).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    sim.link(A, NEW);
+    sim.link(ROOT, A);
+    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    // The code died with the reboot: the new device is still waiting, unpaired.
+    assert!(sim.node(NEW).unwrap().state().is_none());
+    assert!(pairing_results(&sim.drain_events(NEW)).is_empty());
 }

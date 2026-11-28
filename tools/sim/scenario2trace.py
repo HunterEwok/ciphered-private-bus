@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts the scenario runs of the channels, calls and streams models into replay traces.
+"""Converts the scenario runs of the channels, calls, streams and enrollment models into replay traces.
 
 `quint test --out-itf` writes the states of a run but not the actions that led to them, so
 the actions are read from the run's `.then(...)` steps in scenarios.qnt. The module named by
@@ -181,6 +181,22 @@ def line(model: str, text: str, vals: dict, prev: dict, cur: dict, pre: str) -> 
         return stream_line(text, vals, cur, pre)
     n, a = Parser(text, vals).call()
     v = itf2trace.val
+    if model == "enrollment":
+        if n == "pairHonest":
+            return f"{n} {a[0]} {a[1]}"
+        if n == "advPairJoiner":
+            return f"{n} {a[0]} {b(a[1])}"
+        if n == "advPairAcceptor":
+            return f"{n} {a[0]} {a[1]} {b(a[2])}"
+        if n == "joinerSend":
+            return f"{n} {a[0]}"
+        if n == "acceptorRequest":
+            return f"{n} {a[0]} {a[1]['tid']} {itf2trace.en_payload(a[2])}"
+        if n == "badRequest":
+            return f"{n} {a[0]} {a[1]} {a[2]} {a[3]} {itf2trace.en_payload(a[4])}"
+        if n == "rootAdmit":
+            return f"{n} {itf2trace.en_request(a[0])} {a[1]}"
+        raise SystemExit(f"unsupported step {n}{a}")
     if model == "channels":
         if n == "sourceGrantTo":
             return f"sourceGrant {a[0]}"

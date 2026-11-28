@@ -8,5 +8,6 @@
 
 pub mod calls;
 pub mod channels;
+pub mod enrollment;
 pub mod membership;
 pub mod streams;

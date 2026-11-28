@@ -53,6 +53,8 @@ pub const DEFAULT_INITIAL_CREDIT: u32 = 16 << 10;
 pub const MAX_APP_TAG: usize = 64;
 /// Largest message of a reply, in bytes of UTF-8 (Appendix B, Section B.6).
 pub const MAX_MESSAGE: usize = 256;
+/// The highest short pairing code: 6 decimal digits (Section 13.1).
+pub const MAX_SHORT_CODE: u32 = 999_999;
 /// Highest number of segments of a blob: the segment number is a 4-byte AEAD nonce
 /// (Appendix B, Section B.5).
 pub const MAX_BLOB_SEGMENTS: u32 = 0x7fff_ffff;
@@ -254,6 +256,68 @@ pub struct HostRequestId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct StreamId(pub u64);
 
+/// A pairing in progress on this node.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct PairingId(pub u64);
+
+/// A join request waiting for the owner on the root device.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct JoinRequestId(pub u64);
+
+/// A fingerprint a person compares on two screens: 64 bits of a hash, shown as 20 decimal
+/// digits in groups of five (R-JOIN-5, Appendix B, Sections B.8 and B.11).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Fingerprint(pub u64);
+
+impl fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 2^64 - 1 has 20 decimal digits: four groups of five, the highest first.
+        const GROUP: u64 = 100_000;
+        let n = self.0;
+        let groups = [n / (GROUP * GROUP * GROUP), n / (GROUP * GROUP) % GROUP, n / GROUP % GROUP, n % GROUP];
+        write!(f, "{:05} {:05} {:05} {:05}", groups[0], groups[1], groups[2], groups[3])
+    }
+}
+
+/// The form of a pairing code (R-JOIN-1).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CodeForm {
+    /// 16 random bytes for an on-screen QR code; one attempt.
+    Qr,
+    /// 6 decimal digits a person carries from one device to the other.
+    Short,
+}
+
+/// A pairing code (R-JOIN-1). It is a password: the application shows it to the person in
+/// front of the device, or takes it from them, and keeps it nowhere.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PairingCode {
+    /// The 16 bytes of a QR code.
+    Qr([u8; 16]),
+    /// A short code, 0 to [`MAX_SHORT_CODE`], shown with leading zeros.
+    Short(u32),
+}
+
+/// What a completed pairing gave this node.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Paired {
+    /// This node was the joiner. It knows the bus and its records, and it becomes a member
+    /// when the owner admits it: [`Event::MembershipChanged`] follows, and
+    /// [`LocalApi::state`] then lists this device.
+    Joiner {
+        /// The bus identifier.
+        bus: [u8; 32],
+    },
+    /// This node accepted a joiner, and its join request is on the way to the Root. On the
+    /// root device the request arrives as [`Event::JoinRequested`] at once (R-JOIN-9).
+    Acceptor {
+        /// The name the joiner proposed.
+        name: String,
+        /// The fingerprint of the joiner's device key.
+        fingerprint: Fingerprint,
+    },
+}
+
 /// The mode of a stream, named in the call (R-STR-3).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum StreamMode {
@@ -407,6 +471,8 @@ pub enum HostRequestKind {
 /// An owner's operation on the root device (R-API-2).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum OwnerOperation {
+    /// The first passport of a device, in answer to its join request, and a checkpoint.
+    Admit,
     /// A new passport with other rights or permits, and a checkpoint that clears the old one.
     Change,
     /// A checkpoint that clears the device's passport.
@@ -530,6 +596,41 @@ pub enum Event {
         /// What is asked.
         kind: HostRequestKind,
     },
+    /// A pairing run failed on the node that shows the code, and the code is still good for
+    /// `attempts_left` more runs (R-JOIN-3).
+    PairingAttemptFailed {
+        /// The pairing.
+        pairing: PairingId,
+        /// Runs the code still allows, at least 1.
+        attempts_left: u8,
+    },
+    /// A pairing ended: the two devices are paired, or the pairing stopped for the reason
+    /// given and its code is spent. A pairing the application cancelled raises no event.
+    PairingFinished {
+        /// The pairing.
+        pairing: PairingId,
+        /// How it ended.
+        result: Result<Paired, Report>,
+    },
+    /// On the root device: a join request with a valid joiner's signature waits for the
+    /// owner (R-JOIN-5). The application shows the name, the acceptor and the fingerprint,
+    /// and asks the owner to compare the fingerprint with the one on the joiner's screen
+    /// before [`LocalApi::admit`] (R-JOIN-7).
+    JoinRequested {
+        /// The handle for [`LocalApi::admit`] and [`LocalApi::decline_join`].
+        request: JoinRequestId,
+        /// The joiner.
+        device: DeviceId,
+        /// The name the joiner proposed.
+        name: String,
+        /// The member that accepted the request; the root device itself if it paired the
+        /// joiner directly (R-JOIN-9).
+        acceptor: DeviceId,
+        /// The fingerprint of the joiner's device key.
+        fingerprint: Fingerprint,
+        /// Whether the joiner has a user-presence key; the passport will name it.
+        presence: bool,
+    },
     /// A request of [`LocalApi::sign_app_data`] ended.
     AppDataSigned {
         /// The request.
@@ -565,6 +666,8 @@ pub struct Member {
 pub struct BusState {
     /// The bus identifier.
     pub bus: [u8; 32],
+    /// The fingerprint of the bus, which a joiner shows after admission (R-JOIN-7).
+    pub fingerprint: Fingerprint,
     /// This device.
     pub device: DeviceId,
     /// The root generation.
@@ -759,7 +862,41 @@ pub trait LocalApi {
     fn set_app_info(&mut self, app: &[u8]) -> Result<(), Report>;
 
     /// A snapshot of the bus state.
-    fn state(&self) -> BusState;
+    ///
+    /// `None` on a node that is not on a bus yet: it has not completed a pairing. After the
+    /// pairing the node knows the bus, and it is a member once `members` lists its device.
+    fn state(&self) -> Option<BusState>;
+
+    /// This device.
+    fn device(&self) -> DeviceId;
+
+    /// The fingerprint of this device's key. A joiner shows it while it waits for the owner,
+    /// who compares it with the one on the root device (R-JOIN-7).
+    fn device_fingerprint(&self) -> Fingerprint;
+
+    /// Starts a pairing with a code the core generates, for the application to show on this
+    /// device's screen (R-JOIN-1). A node that is not on a bus pairs as the joiner; a member
+    /// pairs as the acceptor and needs the accept right. The joiner starts the exchange on
+    /// every connected link; the acceptor answers on any link. A node has one pairing at a
+    /// time. The code allows a profile number of runs (R-JOIN-3), a QR code one.
+    ///
+    /// # Errors
+    /// `join/busy`, `join/no-right`, `mem/halted`.
+    fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report>;
+
+    /// Starts a pairing with the code shown on the other device and entered here. The roles
+    /// and the rules are those of [`LocalApi::show_pairing_code`]. The node counts the runs
+    /// with one code and refuses the code once they are spent (R-JOIN-3).
+    ///
+    /// # Errors
+    /// `join/busy`, `join/no-right`, `join/bad-code`, `join/attempts`, `mem/halted`.
+    fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report>;
+
+    /// Cancels a pairing. A code this node showed is spent.
+    ///
+    /// # Errors
+    /// `api/unknown-id`.
+    fn cancel_pairing(&mut self, pairing: PairingId) -> Result<(), Report>;
 
     /// The next event, if any.
     fn poll_event(&mut self) -> Option<Event>;
@@ -769,6 +906,20 @@ pub trait LocalApi {
     /// # Errors
     /// `api/unknown-id`.
     fn answer_host(&mut self, id: HostRequestId, answer: HostAnswer) -> Result<(), Report>;
+
+    /// On the root device: admits the joiner of a join request with the given rights and
+    /// permits (R-JOIN-5). The user-presence key is the one the joiner signed. The passport
+    /// and the checkpoint are signed after the host confirms the request returned here.
+    ///
+    /// # Errors
+    /// `api/not-root`, `api/unknown-id`, `mem/halted`.
+    fn admit(&mut self, request: JoinRequestId, rights: Rights, permits: Vec<Permit>) -> Result<HostRequestId, Report>;
+
+    /// On the root device: declines a join request. Nothing is signed.
+    ///
+    /// # Errors
+    /// `api/not-root`, `api/unknown-id`.
+    fn decline_join(&mut self, request: JoinRequestId) -> Result<(), Report>;
 
     /// On the root device: changes a member's rights, user-presence key and permits (R-MEM-4).
     /// The records are signed after the host confirms the request returned here.

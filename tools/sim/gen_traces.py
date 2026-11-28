@@ -52,6 +52,11 @@ MODELS = {
         "scenario_modules": ["scenarios", "scenarios_reset"],
         "rare": {"commanderReply": 4, "sendChunk": 3, "overrun": 2, "resetNonces": 2},
     },
+    "enrollment": {
+        "consts": "joiners=j1,j2 presence=j1 acceptors=h,root limit=2 max_tid=6",
+        "scenario_consts": "joiners=j1 presence=j1 acceptors=h limit=2 max_tid=4",
+        "rare": {"rootAdmit": 4, "acceptorRequest": 3, "joinerSend": 2, "badRequest": 1},
+    },
 }
 
 

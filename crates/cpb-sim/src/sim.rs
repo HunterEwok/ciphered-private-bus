@@ -6,8 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestId,
-    IncomingId, InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights, StreamId,
+    Action, BlobWriteId, BusState, CallId, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, Fingerprint,
+    HostAnswer, HostRequestId, IncomingId, InvokeOptions, JoinRequestId, LocalApi, PairingCode, PairingId, Permit,
+    Publication, Readers, Report, ResultCode, Rights, StreamId,
 };
 
 use crate::engine::membership::{Root, View};
@@ -68,9 +69,10 @@ fn edge(a: DeviceId, b: DeviceId) -> (DeviceId, DeviceId) {
 
 /// Several bus nodes in one process.
 ///
-/// Owner operations (admit, change, revoke) are methods of the simulator until enrollment
-/// arrives in M2. Everything an application does goes through [`Sim::node`] and the
-/// [`LocalApi`] trait.
+/// Everything an application does goes through [`Sim::node`] and the [`LocalApi`] trait,
+/// enrollment included: [`Sim::add_device`] gives a device that is not on the bus, and it
+/// joins by pairing. [`Sim::admit`] and [`Sim::revoke`] are shortcuts for tests that are not
+/// about enrollment.
 #[derive(Debug)]
 pub struct Sim {
     config: Config,
@@ -153,9 +155,20 @@ impl Sim {
         true
     }
 
-    /// The owner admits a device: the Root issues its passport and a checkpoint. A device not
-    /// yet simulated gets a node that starts with the records it would receive at the end of
-    /// enrollment.
+    /// A device that is not on the bus: it has its keys, with a user-presence key if
+    /// `presence`, and joins by pairing (Section 7). Returns false if the device exists.
+    pub fn add_device(&mut self, device: DeviceId, presence: bool) -> bool {
+        if self.nodes.contains_key(&device) {
+            return false;
+        }
+        let seed = self.rng.next_u64();
+        self.nodes.insert(device, Node::unpaired(device, presence, self.config.profile, self.mode, seed));
+        true
+    }
+
+    /// The owner admits a device without enrollment: the Root issues its passport and a
+    /// checkpoint. A device not yet simulated gets a node that starts with the records it
+    /// would receive at the end of enrollment.
     pub fn admit(&mut self, device: DeviceId, rights: Rights, presence: bool, permits: Vec<Permit>) {
         self.owner_records(|r| {
             let (p, c) = r.issue(device, rights, presence, permits);
@@ -426,32 +439,33 @@ impl NodeApi<'_> {
     fn gone(&self) -> Report {
         Report::new(cpb_api::RuleCode::API_UNKNOWN_ID, format!("no node {}", self.id))
     }
+
+    /// An operation that needs a bus (R-API-2).
+    fn on_bus<T>(&mut self, f: impl FnOnce(&mut Node) -> Result<T, Report>) -> Result<T, Report> {
+        let e = self.gone();
+        self.with(|n| n.needs_bus().and_then(|()| f(n))).unwrap_or(Err(e))
+    }
 }
 
 impl LocalApi for NodeApi<'_> {
     fn publish(&mut self, channel: Channel, data: &[u8], depth: u16) -> Result<u64, Report> {
-        let e = self.gone();
-        self.with(|n| n.publish(channel, data, depth)).unwrap_or(Err(e))
+        self.on_bus(|n| n.publish(channel, data, depth))
     }
 
     fn begin_blob(&mut self, channel: Channel, data: &[u8], depth: u16) -> Result<BlobWriteId, Report> {
-        let e = self.gone();
-        self.with(|n| n.begin_blob(channel, data, depth)).unwrap_or(Err(e))
+        self.on_bus(|n| n.begin_blob(channel, data, depth))
     }
 
     fn write_blob(&mut self, id: BlobWriteId, bytes: &[u8]) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.write_blob(id, bytes)).unwrap_or(Err(e))
+        self.on_bus(|n| n.write_blob(id, bytes))
     }
 
     fn finish_blob(&mut self, id: BlobWriteId) -> Result<u64, Report> {
-        let e = self.gone();
-        self.with(|n| n.finish_blob(id)).unwrap_or(Err(e))
+        self.on_bus(|n| n.finish_blob(id))
     }
 
     fn abort_blob(&mut self, id: BlobWriteId) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.abort_blob(id)).unwrap_or(Err(e))
+        self.on_bus(|n| n.abort_blob(id))
     }
 
     fn fetch_blob(
@@ -462,13 +476,11 @@ impl LocalApi for NodeApi<'_> {
         first: u32,
         count: u32,
     ) -> Result<FetchId, Report> {
-        let e = self.gone();
-        self.with(|n| n.fetch_blob(source, channel, number, first, count)).unwrap_or(Err(e))
+        self.on_bus(|n| n.fetch_blob(source, channel, number, first, count))
     }
 
     fn cancel_fetch(&mut self, fetch: FetchId) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.cancel_fetch(fetch)).unwrap_or(Err(e))
+        self.on_bus(|n| n.cancel_fetch(fetch))
     }
 
     fn read(&self, source: DeviceId, channel: Channel) -> Vec<Publication> {
@@ -476,18 +488,15 @@ impl LocalApi for NodeApi<'_> {
     }
 
     fn subscribe(&mut self, source: DeviceId, channel: Channel) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.subscribe(source, channel)).unwrap_or(Err(e))
+        self.on_bus(|n| n.subscribe(source, channel))
     }
 
     fn set_readers(&mut self, channel: Channel, readers: Readers) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.set_readers(channel, readers)).unwrap_or(Err(e))
+        self.on_bus(|n| n.set_readers(channel, readers))
     }
 
     fn rotate_channel_key(&mut self, channel: Channel) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.rotate_channel_key(channel)).unwrap_or(Err(e))
+        self.on_bus(|n| n.rotate_channel_key(channel))
     }
 
     fn invoke(
@@ -497,13 +506,11 @@ impl LocalApi for NodeApi<'_> {
         args: &[u8],
         options: InvokeOptions,
     ) -> Result<CallId, Report> {
-        let e = self.gone();
-        self.with(|n| n.invoke(target, action, args, options)).unwrap_or(Err(e))
+        self.on_bus(|n| n.invoke(target, action, args, options))
     }
 
     fn reply(&mut self, call: IncomingId, code: ResultCode, message: &str, data: &[u8]) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.reply(call, code, message, data)).unwrap_or(Err(e))
+        self.on_bus(|n| n.reply(call, code, message, data))
     }
 
     fn reply_with_stream(
@@ -514,23 +521,19 @@ impl LocalApi for NodeApi<'_> {
         data: &[u8],
         credit: u32,
     ) -> Result<StreamId, Report> {
-        let e = self.gone();
-        self.with(|n| n.reply_with_stream(call, code, message, data, credit)).unwrap_or(Err(e))
+        self.on_bus(|n| n.reply_with_stream(call, code, message, data, credit))
     }
 
     fn stream_write(&mut self, stream: StreamId, data: &[u8]) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.stream_write(stream, data)).unwrap_or(Err(e))
+        self.on_bus(|n| n.stream_write(stream, data))
     }
 
     fn stream_grant(&mut self, stream: StreamId, bytes: u32) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.stream_grant(stream, bytes)).unwrap_or(Err(e))
+        self.on_bus(|n| n.stream_grant(stream, bytes))
     }
 
     fn stream_end(&mut self, stream: StreamId) -> Result<(), Report> {
-        let e = self.gone();
-        self.with(|n| n.stream_end(stream)).unwrap_or(Err(e))
+        self.on_bus(|n| n.stream_end(stream))
     }
 
     fn register_action(&mut self, action: Action) {
@@ -547,21 +550,39 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.set_app_info(app)).unwrap_or(Err(e))
     }
 
-    fn state(&self) -> BusState {
-        self.sim.nodes.get(&self.id).map_or_else(
-            || BusState {
-                bus: self.sim.bus,
-                device: self.id,
-                generation: 0,
-                checkpoint: 0,
-                root_device: self.sim.root_device,
-                halted: false,
-                members: Vec::new(),
-                links: Vec::new(),
-                memory_used: 0,
-            },
-            Node::state,
-        )
+    fn state(&self) -> Option<BusState> {
+        self.sim.nodes.get(&self.id).and_then(Node::state)
+    }
+
+    fn device(&self) -> DeviceId {
+        self.id
+    }
+
+    fn device_fingerprint(&self) -> Fingerprint {
+        self.sim.nodes.get(&self.id).map_or(Fingerprint(0), Node::fingerprint)
+    }
+
+    fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report> {
+        let e = self.gone();
+        self.with(|n| n.show_pairing_code(form)).unwrap_or(Err(e))
+    }
+
+    fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report> {
+        let e = self.gone();
+        self.with(|n| n.enter_pairing_code(code)).unwrap_or(Err(e))
+    }
+
+    fn cancel_pairing(&mut self, pairing: PairingId) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.cancel_pairing(pairing)).unwrap_or(Err(e))
+    }
+
+    fn admit(&mut self, request: JoinRequestId, rights: Rights, permits: Vec<Permit>) -> Result<HostRequestId, Report> {
+        self.on_bus(|n| n.admit(request, rights, permits))
+    }
+
+    fn decline_join(&mut self, request: JoinRequestId) -> Result<(), Report> {
+        self.on_bus(|n| n.decline_join(request))
     }
 
     fn poll_event(&mut self) -> Option<Event> {
@@ -580,24 +601,21 @@ impl LocalApi for NodeApi<'_> {
         presence: bool,
         permits: Vec<Permit>,
     ) -> Result<HostRequestId, Report> {
-        let e = self.gone();
-        self.with(|n| n.change_member(device, rights, presence, permits)).unwrap_or(Err(e))
+        self.on_bus(|n| n.change_member(device, rights, presence, permits))
     }
 
     fn sign_app_data(&mut self, tag: &str, data: &[u8]) -> Result<HostRequestId, Report> {
-        let e = self.gone();
-        self.with(|n| n.sign_app_data(tag, data)).unwrap_or(Err(e))
+        self.on_bus(|n| n.sign_app_data(tag, data))
     }
 
     fn verify_app_data(&self, tag: &str, data: &[u8], signature: &[u8]) -> Result<(), Report> {
         match self.sim.nodes.get(&self.id) {
-            Some(n) => n.verify_app_data(tag, data, signature),
+            Some(n) => n.needs_bus().and_then(|()| n.verify_app_data(tag, data, signature)),
             None => Err(self.gone()),
         }
     }
 
     fn revoke(&mut self, device: DeviceId) -> Result<HostRequestId, Report> {
-        let e = self.gone();
-        self.with(|n| n.revoke(device)).unwrap_or(Err(e))
+        self.on_bus(|n| n.revoke(device))
     }
 }

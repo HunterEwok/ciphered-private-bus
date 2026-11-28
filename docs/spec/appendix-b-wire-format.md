@@ -1044,6 +1044,17 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
    successful run or when the attempts are exhausted.
 6. The joiner's rights (read, publish, permits) are set by the owner on the Root's screen. How this
    choice is presented is decided by the application.
+7. A device has one code at a time, because `PairInit` does not say which code it answers. A joiner
+   with a code sends `PairInit` on every link it has and on every link that comes up. A member that
+   receives `PairInit` while it has no code keeps it, the latest one per link, until the link goes
+   down, and answers it when it gets a code. This serves the joiner that shows the code: it starts the
+   exchange before the owner has entered the code on the acceptor.
+8. The party where a code was entered counts its runs per code: entering the same code again
+   continues the count, and another code starts a new one.
+9. An acceptor keeps a join request it prepared until it has sent it to the Root or to a relay. The
+   Root keeps the requests that wait for the owner. Both buffers have the bound of the relay's join
+   buffer (Section 13.2 of the requirements specification) and evict the oldest request on overflow.
+   None of them survives a reboot (R-CORE-5).
 
 ### Decisions in This Section
 
@@ -1055,3 +1066,5 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
    else's key as its own.
 4. There is no separate "join declined" object.
 5. The joiner fetches its passport with an ordinary hello; there is no dedicated message for it.
+6. An early `PairInit` waits for the acceptor's code instead of being refused, so the order in which
+   the two devices get the code does not matter.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts Quint ITF traces of the channels, calls and streams models into replay traces.
+"""Converts Quint ITF traces of the channels, calls, streams and enrollment models into replay traces.
 
 A replay trace is plain text: a header with the instance constants, then for every step of
 the model one line with the action and its arguments, followed by lines with the projected
@@ -191,8 +191,52 @@ def st_step(st: dict, pre: str) -> str:
     raise SystemExit(f"unknown streams action {a}")
 
 
-STATE = {"channels": ch_state, "calls": cl_state, "streams": st_state}
-STEP = {"channels": ch_step, "calls": cl_step, "streams": st_step}
+# ----------------------------------------------------------------------- enrollment
+
+def en_payload(p: dict) -> str:
+    return f"{p['key']}:{p['presence']}:{p['name']}:{p['tid']}"
+
+
+def en_request(r: dict) -> str:
+    return f"{r['key']}:{r['presence']}:{r['name']}:{r['tid']}:{r['acceptor']}/{en_payload(r['signed'])}"
+
+
+def en_state(st: dict, pre: str) -> list[str]:
+    out = [f"= tid {val(st[pre + 'tid'])}"]
+    current, tries = val(st[pre + "current"]), val(st[pre + "joinerTries"])
+    for j in sorted(current):
+        out.append(f"= joiner {j} tries={tries[j]} current={current[j]}")
+    for a, m in sorted(val(st[pre + "acceptorTries"]).items()):
+        out.append(f"= acceptor {a} " + ",".join(f"{j}={n}" for j, n in sorted(m.items())))
+    out.append("= sent " + ",".join(sorted(f"{en_payload(x['p'])}>{x['to']}" for x in val(st[pre + "sent"]))))
+    out.append("= inbox " + ",".join(sorted(en_request(r) for r in val(st[pre + "inbox"]))))
+    out.append("= passports " + ",".join(
+        sorted(f"{x['key']}:{x['presence']}:{x['name']}" for x in val(st[pre + "passports"]))))
+    return out
+
+
+def en_step(st: dict, pre: str) -> str:
+    a = st["mbt::actionTaken"]
+    p = {k: val(v["value"]) for k, v in st["mbt::nondetPicks"].items() if v["tag"] == "Some"}
+    if a == "pairHonest":
+        return f"{a} {p['j']} {p['a']}"
+    if a == "advPairJoiner":
+        return f"{a} {p['j']} {b(p['success'])}"
+    if a == "advPairAcceptor":
+        return f"{a} {p['a']} {p['j']} {b(p['success'])}"
+    if a == "joinerSend":
+        return f"{a} {p['j']}"
+    if a == "acceptorRequest":
+        return f"{a} {p['s']['acceptor']} {p['s']['tid']} {en_payload(p['p'])}"
+    if a == "badRequest":
+        return f"{a} {p['key']} {p['presence']} {p['name']} {p['t']} {en_payload(p['p'])}"
+    if a == "rootAdmit":
+        return f"{a} {en_request(p['r'])} {p['j']}"
+    raise SystemExit(f"unknown enrollment action {a}")
+
+
+STATE = {"channels": ch_state, "calls": cl_state, "streams": st_state, "enrollment": en_state}
+STEP = {"channels": ch_step, "calls": cl_step, "streams": st_step, "enrollment": en_step}
 
 
 def main() -> None:

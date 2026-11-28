@@ -93,6 +93,9 @@ impl RuleCode {
 
     // ------------------------------------------------------------------ interface
 
+    /// An operation that needs a bus on a node that has not joined one.
+    pub const API_NO_BUS: Self =
+        Self::new("api", "no-bus", ErrorKind::Refused, "R-API-2", "This device is not on a bus yet.");
     /// The application tried to use a channel reserved for the bus.
     pub const API_RESERVED_CHANNEL: Self = Self::new(
         "api",
@@ -234,6 +237,47 @@ impl RuleCode {
     pub const MEM_HALTED: Self =
         Self::new("mem", "halted", ErrorKind::Refused, "R-MEM-9", "The bus has stopped and waits for the owner.");
 
+    // ----------------------------------------------------------------- enrollment
+
+    /// The node already has a pairing in progress.
+    pub const JOIN_BUSY: Self =
+        Self::new("join", "busy", ErrorKind::Refused, "R-JOIN-1", "This device is already pairing.");
+    /// A member without the accept right tried to accept a joiner.
+    pub const JOIN_NO_RIGHT: Self =
+        Self::new("join", "no-right", ErrorKind::Refused, "R-JOIN-4", "This device may not add new devices.");
+    /// A short code above 999999.
+    pub const JOIN_BAD_CODE: Self =
+        Self::new("join", "bad-code", ErrorKind::InvalidArgument, "R-JOIN-1", "The code has six digits.");
+    /// A pairing run in which the two sides held different codes.
+    pub const JOIN_WRONG_CODE: Self =
+        Self::new("join", "wrong-code", ErrorKind::Refused, "R-JOIN-3", "The code did not match.");
+    /// The runs a code allows are spent.
+    pub const JOIN_ATTEMPTS: Self =
+        Self::new("join", "attempts", ErrorKind::Refused, "R-JOIN-3", "Too many attempts; a new code is needed.");
+    /// The other side stopped the pairing.
+    pub const JOIN_STOPPED: Self =
+        Self::new("join", "stopped", ErrorKind::Refused, "R-JOIN-1", "The other device stopped the pairing.");
+    /// The joiner's payload was signed in another pairing session.
+    pub const JOIN_TRANSCRIPT: Self = Self::new(
+        "join",
+        "transcript",
+        ErrorKind::Refused,
+        "R-JOIN-4",
+        "The new device's request does not belong to this pairing.",
+    );
+    /// The joiner's signature does not cover the key, the presence key and the name of a
+    /// join request.
+    pub const JOIN_SIGNATURE: Self =
+        Self::new("join", "signature", ErrorKind::Refused, "R-JOIN-4", "A join request was altered on the way.");
+    /// A join request from a device without the accept right.
+    pub const JOIN_NOT_ACCEPTOR: Self = Self::new(
+        "join",
+        "not-acceptor",
+        ErrorKind::Refused,
+        "R-JOIN-4",
+        "A join request came from a device that may not add new devices.",
+    );
+
     // ------------------------------------------------------------------- channels
 
     /// The source of a publication or a grant has no publish right.
@@ -312,6 +356,7 @@ impl RuleCode {
 
 /// Every rule code, in the order of this module.
 pub const ALL: &[RuleCode] = &[
+    RuleCode::API_NO_BUS,
     RuleCode::API_RESERVED_CHANNEL,
     RuleCode::API_DATA_TOO_LARGE,
     RuleCode::API_DEPTH_TOO_LARGE,
@@ -334,6 +379,15 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::MEM_ROOT_KEY_REUSED,
     RuleCode::MEM_APP_SIGNATURE,
     RuleCode::MEM_HALTED,
+    RuleCode::JOIN_BUSY,
+    RuleCode::JOIN_NO_RIGHT,
+    RuleCode::JOIN_BAD_CODE,
+    RuleCode::JOIN_WRONG_CODE,
+    RuleCode::JOIN_ATTEMPTS,
+    RuleCode::JOIN_STOPPED,
+    RuleCode::JOIN_TRANSCRIPT,
+    RuleCode::JOIN_SIGNATURE,
+    RuleCode::JOIN_NOT_ACCEPTOR,
     RuleCode::PUB_NO_RIGHT,
     RuleCode::PUB_NO_KEY,
     RuleCode::PUB_OUTSIDE_WINDOW,

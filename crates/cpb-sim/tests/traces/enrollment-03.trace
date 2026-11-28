@@ -1,0 +1,550 @@
+model enrollment
+const joiners=j1,j2 presence=j1 acceptors=h,root limit=2 max_tid=6
+= tid 0
+= joiner j1 tries=0 current=0
+= joiner j2 tries=0 current=0
+= acceptor h j1=0,j2=0
+= acceptor root j1=0,j2=0
+= sent 
+= inbox 
+= passports 
+advPairJoiner j2 0
+= tid 1
+= joiner j1 tries=0 current=0
+= joiner j2 tries=1 current=0
+= acceptor h j1=0,j2=0
+= acceptor root j1=0,j2=0
+= sent 
+= inbox 
+= passports 
+pairHonest j2 root
+= tid 2
+= joiner j1 tries=0 current=0
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=0,j2=1
+= sent 
+= inbox 
+= passports 
+pairHonest j1 root
+= tid 3
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=1,j2=1
+= sent 
+= inbox 
+= passports 
+badRequest j2 j2 j2 5 adv:j2:j2:3
+= tid 3
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=1,j2=1
+= sent 
+= inbox 
+= passports 
+joinerSend j2
+= tid 3
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=1,j2=1
+= sent j2:none:j2:2>root
+= inbox 
+= passports 
+acceptorRequest root 2 j2:none:j2:2
+= tid 3
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=1,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports 
+rootAdmit j2:none:j2:2:root/j2:none:j2:2 j2
+= tid 3
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=1,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+advPairAcceptor root j1 1
+= tid 4
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest adv j2 adv 1 adv:adv:adv:3
+= tid 4
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j1 j1 adv 3 adv:none:adv:2
+= tid 4
+= joiner j1 tries=1 current=3
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+pairHonest j1 c
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:adv:j2:4
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox adv:adv:j2:4:root/adv:adv:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:none:j2:4
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:adv:j1:4
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+rootAdmit j2:none:j2:2:root/j2:none:j2:2 j2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j2 j1 adv 6 adv:j1:j2:6
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:none:j1:4
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j1 j2 adv 1 adv:j1:j2:5
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest adv j1 j1 4 adv:j1:adv:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j2 adv adv 1 adv:none:j1:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+rootAdmit j2:none:j2:2:root/j2:none:j2:2 j2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j2 none adv 6 adv:j2:j2:1
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j1 adv j2 3 adv:j2:adv:4
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+rootAdmit j2:none:j2:2:root/j2:none:j2:2 j2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest j1 j1 adv 4 adv:j2:adv:1
+= tid 5
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=1
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+advPairAcceptor root j2 1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:adv:j2:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:none:j1:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest adv adv adv 6 adv:none:j2:2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+rootAdmit j2:none:j2:2:root/j2:none:j2:2 j2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 6 adv:j1:j2:6
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:j2:j2:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:adv:j2:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:adv:j2:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest adv j1 j2 3 adv:none:j2:2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 6 adv:none:j2:6
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 6 adv:adv:j1:6
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 6 adv:j1:j1:6
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+badRequest adv adv adv 5 adv:j2:j1:3
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 6 adv:j2:j1:6
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j1:6:root/adv:j2:j1:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+joinerSend j1
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j1:6:root/adv:j2:j1:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 2 j2:none:j2:2
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j1:6:root/adv:j2:j1:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2
+acceptorRequest root 4 adv:none:j2:4
+= tid 6
+= joiner j1 tries=2 current=5
+= joiner j2 tries=2 current=2
+= acceptor h j1=0,j2=0
+= acceptor root j1=2,j2=2
+= sent j1:j1:j1:5>c,j2:none:j2:2>root
+= inbox adv:adv:j1:4:root/adv:adv:j1:4,adv:adv:j1:6:root/adv:adv:j1:6,adv:adv:j2:4:root/adv:adv:j2:4,adv:j1:j1:6:root/adv:j1:j1:6,adv:j1:j2:6:root/adv:j1:j2:6,adv:j2:j1:6:root/adv:j2:j1:6,adv:j2:j2:4:root/adv:j2:j2:4,adv:none:j1:4:root/adv:none:j1:4,adv:none:j2:4:root/adv:none:j2:4,adv:none:j2:6:root/adv:none:j2:6,j2:none:j2:2:root/j2:none:j2:2
+= passports j2:none:j2

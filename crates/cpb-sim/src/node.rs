@@ -19,6 +19,12 @@ use crate::engine::membership::{Change, Checkpoint, Passport, Root, View};
 use crate::engine::streams::{Chunk, Kind, Received, SendError, Side, Table, Taken};
 use crate::rng::Rng;
 
+mod enroll;
+
+use crate::engine::enrollment::{Attempts, Buffer, Payload, Request};
+use cpb_api::{JoinRequestId, PairingCode};
+use enroll::{Bootstrap, Pairing};
+
 /// Profile parameters the simulator uses (Section 13.2).
 #[derive(Clone, Copy, Debug)]
 pub struct Profile {
@@ -37,6 +43,11 @@ pub struct Profile {
     /// Lossy mode: bytes of stream data the core holds for the application; a chunk that
     /// does not fit is dropped (R-STR-3).
     pub stream_buffer: u32,
+    /// Pairing runs one short code allows, 1 to 10 (R-JOIN-3).
+    pub pairing_attempts: u8,
+    /// Join requests a relay holds for the Root, and the Root for the owner, 1 to 256
+    /// (R-JOIN-8).
+    pub join_buffer: u16,
 }
 
 /// The default segment: the 4096-byte segment frame of Section 13.2, less the 38-byte frame
@@ -50,6 +61,12 @@ pub const DEFAULT_STREAM_CHUNK: u32 = 4096 - 46 - 16;
 /// The default limit of open streams per node (Section 13.2).
 pub const DEFAULT_MAX_STREAMS: u16 = 8;
 
+/// The default number of pairing runs per short code (Section 13.2).
+pub const DEFAULT_PAIRING_ATTEMPTS: u8 = 3;
+
+/// The default number of join requests held (Section 13.2).
+pub const DEFAULT_JOIN_BUFFER: u16 = 16;
+
 impl Default for Profile {
     fn default() -> Self {
         Self {
@@ -61,6 +78,8 @@ impl Default for Profile {
             stream_chunk: DEFAULT_STREAM_CHUNK,
             // What an ordered stream holds under the default initial credit.
             stream_buffer: DEFAULT_INITIAL_CREDIT,
+            pairing_attempts: DEFAULT_PAIRING_ATTEMPTS,
+            join_buffer: DEFAULT_JOIN_BUFFER,
         }
     }
 }
@@ -127,6 +146,29 @@ pub(crate) enum Body {
         data: Vec<u8>,
         last: bool,
     },
+    PairInit {
+        nonce: u64,
+    },
+    PairReply {
+        nonce: u64,
+    },
+    /// Stands for the joiner's `CPace` value and confirmation.
+    PairConfirm {
+        code: PairingCode,
+    },
+    /// Stands for the acceptor's confirmation and the sealed `PairBus` that follows it.
+    PairDone {
+        code: PairingCode,
+        bus: [u8; 32],
+    },
+    /// The sealed `PairDevice`.
+    PairDevice {
+        payload: Payload,
+    },
+    PairAbort {
+        code: u8,
+    },
+    JoinRequest(Request),
 }
 
 impl Body {
@@ -152,6 +194,13 @@ impl Body {
             Self::BlobGet { .. } => "BlobGet",
             Self::BlobSegment { .. } => "BlobSegment",
             Self::Chunk { .. } => "StreamChunk",
+            Self::PairInit { .. } => "PairInit",
+            Self::PairReply { .. } => "PairReply",
+            Self::PairConfirm { .. } => "PairConfirm",
+            Self::PairDone { .. } => "PairDone",
+            Self::PairDevice { .. } => "PairDevice",
+            Self::PairAbort { .. } => "PairAbort",
+            Self::JoinRequest(_) => "JoinRequest",
         }
     }
 }
@@ -206,6 +255,7 @@ struct CmdState {
 enum HostWait {
     Call(DeviceId),
     Change { device: DeviceId, rights: Rights, presence: bool, permits: Vec<Permit> },
+    Admit { join: JoinRequestId, rights: Rights, permits: Vec<Permit> },
     AppData { signature: Vec<u8> },
     Revoke(DeviceId),
 }
@@ -267,6 +317,46 @@ struct Open {
     held: u64,
 }
 
+/// The enrollment state of a node: its pairing, and the join requests it holds.
+#[derive(Debug)]
+struct Enrollment {
+    /// The device has a user-presence key, which its join request names.
+    has_presence: bool,
+    /// The node publishes its node info once it is admitted (R-CH-16).
+    announce: bool,
+    pairing: Option<Pairing>,
+    /// The code last entered here and the runs made with it (R-JOIN-3).
+    entered: Option<(PairingCode, Attempts)>,
+    /// `PairInit` nonces of joiners that started before this node had a code.
+    pair_inits: BTreeMap<DeviceId, u64>,
+    bootstrap: Option<Bootstrap>,
+    /// Join requests this acceptor made and has not sent on yet.
+    own_joins: Buffer,
+    /// Join requests this relay holds for the Root (R-JOIN-8).
+    relay_joins: Buffer,
+    /// On the root device: requests waiting for the owner.
+    inbox: Buffer,
+    join_ids: BTreeMap<JoinRequestId, Request>,
+}
+
+impl Enrollment {
+    fn new(profile: Profile) -> Self {
+        let buffer = || Buffer::new(usize::from(profile.join_buffer));
+        Self {
+            has_presence: false,
+            announce: false,
+            pairing: None,
+            entered: None,
+            pair_inits: BTreeMap::new(),
+            bootstrap: None,
+            own_joins: buffer(),
+            relay_joins: buffer(),
+            inbox: buffer(),
+            join_ids: BTreeMap::new(),
+        }
+    }
+}
+
 /// A simulated node.
 #[derive(Debug)]
 pub(crate) struct Node {
@@ -301,6 +391,9 @@ pub(crate) struct Node {
     /// Stream state by peer and role; the application's handles are in `open`.
     tables: BTreeMap<(DeviceId, Role), Table>,
     open: BTreeMap<StreamId, Open>,
+    /// False until a pairing gives the node its bus and the first checkpoint.
+    pub(crate) on_bus: bool,
+    enroll: Enrollment,
 }
 
 fn too_large(n: usize) -> Result<(), Report> {
@@ -346,9 +439,30 @@ impl Node {
             fetches: BTreeMap::new(),
             tables: BTreeMap::new(),
             open: BTreeMap::new(),
+            on_bus: true,
+            enroll: Enrollment::new(profile),
         };
         n.refresh_target();
         n
+    }
+
+    /// A device that is not on a bus: it has its keys and nothing else. Its view is a
+    /// placeholder until pairing gives it the checkpoint of its bus.
+    pub(crate) fn unpaired(id: DeviceId, presence: bool, profile: Profile, mode: ErrorMode, seed: u64) -> Self {
+        let none = Checkpoint { generation: 0, number: 0, valid: BTreeSet::new(), next_free: 0, root_device: id };
+        let mut n = Self::new(id, [0u8; 32], View::new(none, []), profile, mode, seed);
+        n.on_bus = false;
+        n.enroll.has_presence = presence;
+        n
+    }
+
+    /// The error of an operation that needs a bus (R-API-2).
+    pub(crate) fn needs_bus(&self) -> Result<(), Report> {
+        if self.on_bus {
+            Ok(())
+        } else {
+            Err(Report::new(RuleCode::API_NO_BUS, format!("{} is not on a bus", self.id)))
+        }
     }
 
     fn fresh_id(&mut self) -> u64 {
@@ -493,6 +607,14 @@ impl Node {
         let invalid: BTreeSet<DeviceId> =
             self.open.values().map(|o| o.peer).filter(|p| !me_valid || self.view.valid(*p).is_none()).collect();
         self.close_streams(|o| invalid.contains(&o.peer), Some(StreamEnd::Revoked));
+        // A device admitted after pairing publishes its node info with the name it proposed.
+        if self.enroll.announce && self.own_passport().is_some_and(|p| p.rights.publish) {
+            self.enroll.announce = false;
+            if let Err(r) = self.publish_node_info() {
+                self.log.push(format!("{} {}", self.id, r.log_line()));
+            }
+        }
+        self.flush_joins();
     }
 
     /// Applies a checkpoint and a passport made by this node's Root (R-MEM-3).
@@ -1242,6 +1364,10 @@ impl Node {
 
     pub(crate) fn link_up(&mut self, peer: DeviceId) {
         self.links.insert(peer);
+        if !self.on_bus {
+            self.link_up_off_bus(peer);
+            return;
+        }
         self.key_requested.retain(|(s, _)| *s != peer);
         let passport = self.own_passport().cloned();
         let epoch = self.target.tepoch;
@@ -1261,6 +1387,7 @@ impl Node {
 
     pub(crate) fn link_down(&mut self, peer: DeviceId) {
         self.links.remove(&peer);
+        self.link_down_pairing(peer);
         // Link down closes the streams the link carried (R-STR-5).
         self.close_streams(|o| o.via == peer, Some(StreamEnd::LinkDown));
     }
@@ -1288,9 +1415,26 @@ impl Node {
             }
         }
         self.after_peer_known(m.from);
+        self.flush_joins();
+    }
+
+    /// What a node that is not on a bus takes: the pairing messages, and the checkpoint of
+    /// its bus once it is paired.
+    fn handle_off_bus(&mut self, m: &Msg) {
+        match &m.body {
+            Body::PairReply { nonce } => self.on_pair_reply(m.from, *nonce),
+            Body::PairDone { code, bus } => self.on_pair_done(m.from, *code, *bus),
+            Body::PairAbort { code } => self.on_pair_abort(m.from, *code),
+            Body::Checkpoint(c) => self.on_first_checkpoint(m.from, c),
+            _ => {}
+        }
     }
 
     pub(crate) fn handle(&mut self, m: &Msg) {
+        if !self.on_bus {
+            self.handle_off_bus(m);
+            return;
+        }
         if self.view.halted && !matches!(m.body, Body::Get) {
             return;
         }
@@ -1344,6 +1488,17 @@ impl Node {
             Body::BlobSegment { channel, number, segment, data, last } => {
                 if self.sender(m).is_some() {
                     self.on_blob_segment(m.from, *channel, *number, *segment, data, *last);
+                }
+            }
+            Body::PairInit { nonce } => self.on_pair_init(m.from, *nonce),
+            Body::PairConfirm { code } => self.on_pair_confirm(m.from, *code),
+            Body::PairDevice { payload } => self.on_pair_device(m.from, payload),
+            Body::PairAbort { code } => self.on_pair_abort(m.from, *code),
+            // A member does not start a pairing exchange.
+            Body::PairReply { .. } | Body::PairDone { .. } => {}
+            Body::JoinRequest(r) => {
+                if self.sender(m).is_some() {
+                    self.on_join_request(r);
                 }
             }
         }
@@ -1406,6 +1561,7 @@ impl Node {
         self.open.clear();
         // Events the application has not taken were in RAM too.
         self.events.clear();
+        self.reboot_enrollment();
         self.links.clear();
         self.outbox.clear();
         self.note("reboot");
@@ -1660,6 +1816,10 @@ impl Node {
         }
         self.halted_err()?;
         name.clone_into(&mut self.name);
+        // Before admission the name is only proposed: it goes into the join request.
+        if self.own_passport().is_none() {
+            return Ok(());
+        }
         self.publish_node_info()
     }
 
@@ -1672,6 +1832,9 @@ impl Node {
         }
         self.halted_err()?;
         self.app = app.to_vec();
+        if self.own_passport().is_none() {
+            return Ok(());
+        }
         self.publish_node_info()
     }
 
@@ -1680,7 +1843,15 @@ impl Node {
         self.publish_inner(Channel::NODE_INFO, &data, None, 1).map(|_| ())
     }
 
-    pub(crate) fn state(&self) -> BusState {
+    pub(crate) fn fingerprint(&self) -> cpb_api::Fingerprint {
+        enroll::key_fingerprint(self.id)
+    }
+
+    pub(crate) fn state(&self) -> Option<BusState> {
+        self.on_bus.then(|| self.snapshot())
+    }
+
+    fn snapshot(&self) -> BusState {
         let members = self
             .view
             .members()
@@ -1695,6 +1866,7 @@ impl Node {
             .fold(0usize, usize::saturating_add);
         BusState {
             bus: self.bus,
+            fingerprint: enroll::bus_fingerprint(&self.bus),
             device: self.id,
             generation: self.view.checkpoint.generation,
             checkpoint: self.view.checkpoint.number,
@@ -1739,6 +1911,10 @@ impl Node {
                     self.root_records(c, Some(p));
                 }
             }
+            (HostWait::Admit { join, rights, permits }, HostAnswer::Approve) => {
+                self.admit_confirmed(join, rights, permits);
+            }
+            (HostWait::Admit { .. }, HostAnswer::Refuse) => self.note("owner declined the admission"),
             (HostWait::Revoke(device), HostAnswer::Approve) => {
                 if let Some(c) = self.root.as_mut().and_then(|r| r.revoke(device)) {
                     self.root_records(c, None);

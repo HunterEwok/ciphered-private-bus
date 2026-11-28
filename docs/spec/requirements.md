@@ -1224,7 +1224,14 @@ Appendix B, Section B.10.
 > channel 0, R-CH-16); read the bus state. The bus state is a snapshot without side effects: bus
 > identifier, root generation, checkpoint number, root device, halted flag, known valid members with
 > their rights, permits and whether they have a user-presence key (the values the owner's "change"
-> operation takes), connected links, core memory usage. The snapshot contains no secrets. After accepting a
+> operation takes), connected links, core memory usage, and the bus fingerprint (R-JOIN-7). The snapshot contains no secrets.
+> A node that has not completed a pairing has no bus: it has no bus state, and every operation that needs
+> a bus is refused. On every node the interface gives the device identifier and the fingerprint of the
+> device key (R-JOIN-7), and the pairing operations: start a pairing with a code the core generates for
+> this device's screen, in either form (R-JOIN-1); start a pairing with a code entered on this device;
+> cancel a pairing. A node without a bus pairs as the joiner; a member with the accept right, or the
+> root device (R-JOIN-9), pairs as the acceptor. The core reports every failed run of a code shown on
+> this device with the attempts the code has left, and the end of a pairing with its result (R-JOIN-3). After accepting a
 > checkpoint or a passport the core reports a membership change with the root generation and the
 > checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
 > members with the read right. Subscribing delivers the channel's retained publications at once. With a
@@ -1235,7 +1242,10 @@ Appendix B, Section B.10.
 > on the root device it asks for that signature (R-KEY-12). On the
 > root device the interface also gives the owner's operations, each confirmed through the root key
 > (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and
-> revoke a device (R-MEM-4).
+> revoke a device (R-MEM-4). The core reports each join request that carries a valid joiner's signature
+> with the joiner's name, the acceptor, the fingerprint of the joiner's device key, and whether the
+> joiner has a user-presence key; the owner admits the joiner with rights and permits, or declines,
+> which signs nothing.
 > *Serves:* scope. *Verified by:* interface test.
 
 > **R-API-3.** A confirmation-class action always goes through the effect "sign with the presence key"

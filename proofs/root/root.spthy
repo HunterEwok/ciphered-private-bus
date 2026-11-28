@@ -7,8 +7,9 @@
  * properties S8 and S9; limitation L2): the bus identifier binds the first
  * root key and both halves of the recovery key, a root change record signed
  * by K1 and K2 designates the root key of a new generation, the root signs
- * passports and checkpoints of its generation, and a halt proof of two
- * records with one head halts a node. Verification level V1 (Section 14.1):
+ * passports and checkpoints of its generation, and signs application data
+ * on request (R-KEY-12), and a halt proof of two records with one head
+ * halts a node. Verification level V1 (Section 14.1):
  * a symbolic model, primitives are perfect.
  *
  * Abstractions, each stated here so that a reader can check them:
@@ -28,6 +29,11 @@
  * - The recovery key is offline but may sign two records of one generation
  *   (L6), and a root may sign two records with one head (S8); both are
  *   the faults that halt proofs expose.
+ * - Application data and its tag are chosen by the adversary: RootSignApp is
+ *   a signing oracle for any input. Every generation has its own fresh root
+ *   key, so the generation inside the signed input adds nothing a symbolic
+ *   probe can show; a signature of the previous root fails at the new
+ *   generation because the key differs (app_signature_authentic).
  * - Compromise: RevealRoot gives the root key of one generation, RevealK1
  *   and RevealK2 one half of the recovery key. Quantum stands for an
  *   adversary with a quantum computer: it gives every classical signing key
@@ -41,6 +47,7 @@
  *   PROBE_NO_BUS_CHECK    the joiner does not check the bus identifier     -> join_authentic
  *   PROBE_HALT_SAME_REST  a halt proof is accepted with two equal rests    -> halt_proof_authentic
  *   PROBE_NO_LABEL        records are signed without the label of their kind -> halt_proof_authentic
+ *   PROBE_APP_SAME_LABEL  application data is signed with the passport label and shape -> old_root_powerless
  */
 
 theory CpbRoot
@@ -53,6 +60,15 @@ builtins: hashing, signing
 macros: recmsg(lbl, head, rh) = <h(head), rh>
 #else
 macros: recmsg(lbl, head, rh) = <lbl, h(head), rh>
+#endif
+
+// What the Root signs as application data (R-KEY-12, Appendix B, Section
+// B.8). PROBE_APP_SAME_LABEL signs it in the shape of a passport, with the
+// tag as its number.
+#ifdef PROBE_APP_SAME_LABEL
+macros: appmsg(bus, g, tag, data) = recmsg('cpb passport v1', <bus, g, tag>, h(data))
+#else
+macros: appmsg(bus, g, tag, data) = <'cpb app v1', bus, g, h(tag), h(data)>
 #endif
 
 restriction Inequality:
@@ -111,6 +127,14 @@ rule RootCheckpoint:
     [ !RootLtk(bus, g, rk), Fr(~c) ]
   --[ RootSigned(bus, g, 'cpb checkpoint v1', head, h(rest)) ]->
     [ Out(<'cpb checkpoint v1', head, rest, sign(recmsg('cpb checkpoint v1', head, h(rest)), rk)>) ]
+
+// On request of the application, the root signs application data with a tag
+// (R-KEY-12). The application chooses both, so the adversary does: the rule
+// is a signing oracle for any input, called any number of times.
+rule RootSignApp:
+    [ !RootLtk(bus, g, rk), In(<tag, data>) ]
+  --[ AppSigned(bus, g, tag, data) ]->
+    [ Out(sign(appmsg(bus, g, tag, data), rk)) ]
 
 rule RevealRoot:
     [ !RootLtk(bus, g, rk) ]
@@ -206,6 +230,13 @@ rule NodeAcceptRecord:
   --[ AcceptRecord(D, bus, g, lbl, head, h(rest)) ]->
     [ ]
 #endif
+
+// A node verifies signed application data against the root key of a
+// generation it holds (R-KEY-12).
+rule NodeVerifyApp:
+    [ !NodeRoot(D, bus, g, pk(xr)), In(<tag, data, sign(appmsg(bus, g, tag, data), xr)>) ]
+  --[ AppVerified(bus, g, tag, data) ]->
+    [ ]
 
 // A halt proof of a passport or checkpoint (Appendix B, Section B.3, rule
 // 1): one head, two different rests, both signed by the root of the
@@ -303,6 +334,27 @@ lemma old_root_powerless:
        | (Ex #k. RevealRoot(bus, g) @ k & k < r)
        | (Ex #k. Quantum(bus) @ k & k < r)
        | ((Ex #k. RevealK1(bus) @ k & k < r) & (Ex #k. RevealK2(bus) @ k & k < r))"
+
+// R-KEY-12: a node accepts application data of a generation only as the
+// root of that generation signed it, unless that root's key is known. With
+// the oracle RootSignApp present, every other lemma still holds: the label
+// cpb app v1 keeps the signatures apart (R-KEY-8).
+lemma app_signature_authentic:
+  "All bus g t d #i.
+     AppVerified(bus, g, t, d) @ i
+     ==> (Ex #j. AppSigned(bus, g, t, d) @ j & j < i)
+       | (Ex #k. RevealRoot(bus, g) @ k & k < i)
+       | (Ex #k. Quantum(bus) @ k & k < i)
+       | ((Ex #k. RevealK1(bus) @ k & k < i) & (Ex #k. RevealK2(bus) @ k & k < i))"
+
+// Non-vacuity: a node verifies signed application data with no key revealed.
+lemma app_signature_reachable:
+  exists-trace
+  "Ex bus g t d #i.
+     AppVerified(bus, g, t, d) @ i
+     & (not Ex b x #k. RevealRoot(b, x) @ k)
+     & (not Ex b #k. RevealK1(b) @ k) & (not Ex b #k. RevealK2(b) @ k)
+     & (not Ex b #k. Quantum(b) @ k)"
 
 // L2: a quantum adversary forges records of the current root. This is a
 // stated limitation, not a property: the trace must exist.

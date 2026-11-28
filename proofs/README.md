@@ -13,7 +13,7 @@ runs any of them; `.github/workflows/proofs.yml` runs every lemma and every prob
 | [hello](hello) | the link hello and its authentication |
 | [channels](channels) | sealing key claims, channel key grants and requests, publications |
 | [calls](calls) | nonces, calls, replies and streams |
-| [root](root) | root change, recovery and halt proofs |
+| [root](root) | root change, recovery, halt proofs and root-signed application data |
 | [quantum](quantum) | sealing with X-Wing against a quantum adversary |
 
 ## Coverage
@@ -33,8 +33,9 @@ network is the Dolev-Yao adversary, which is the transport assumption of R-ARC-5
 | R-JOIN-6 | pairing, root | `admission_via_request`, `admission_direct`; `old_root_powerless` |
 | R-JOIN-9 | pairing | `admission_direct` |
 | R-KEY-2 | channels, calls, quantum | `channel_key_secrecy` (with `PROBE_UNSIGNED_CLAIM`), `command_secrecy`, `harvest_now_decrypt_later` |
-| R-KEY-8 | all | every signature and derivation carries its own label; `PROBE_NO_LABEL` (root) shows a defect when one is missing; `key_separation` (channels) proves that no content key is a blob key |
+| R-KEY-8 | all | every signature and derivation carries its own label; `PROBE_NO_LABEL` (root) shows a defect when one is missing and `PROBE_APP_SAME_LABEL` (root) when one is shared; `key_separation` (channels) proves that no content key is a blob key |
 | R-KEY-9 | channels, calls | see the note below |
+| R-KEY-12 | root | `app_signature_authentic`, every root lemma with the application signing oracle present (with `PROBE_APP_SAME_LABEL`) |
 | R-CH-1 | channels | `channel_key_secrecy` |
 | R-CH-2 | channels | `channel_key_secrecy`, `grant_authenticity` |
 | R-CH-3 | channels | `content_secrecy`, `blob_secrecy` (with `PROBE_BLOB_KEY_IN_CLEAR`), `content_key_unique` (with `PROBE_KEY_NO_HEADER`), `blob_key_unique` (with `PROBE_BLOB_KEY_FROM_K`), `key_separation` |

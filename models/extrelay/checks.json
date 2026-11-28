@@ -39,7 +39,6 @@
       "stepRegister",
       "stepClose",
       "stepForge",
-      "stepRelayTicket",
       "stepNodeCheckpoint",
       "stepNodeAccess",
       "stepNodeBridge",

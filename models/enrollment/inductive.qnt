@@ -12,15 +12,13 @@ module inductive {
   const I_JOINERS: Set[str]
   const I_PRESENCE: Set[str]
   const I_ACCEPTORS: Set[str]
-  const I_LIMIT: int
   const I_MAX_TID: int
   const I_MUTANT: str
-  import enrollment(JOINERS = I_JOINERS, PRESENCE = I_PRESENCE, ACCEPTORS = I_ACCEPTORS, LIMIT = I_LIMIT,
+  import enrollment(JOINERS = I_JOINERS, PRESENCE = I_PRESENCE, ACCEPTORS = I_ACCEPTORS,
                     MAX_TID = I_MAX_TID, MUTANT = I_MUTANT).* from "./enrollment"
 
   // ------------------------------------------------------------ bounded types
   val TIDS = 1.to(MAX_TID)
-  val TRIES = 0.to(LIMIT)
   val SESSIONS: Set[Session] = tuples(TIDS, JOINERS.union(Set(ADV)), SIDES.union(Set(ADV)))
     .map(t => { tid: t._1, joiner: t._2, acceptor: t._3 })
   // What honest joiners send: their own payload, to the other end of a session.
@@ -57,20 +55,17 @@ module inductive {
                      implies ss.contains({ tid: r.tid, joiner: r.key, acceptor: r.acceptor })),
   }
 
-  pure def indInvOf(t: int, ss: Set[Session], cu: str -> int, jt: str -> int, at: str -> (str -> int),
+  pure def indInvOf(t: int, ss: Set[Session], cu: str -> int,
                     se: Set[{ p: Payload, to: str }], ib: Set[Request], pp: Set[Passport], co: Set[str],
                     b: Set[str], sn: Set[str]): bool = and {
     sessionsOk(t, ss, cu),
-    jt.keys() == JOINERS, JOINERS.forall(j => TRIES.contains(jt.get(j))),
-    at.keys() == ACCEPTORS,
-    ACCEPTORS.forall(a => at.get(a).keys() == JOINERS and JOINERS.forall(j => TRIES.contains(at.get(a).get(j)))),
     requestsOk(ss, se, ib),
     pp.subseteq(PASSPORTS), co.subseteq(KEYS), pp.forall(p => co.contains(p.key)),
     b == Set(),
     sn.subseteq(TAGS),
   }
 
-  val IndInv = indInvOf(tid, sessions, current, joinerTries, acceptorTries, sent, inbox, passports, confirmed,
+  val IndInv = indInvOf(tid, sessions, current, sent, inbox, passports, confirmed,
                         broken, seen)
 
   // The model's own initial state, step, and safety, and the branches of the
@@ -79,17 +74,8 @@ module inductive {
   action modelStep = step
   val modelSafety = safety
   action stepPairHonest = { nondet j = JOINERS.oneOf() nondet a = SIDES.oneOf() pairHonest(j, a) }
-  action stepAdvJoiner = {
-    nondet j = JOINERS.oneOf()
-    nondet success = Set(false, true).oneOf()
-    advPairJoiner(j, success)
-  }
-  action stepAdvAcceptor = {
-    nondet j = JOINERS.oneOf()
-    nondet a = ACCEPTORS.oneOf()
-    nondet success = Set(false, true).oneOf()
-    advPairAcceptor(a, j, success)
-  }
+  action stepAdvJoiner = { nondet j = JOINERS.oneOf() advPairJoiner(j) }
+  action stepAdvAcceptor = { nondet a = ACCEPTORS.oneOf() advPairAcceptor(a) }
   action stepSend = { nondet j = JOINERS.oneOf() joinerSend(j) }
   action stepAdmit = { nondet j = JOINERS.oneOf() all { inbox != Set(), nondet r = inbox.oneOf() rootAdmit(r, j) } }
   action stepRequest = all {
@@ -116,27 +102,23 @@ module inductive {
     nondet t = 0.to(MAX_TID).oneOf()
     nondet ss = SESSIONS.powerset().oneOf()
     nondet cu = setOfMaps(JOINERS, 0.to(MAX_TID)).oneOf()
-    nondet jt = setOfMaps(JOINERS, TRIES).oneOf()
-    nondet at = setOfMaps(ACCEPTORS, setOfMaps(JOINERS, TRIES)).oneOf()
     nondet se = SENT.powerset().oneOf()
     nondet ib = REQUESTS.powerset().oneOf()
     nondet pp = PASSPORTS.powerset().oneOf()
     nondet co = KEYS.powerset().oneOf()
     nondet sn = TAGS.powerset().oneOf()
     all {
-      indInvOf(t, ss, cu, jt, at, se, ib, pp, co, Set(), sn),
-      tid' = t, sessions' = ss, current' = cu, joinerTries' = jt, acceptorTries' = at, sent' = se, inbox' = ib,
+      indInvOf(t, ss, cu, se, ib, pp, co, Set(), sn),
+      tid' = t, sessions' = ss, current' = cu, sent' = se, inbox' = ib,
       passports' = pp, confirmed' = co, broken' = Set(), seen' = sn,
     }
   }
 }
 
 module tiny_ind {
-  import inductive(I_JOINERS = Set("j1"), I_PRESENCE = Set("j1"), I_ACCEPTORS = Set("h"), I_LIMIT = 2,
-                   I_MAX_TID = 4, I_MUTANT = "none").*
+  import inductive(I_JOINERS = Set("j1"), I_PRESENCE = Set("j1"), I_ACCEPTORS = Set("h"), I_MAX_TID = 4, I_MUTANT = "none").*
 }
 
 module small_ind {
-  import inductive(I_JOINERS = Set("j1", "j2"), I_PRESENCE = Set("j1"), I_ACCEPTORS = Set("h", "root"),
-                   I_LIMIT = 2, I_MAX_TID = 6, I_MUTANT = "none").*
+  import inductive(I_JOINERS = Set("j1", "j2"), I_PRESENCE = Set("j1"), I_ACCEPTORS = Set("h", "root"), I_MAX_TID = 6, I_MUTANT = "none").*
 }

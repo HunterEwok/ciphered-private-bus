@@ -97,6 +97,9 @@ def check_model(name):
         for s in sorted((listed | disabled) - set(defined)):
             errors.append(f"{where}: {s} is checked but not defined")
         if "steps" in value:
+            for s in sorted(set(value["steps"]) & disabled):
+                errors.append(f"{where}: {s} is listed both as a step and as a disabled step")
+        if "steps" in value:
             # A view's steps restate the model's actions for copy A; that they
             # equal the model's step is argued in the view file.
             used = "".join(defined.values())

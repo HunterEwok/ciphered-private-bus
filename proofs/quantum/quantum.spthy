@@ -1,0 +1,169 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 HunterEwok
+ *
+ * Sealing with X-Wing against a quantum adversary (property S1, harvest now,
+ * decrypt later; R-KEY-2, R-KEY-6; limitation L2; Section 14.1, V1: "the
+ * quantum adversary is described by separate lemmas"). Every envelope of the
+ * bus that carries a secret (key grant, call, join request) is HPKE with the
+ * X-Wing KEM to a sealing key whose claim the device key signed. This model
+ * keeps that one step and opens up the KEM: the ML-KEM-768 part and the
+ * X25519 part are separate, and the shared secret is the X-Wing combiner of
+ * both. Verification level V1: a symbolic model, primitives are perfect.
+ *
+ * Abstractions, each stated here so that a reader can check them:
+ * - ML-KEM-768 is asymmetric encryption of a fresh shared secret; X25519 is
+ *   Diffie-Hellman. The X-Wing combiner is the hash
+ *   h(<ss_M, ss_X, ct_X, pk_X, label>) of draft-connolly-cfrg-xwing-kem-11.
+ *   The HPKE key schedule and ChaCha20-Poly1305 are symmetric encryption
+ *   under that secret, with the associated data inside the plaintext.
+ * - A sealing key epoch is the pair of an X25519 and an ML-KEM private key;
+ *   its claim is signed with the device key (ES256).
+ * - Compromise: RevealSeal gives a whole sealing private key the node still
+ *   holds (a classical compromise of the node; none after erasure);
+ *   RevealDev a device signing key. Quantum stands for an adversary with a
+ *   quantum computer, at any point of the trace: it obtains every X25519
+ *   private key and every ES256 signing key, including keys already erased,
+ *   since it computes them from public keys. It does not obtain ML-KEM keys.
+ *
+ * Probes (R-VER-2), each a deliberate defect selected with -D, each expected
+ * to falsify the lemma named:
+ *   PROBE_X25519_ONLY   the shared secret is X25519 alone (sealing with a
+ *                       classical algorithm, which R-KEY-6 forbids)  -> harvest_now_decrypt_later
+ *   PROBE_NO_ERASE      erasing a sealing key keeps it              -> forward_secrecy
+ */
+
+theory CpbQuantum
+begin
+
+builtins: diffie-hellman, hashing, signing, symmetric-encryption, asymmetric-encryption
+
+// The X-Wing combiner (draft-connolly-cfrg-xwing-kem-11, Section 5.3), or,
+// in the probe, the X25519 secret alone.
+#ifdef PROBE_X25519_ONLY
+macros: combiner(ssm, ssx, ctx, pkx) = h(<'cpb x25519 only', ssx, ctx, pkx>)
+#else
+macros: combiner(ssm, ssx, ctx, pkx) = h(<ssm, ssx, ctx, pkx, 'X-Wing'>)
+#endif
+
+restriction OneDevice:
+  "All d #i #j. NewDevice(d) @ i & NewDevice(d) @ j ==> #i = #j"
+
+#ifdef not PROBE_NO_ERASE
+restriction NoSealUseAfterErase:
+  "All d p #e #u. ErasedSeal(d, p) @ e & UseSeal(d, p) @ u ==> u < e"
+#endif
+
+/* ---------------------------------------------------------------- devices */
+
+rule NewDevice:
+    [ Fr(~ltk) ]
+  --[ NewDevice($D) ]->
+    [ !Ltk($D, ~ltk), !DevKey($D, pk(~ltk)), Out(pk(~ltk)) ]
+
+// A sealing key epoch: an X25519 key and an ML-KEM key, and the claim of the
+// pair signed by the device key (R-KEY-2).
+rule NewSealKey:
+    let pkx   = 'g'^~x
+        pkm   = pk(~m)
+        claim = <'claim', D, pkx, pkm>
+    in
+    [ !Ltk(D, ltk), Fr(~x), Fr(~m) ]
+  --[ NewSeal(D, pkx) ]->
+    [ !SealKey(D, ~x, ~m), Out(<claim, sign(<'cpb seal claim v1', D, pkx, pkm>, ltk)>) ]
+
+rule RevealSeal:
+    [ !SealKey(D, x, m) ]
+  --[ RevealSeal(D, 'g'^x), UseSeal(D, 'g'^x) ]->
+    [ Out(x), Out(m) ]
+
+rule EraseSeal:
+    [ !SealKey(D, x, m) ]
+  --[ ErasedSeal(D, 'g'^x) ]->
+    [ ]
+
+rule RevealDev:
+    [ !Ltk(D, ltk) ]
+  --[ RevealDev(D) ]->
+    [ Out(ltk) ]
+
+// A quantum computer: discrete logarithms of every X25519 and ES256 public
+// key, erased or not. It never yields an ML-KEM private key.
+rule QuantumX25519:
+    [ !SealKey(D, x, m) ]
+  --[ Quantum() ]->
+    [ Out(x) ]
+
+rule QuantumDev:
+    [ !Ltk(D, ltk) ]
+  --[ Quantum() ]->
+    [ Out(ltk) ]
+
+/* ---------------------------------------------------------------- sealing */
+
+// A sender seals a fresh secret to a claimed sealing key of R: the secret
+// stands for a channel key, a call command or a join request body.
+rule Seal:
+    let claim = <'claim', R, pkx, pkm>
+        ctx   = 'g'^~e
+        ctm   = aenc(~ssm, pkm)
+        ss    = combiner(~ssm, pkx^~e, ctx, pkx)
+        env   = <ctx, ctm, senc(<'cpb sealed v1', ~s>, ss)>
+    in
+    [ !DevKey(R, pk(xr)), Fr(~e), Fr(~ssm), Fr(~s),
+      In(<claim, sign(<'cpb seal claim v1', R, pkx, pkm>, xr)>) ]
+  --[ Sealed(R, pkx, ~s) ]->
+    [ Out(env) ]
+
+// The receiver opens an envelope with a sealing key it still holds.
+rule Open:
+    let pkx = 'g'^~x
+        ss  = combiner(ssm, ctx^~x, ctx, pkx)
+    in
+    [ !SealKey(R, ~x, ~m), In(<ctx, aenc(ssm, pk(~m)), senc(<'cpb sealed v1', s>, ss)>) ]
+  --[ Opened(R, s), UseSeal(R, pkx) ]->
+    [ ]
+
+/* ------------------------------------------------------------------ lemmas */
+
+lemma executable:
+  exists-trace
+  "Ex R p s #i #j. Sealed(R, p, s) @ i & Opened(R, s) @ j
+     & (not Ex d y #k. RevealSeal(d, y) @ k)
+     & (not Ex d #k. RevealDev(d) @ k)
+     & (not Ex #k. Quantum() @ k)"
+
+// S1, harvest now, decrypt later: a sealed secret is learned only with the
+// whole sealing private key of its receiver, or by an adversary that could
+// sign claims for the receiver before the secret was sealed (a classical
+// compromise of its device key, or a quantum computer already at work: L2).
+// A quantum computer that comes after the envelope was recorded does not
+// open it, because the ML-KEM part stays secret.
+lemma harvest_now_decrypt_later:
+  "All R p s #i #j.
+     Sealed(R, p, s) @ i & K(s) @ j
+     ==> (Ex #r. RevealSeal(R, p) @ r)
+       | (Ex #r. RevealDev(R) @ r & r < i)
+       | (Ex #q. Quantum() @ q & q < i)"
+
+// S13 with a quantum adversary: once the receiver has erased the sealing
+// key, even a classical compromise of the node together with a later
+// quantum computer does not open what was sealed to it.
+lemma forward_secrecy:
+  "All R p s #i #j.
+     Sealed(R, p, s) @ i & K(s) @ j
+     ==> (Ex #r. RevealSeal(R, p) @ r & (All #e. ErasedSeal(R, p) @ e ==> r < e))
+       | (Ex #r. RevealDev(R) @ r & r < i)
+       | (Ex #q. Quantum() @ q & q < i)"
+
+// L2: a quantum computer at work before the envelope is sealed forges the
+// receiver's claim and reads what is then sealed to the adversary's key.
+// This is a stated limitation, not a property: the trace must exist.
+lemma quantum_active_reads:
+  exists-trace
+  "Ex R p s #i #j #q.
+     Sealed(R, p, s) @ i & K(s) @ j & Quantum() @ q & q < i
+     & (not Ex y #r. RevealSeal(R, y) @ r)
+     & (not Ex #r. RevealDev(R) @ r)"
+
+end

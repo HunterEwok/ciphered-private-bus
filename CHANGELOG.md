@@ -55,6 +55,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 
 ### Changed
+- Specification: a hello that names the receiver's own device or repeats the receiver's nonce is
+  rejected, so a reflected hello cannot make a node accept a link with itself (R-REL-1, Appendix B,
+  Section B.4; no wire format change). The Tamarin model of the hello proves it.
 - Specification: a halted node ranks its (generation, checkpoint) pair above every checkpoint of its
   generation and answers every sender of that generation with its halt proof (R-MEM-6, R-MEM-10,
   Appendix B, Section B.3, rule 3). Reason: the membership model showed that a proof of a generation

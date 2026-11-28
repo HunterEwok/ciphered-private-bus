@@ -1,0 +1,38 @@
+{
+  "probes": {
+    "PROBE_UNSIGNED_CLAIM": "channel_key_secrecy",
+    "PROBE_NO_ERASE": "channel_key_secrecy",
+    "PROBE_NO_GRANT_SIG": "grant_authenticity",
+    "PROBE_PUB_SIG_HEADER": "source_authenticity",
+    "PROBE_REQUEST_UNSIGNED": "request_authenticity",
+    "PROBE_KEY_NO_HEADER": "content_key_unique",
+    "PROBE_BLOB_KEY_IN_CLEAR": "blob_secrecy",
+    "PROBE_BLOB_KEY_FROM_K": "blob_key_unique"
+  },
+  "ci": {
+    "lemmas": [
+      "executable",
+      "channel_key_secrecy",
+      "content_secrecy",
+      "blob_secrecy",
+      "content_key_unique",
+      "key_separation",
+      "blob_key_unique",
+      "grant_authenticity",
+      "source_authenticity",
+      "content_agreement",
+      "request_authenticity",
+      "answer_binding"
+    ],
+    "probes": [
+      "PROBE_UNSIGNED_CLAIM",
+      "PROBE_NO_ERASE",
+      "PROBE_NO_GRANT_SIG",
+      "PROBE_PUB_SIG_HEADER",
+      "PROBE_REQUEST_UNSIGNED",
+      "PROBE_KEY_NO_HEADER",
+      "PROBE_BLOB_KEY_IN_CLEAR",
+      "PROBE_BLOB_KEY_FROM_K"
+    ]
+  }
+}

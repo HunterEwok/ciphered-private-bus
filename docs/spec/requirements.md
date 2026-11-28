@@ -915,10 +915,11 @@ unrelated buses at once. An external server receives a ticket from the Root: bus
 
 > **R-REL-1.** A relay accepts a device connection after a hello in which the device presents its
 > passport, its checkpoint, and a device key signature over the nonces of both sides and the list of
-> versions. Before the hello, and when root generations differ, the sides exchange control-plane
-> objects: the latest root change record, the checkpoint, and the device's passport. These objects are
-> self-verifying, so a node with an old passport receives a new one and repeats the hello. The relay
-> serves them to anyone who presents a passport of any generation of this bus.
+> versions. A hello that names the receiver's own device or repeats its own nonce is rejected. Before
+> the hello, and when root generations differ, the sides exchange control-plane objects: the latest
+> root change record, the checkpoint, and the device's passport. These objects are self-verifying, so a
+> node with an old passport receives a new one and repeats the hello. The relay serves them to anyone
+> who presents a passport of any generation of this bus.
 > *Serves:* S14. *Verified by:* Tamarin, model.
 
 > **R-REL-2.** A relay MUST verify the Root signature on passports and checkpoints and the source
@@ -1412,6 +1413,8 @@ moving to a later revision or to the resulting RFC is a format change recorded i
   Transactions on Computer Systems, Vol. 2, No. 4, 1984.
 - **[SALTZER-PROT]** Saltzer, J. and M. Schroeder, "The Protection of Information in Computer
   Systems", Proceedings of the IEEE, Vol. 63, No. 9, 1975.
+- **[SELFIE]** Drucker, N. and S. Gueron, "Selfie: reflections on TLS 1.3 with PSK", Journal of
+  Cryptology, Vol. 34, 2021 (IACR ePrint 2019/347).
 - **[TAMARIN]** Meier, S., Schmidt, B., Cremers, C., and D. Basin, "The TAMARIN Prover for the Symbolic
   Analysis of Security Protocols", CAV 2013.
 - **[TLA]** Lamport, L., "Specifying Systems: The TLA+ Language and Tools for Hardware and Software

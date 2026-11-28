@@ -1,0 +1,18 @@
+{
+  "probes": {
+    "PROBE_X25519_ONLY": "harvest_now_decrypt_later",
+    "PROBE_NO_ERASE": "forward_secrecy"
+  },
+  "ci": {
+    "lemmas": [
+      "executable",
+      "harvest_now_decrypt_later",
+      "forward_secrecy",
+      "quantum_active_reads"
+    ],
+    "probes": [
+      "PROBE_X25519_ONLY",
+      "PROBE_NO_ERASE"
+    ]
+  }
+}

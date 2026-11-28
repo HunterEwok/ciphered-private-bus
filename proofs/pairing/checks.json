@@ -1,0 +1,30 @@
+{
+  "probes": {
+    "PROBE_NO_FINGERPRINT": "admission_via_request",
+    "PROBE_NO_TRANSCRIPT": "device_binding",
+    "PROBE_SIG_KEY_ONLY": "admission_via_request",
+    "PROBE_NO_CONFIRM": "acceptor_agreement",
+    "PROBE_DIRECT_NO_FINGERPRINT": "admission_direct"
+  },
+  "ci": {
+    "lemmas": [
+      "executable_via_request",
+      "executable_direct",
+      "acceptor_key_secrecy",
+      "joiner_key_secrecy",
+      "joiner_agreement",
+      "acceptor_agreement",
+      "bus_authenticity",
+      "device_binding",
+      "admission_via_request",
+      "admission_direct"
+    ],
+    "probes": [
+      "PROBE_NO_FINGERPRINT",
+      "PROBE_NO_TRANSCRIPT",
+      "PROBE_SIG_KEY_ONLY",
+      "PROBE_NO_CONFIRM",
+      "PROBE_DIRECT_NO_FINGERPRINT"
+    ]
+  }
+}

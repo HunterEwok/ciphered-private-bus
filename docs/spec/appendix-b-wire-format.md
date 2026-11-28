@@ -281,6 +281,11 @@ before the hello and contains nothing but the server key and the limits.
 The selected version is the highest version common to both lists. The lists are covered by the
 signature through the hashes of the hellos.
 
+A hello whose `device` is the receiver's own device, or whose `nonce` equals the receiver's own nonce,
+is rejected. Otherwise a hello reflected back to its sender is signed over two equal hashes, and the
+sender accepts its own reflected `Auth` as the peer's: a link with itself (the selfie attack on TLS 1.3
+with pre-shared keys [SELFIE] is the same flaw).
+
 ## B.5. Channels
 
 ### Channel Key Grant (`KeyGrant`)

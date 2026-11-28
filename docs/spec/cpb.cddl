@@ -154,9 +154,11 @@ blob-ref  = [size: 17..9007199254740991, hash: hash32, seg: 1024..16346]
 ; segments N = ceil(size / seg) <= 2^31 - 1; segment i starts at i * seg;
 ; size mod seg is 0 or >= 17 (the last segment holds a tag and >= 1 byte)
 PubContent = {1: 0..65535, ? 2: u53 .default 0, ? 3: bstr .size (1..4096),
-              ? 4: bstr .size (1..4096)}    ; pad: zero bytes, len(data) + len(pad) <= 4096
-NodeInfo   = {1: tstr .size (1..64), * ext}   ; PubContent.data of channel 0 (R-CH-16)
-Publication    = [PubHeader, bstr .size (19..4125), sig-p256]
+              ? 4: bstr .size (1..4096),    ; pad: zero bytes, len(data) + len(pad) <= 4096
+              ? 5: bstr .size 32}           ; blob key, present exactly when the header has a blob
+NodeInfo   = {1: tstr .size (1..64), ? 2: bstr .size (1..4024), * ext}
+                                            ; PubContent.data of channel 0 (R-CH-16), at most 4096 bytes
+Publication    = [PubHeader, bstr .size (19..4160), sig-p256]
 PublicationMsg = {0: 17, 1: bstr .cbor Publication}
 
 BlobGet = {0: 18, 1: bus-id, 2: hash32, 3: 0..2147483646, * ext}

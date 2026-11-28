@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cpb_api::{DeviceId, RuleCode};
+use cpb_api::{BlobInfo, DeviceId, RuleCode};
 
 /// A key grant as it travels: the generation and the key, for one reader.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -35,8 +35,8 @@ pub struct Pub {
     pub depth: u16,
     /// Data, up to 4096 bytes.
     pub data: Vec<u8>,
-    /// Blob, whole.
-    pub blob: Option<Vec<u8>>,
+    /// The blob's size and segment count; its bytes travel separately (R-CH-15).
+    pub blob: Option<BlobInfo>,
 }
 
 impl Pub {
@@ -132,7 +132,7 @@ impl Source {
         &mut self,
         depth: u16,
         data: Vec<u8>,
-        blob: Option<Vec<u8>>,
+        blob: Option<BlobInfo>,
         members: &BTreeSet<DeviceId>,
         block: u64,
     ) -> Option<Pub> {

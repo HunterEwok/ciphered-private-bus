@@ -152,6 +152,22 @@ impl RuleCode {
         "R-CALL-11",
         "Result codes below 256 belong to the bus.",
     );
+    /// A blob that is empty, or published at depth 0 where it could not be served.
+    pub const API_BAD_BLOB: Self = Self::new(
+        "api",
+        "bad-blob",
+        ErrorKind::InvalidArgument,
+        "R-CH-15",
+        "A blob needs at least one byte and a retention depth of 1 or more.",
+    );
+    /// The application part of the node info exceeds 4024 bytes.
+    pub const API_APP_INFO_TOO_LARGE: Self = Self::new(
+        "api",
+        "app-info-too-large",
+        ErrorKind::InvalidArgument,
+        "R-CH-16",
+        "The node information is too large.",
+    );
 
     // ----------------------------------------------------------------- membership
 
@@ -200,6 +216,11 @@ impl RuleCode {
     pub const GRANT_NOT_READER: Self =
         Self::new("grant", "not-reader", ErrorKind::Refused, "R-API-2", "The device is not a reader of this channel.");
 
+    /// The publication of a blob being fetched left retention, so its source no longer
+    /// serves the blob.
+    pub const BLOB_GONE: Self =
+        Self::new("blob", "gone", ErrorKind::Refused, "R-CH-15", "The file is no longer available.");
+
     // ---------------------------------------------------------------------- calls
 
     /// A nonce request or a call from a device the target creates no slot for.
@@ -245,6 +266,8 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::API_UNKNOWN_ID,
     RuleCode::API_NOT_ROOT,
     RuleCode::API_BUS_RESULT,
+    RuleCode::API_BAD_BLOB,
+    RuleCode::API_APP_INFO_TOO_LARGE,
     RuleCode::MEM_NOT_MEMBER,
     RuleCode::MEM_BEHIND,
     RuleCode::MEM_STALE_CHECKPOINT,
@@ -257,6 +280,7 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::GRANT_NO_READ_RIGHT,
     RuleCode::GRANT_OLD,
     RuleCode::GRANT_NOT_READER,
+    RuleCode::BLOB_GONE,
     RuleCode::CALL_NO_SLOT,
     RuleCode::CALL_NONCE_MISMATCH,
     RuleCode::CALL_STALE_EPOCH,

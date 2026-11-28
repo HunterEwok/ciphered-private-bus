@@ -334,8 +334,9 @@ representation.
 
 > **R-FMT-10.** Every signed and every sealed object MUST contain the bus identifier. An object of
 > another bus MUST be rejected before signature verification. There is one exception: a stream chunk and
-> a blob segment carry no bus identifier. Their key is derived from the call or publication in which the
-> bus is named, so a chunk of another bus does not decrypt.
+> a blob segment carry no bus identifier. A stream key is derived from the call in which the bus is
+> named, and a blob key travels inside the content of the publication in which the bus is named, so a
+> chunk or segment of another bus does not decrypt.
 > *Serves:* S4. *Verified by:* model, test.
 
 > **R-FMT-11.** Every key is encoded as a pair `[algorithm, bytes]`. Algorithm identifiers: 1 ECDSA
@@ -643,9 +644,12 @@ distinguishes channels by it but does not know which channel it is.
 > check the commitment. The format does not limit the number of readers of a channel.
 > *Serves:* S1, S3. *Verified by:* Tamarin, vectors.
 
-> **R-CH-3.** The content key and the blob key are derived from K and the publication header hash with
-> different labels. The header contains the publication number, so every publication has its own key.
-> Content is encrypted with nonce zero; a blob segment with a nonce equal to the segment number.
+> **R-CH-3.** The content key is derived from K and the publication header hash. The header contains
+> the publication number, so every publication has its own key. Content is encrypted with nonce zero.
+> The blob key is 32 random bytes the source draws for each blob and carries in the encrypted content; a
+> blob segment is encrypted with a nonce equal to the segment number. The blob key is not derived from
+> the header hash because the header contains the hash of the encrypted blob, which exists only after
+> encryption.
 > *Serves:* S1. *Verified by:* Tamarin, vectors.
 
 > **R-CH-4.** The source signature covers the header hash and the hash of the encrypted content; for a
@@ -738,19 +742,25 @@ distinguishes channels by it but does not know which channel it is.
 > *Serves:* L5. *Verified by:* vectors.
 
 > **R-CH-15.** A blob is transferred in segments separately from the publication, in the same binary
-> frame as a stream chunk. Each segment is encrypted with the blob key; the associated data includes the
-> publication header hash, the segment number, and a last-segment flag. A reader therefore verifies each
-> segment at once and detects a truncated blob. The hash in the header is SHA-256 of the whole encrypted
-> blob: a relay verifies the blob by it without the key and does not serve it to readers before
-> verification. A reader requests segments by publication header hash and segment number, from any
-> position. The blob is delivered to the application after all segments are verified.
+> frame as a stream chunk. Each segment is encrypted with the blob key, with the segment number as the
+> nonce and the last-segment flag as associated data. A reader therefore verifies each segment at once
+> and detects a truncated blob. The source encrypts the blob segment by segment into host storage as
+> the application writes it, and signs the header when the blob is complete. The hash in the header is
+> SHA-256 of the whole encrypted blob: a relay verifies the blob by it without the key and does not
+> serve it to readers before verification. The source and relays serve a blob while they retain its
+> publication, so a source publishes a blob only at depth 1 or more. A reader requests segments by
+> publication header hash and segment number, from any position, and delivers each verified segment to
+> the application in order; the segment with the last-segment flag completes the blob.
 > *Serves:* S2. *Verified by:* vectors, fuzzing.
 
 > **R-CH-16.** Channel numbers 0..15 are reserved for the bus itself. Channel 0 is the node info: an
 > ordinary encrypted channel to which any valid member may publish. Its readers are all valid members
 > with the read right. The content of a channel 0 publication is `NodeInfo` (Appendix B, Section B.5).
 > The core publishes it itself: the node name is taken from pairing and changed by the "set node name"
-> operation (R-API-2). Numbers 1..15 are reserved. Sealing key claims and join requests are not channel
+> operation, and the application part, which the core does not parse, is set by the "set application
+> node info" operation (R-API-2). The application part lets a profile publish slowly changing state of
+> each node without a channel of its own; it is visible to every valid member with the read right, and
+> only the latest value is kept. Numbers 1..15 are reserved. Sealing key claims and join requests are not channel
 > traffic; they are control-plane objects (Section 4). The application cannot publish to these channels
 > through the local interface.
 > *Serves:* S16. *Verified by:* interface test.
@@ -1116,7 +1126,8 @@ Appendix B, Section B.10.
 > *Serves:* R-ARC-1. *Verified by:* code review, model.
 
 > **R-CORE-2.** The output effects of the core are: send a frame on a link; persist a record; deliver a
-> publication, a call, or stream data to the application; request a host operation with the device,
+> publication, a call, stream data, or a blob segment to the application; report a membership change to
+> the application; request a host operation with the device,
 > presence, or root key (the host produces a presence or root key signature only after user
 > confirmation; the result arrives as an event, and the core does not wait for it); report a rejection
 > with a rule code. There are no other outputs.
@@ -1170,14 +1181,17 @@ Appendix B, Section B.10.
 > cryptography and randomness table.
 > *Serves:* R-ARC-1. *Verified by:* binding tests.
 
-> **R-API-2.** The local interface gives the application these operations: publish; read a channel;
+> **R-API-2.** The local interface gives the application these operations: publish; publish with a
+> blob written in pieces of any size (R-CH-15); fetch a blob from any segment; read a channel;
 > subscribe to a channel; set the readers of its own channel (a list of devices, or all valid members
 > with the read right; a key request from a device outside the list is not answered); invoke an action
 > (with a flag stating whether it is idempotent, R-CALL-13); reply to a call; register an action handler;
-> write and read a stream; set the node name (the core publishes it to channel 0, R-CH-16); read the bus
-> state. The bus state is a snapshot without side effects: bus identifier, root generation, checkpoint
-> number, halted flag, known valid members with their rights, connected links, core memory usage. The
-> snapshot contains no secrets. Until the application sets them, the readers of a channel are all valid
+> write and read a stream; set the node name and the application node info (the core publishes both to
+> channel 0, R-CH-16); read the bus state. The bus state is a snapshot without side effects: bus
+> identifier, root generation, checkpoint number, root device, halted flag, known valid members with
+> their rights, connected links, core memory usage. The snapshot contains no secrets. After accepting a
+> checkpoint or a passport the core reports a membership change with the root generation and the
+> checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
 > members with the read right. Subscribing delivers the channel's retained publications at once. On the
 > root device the interface also gives the owner's operations, each confirmed through the root key
 > (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and

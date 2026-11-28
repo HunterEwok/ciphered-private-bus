@@ -75,7 +75,7 @@ headroom shows how much room they have.
 | `Call` | 5470 | 2 | 9 | 10914 |
 | `Passport` | 4877 | 4 | 128 | 11507 |
 | `Reply` | 4525 | 1 | 6 | 11859 |
-| `Publication` | 4389 | 3 | 10 | 11995 |
+| `Publication` | 4424 | 3 | 10 | 11960 |
 | `JoinRequest` | 1596 | 2 | 6 | 14788 |
 | `Refusal` with a sealing key claim | 1465 | 1 | 7 | 14919 |
 | `KeyGrant` | 1412 | 2 | 10 | 14972 |
@@ -91,8 +91,8 @@ headroom shows how much room they have.
 | Other unsigned messages: `Nonce`, `BlobGet`, `RelayRefusal`, `NonceRequest`, `PairConfirm`, `Auth`, `PairReply`, `Get`, `RelayGet`, `PairDone`, `PairAbort` | 6 to 93 | 1 | ≤ 6 | > 16290 |
 
 Sealed bodies are decoded separately, with their own depth count: relay access plaintext 4554 bytes
-(depth 3, a list of pairs), reply plaintext 4395, command 4112, publication content 4109, join request
-body 310, `PairDevice` 275, `PairBus` 219, `NodeInfo` 68; depth at most 2 in every other case. The deepest structure of the format is the passport: triple, `rest`,
+(depth 3, a list of pairs), reply plaintext 4395, command 4112, publication content 4144, join request
+body 310, `PairDevice` 275, `PairBus` 219, `NodeInfo` 4096; depth at most 2 in every other case. The deepest structure of the format is the passport: triple, `rest`,
 permit list, permit, depth 4. The longest lists hold 128 items: permits, the relays of a checkpoint, and
 the version lists of `Hello` and `PairInit`. A signed object is currently nested inside another object
 at most one level deep (a sealing key claim in `Refusal`, a head in `HaltProof`); R-FMT-4 permits two.

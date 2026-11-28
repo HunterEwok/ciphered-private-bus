@@ -36,6 +36,15 @@ pub const MAX_NAME: usize = 64;
 pub const FIRST_APP_CHANNEL: u16 = 16;
 /// Highest action number (D5).
 pub const MAX_ACTION: u8 = 64;
+/// Largest application part of the node info, in bytes (R-CH-16, Appendix B, Section B.5).
+///
+/// The node info is publication data, so its encoding is at most [`MAX_DATA`] bytes. Without
+/// the application part it takes at most 68 bytes, and the key and the byte string header of
+/// the application part take 4 more: 4096 - 68 - 4 = 4024.
+pub const MAX_APP_INFO: usize = 4024;
+/// Highest number of segments of a blob: the segment number is a 4-byte AEAD nonce
+/// (Appendix B, Section B.5).
+pub const MAX_BLOB_SEGMENTS: u32 = 0x7fff_ffff;
 
 /// A device identifier: the first 16 bytes of the hash of its device key (Section 13.1).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -178,6 +187,18 @@ pub enum Readers {
     Only(Vec<DeviceId>),
 }
 
+/// What a publication says about its blob. The blob itself is fetched with
+/// [`LocalApi::fetch_blob`] and arrives in segments (R-CH-15).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BlobInfo {
+    /// The length of the blob, in bytes.
+    pub size: u64,
+    /// The number of segments; [`Event::BlobSegment`] counts them from 0.
+    pub segments: u32,
+    /// Bytes per segment; the last segment may be shorter.
+    pub segment_size: u32,
+}
+
 /// A publication delivered to or read by the application.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Publication {
@@ -189,9 +210,13 @@ pub struct Publication {
     pub number: u64,
     /// The data, up to [`MAX_DATA`] bytes.
     pub data: Vec<u8>,
-    /// The blob, delivered whole (R-CH-15).
-    pub blob: Option<Vec<u8>>,
+    /// The blob's size and segment count, if the publication has a blob.
+    pub blob: Option<BlobInfo>,
 }
+
+/// A blob being written by [`LocalApi::begin_blob`].
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct BlobWriteId(pub u64);
 
 /// A call made by this node, as returned by [`LocalApi::invoke`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -318,12 +343,51 @@ pub enum Event {
         /// The channel.
         channel: Channel,
     },
-    /// A member published its name on channel 0 (R-CH-16).
-    NodeName {
+    /// A member published its node info on channel 0 (R-CH-16).
+    NodeInfo {
         /// The member.
         device: DeviceId,
         /// Its name.
         name: String,
+        /// The application part, opaque to the core; empty if the member set none.
+        app: Vec<u8>,
+    },
+    /// The node accepted a checkpoint or a passport: the members, their rights, or the root
+    /// device may have changed. [`LocalApi::state`] gives the new picture.
+    MembershipChanged {
+        /// The root generation.
+        generation: u32,
+        /// The checkpoint number.
+        checkpoint: u32,
+    },
+    /// A verified segment of a blob being fetched. Segments arrive in order; the one with
+    /// `last` set completes the blob.
+    BlobSegment {
+        /// The source device.
+        source: DeviceId,
+        /// The channel.
+        channel: Channel,
+        /// The publication number.
+        number: u64,
+        /// The segment number, from 0.
+        segment: u32,
+        /// The offset of the segment in the blob, in bytes.
+        offset: u64,
+        /// The segment's bytes.
+        data: Vec<u8>,
+        /// This is the last segment.
+        last: bool,
+    },
+    /// A blob fetch stopped and will not resume.
+    BlobFailed {
+        /// The source device.
+        source: DeviceId,
+        /// The channel.
+        channel: Channel,
+        /// The publication number.
+        number: u64,
+        /// Why.
+        report: Report,
     },
     /// A call to an action this node registered.
     IncomingCall {
@@ -378,6 +442,9 @@ pub struct BusState {
     pub generation: u32,
     /// The checkpoint number.
     pub checkpoint: u32,
+    /// The root device named by the checkpoint. It changes with a root change and with a
+    /// checkpoint that moves the root to another device (R-MEM-17).
+    pub root_device: DeviceId,
     /// Whether the node is halted.
     pub halted: bool,
     /// Known valid members with their rights.
@@ -399,18 +466,55 @@ pub trait LocalApi {
     /// `api/reserved-channel`, `api/data-too-large`, `api/depth-too-large`, `mem/halted`.
     fn publish(&mut self, channel: Channel, data: &[u8], depth: u16) -> Result<u64, Report>;
 
-    /// Publishes `data` with a blob of any size, delivered whole (R-CH-15).
+    /// Starts a publication with a blob (R-CH-15). The blob is passed in pieces of any size
+    /// with [`LocalApi::write_blob`]; the core encrypts it segment by segment into host
+    /// storage, so it never holds the whole blob in memory. [`LocalApi::finish_blob`]
+    /// publishes it. A blob is served while its publication is retained, so `depth` is at
+    /// least 1.
     ///
     /// # Errors
-    /// As [`LocalApi::publish`].
-    fn publish_blob(&mut self, channel: Channel, data: &[u8], blob: &[u8], depth: u16) -> Result<u64, Report>;
+    /// `api/reserved-channel`, `api/data-too-large`, `api/depth-too-large`, `api/bad-blob`,
+    /// `mem/halted`.
+    fn begin_blob(&mut self, channel: Channel, data: &[u8], depth: u16) -> Result<BlobWriteId, Report>;
 
-    /// The retained publications of a channel, in number order. For an own channel, the
-    /// source's retained publications.
+    /// Appends bytes to a blob being written.
+    ///
+    /// # Errors
+    /// `api/unknown-id`, `api/data-too-large` past the largest blob.
+    fn write_blob(&mut self, id: BlobWriteId, bytes: &[u8]) -> Result<(), Report>;
+
+    /// Publishes a written blob and returns the publication number. The number is taken
+    /// now, so publications made while the blob was written keep their order.
+    ///
+    /// # Errors
+    /// `api/unknown-id`, `api/bad-blob` for an empty blob, `mem/halted`, and the errors of
+    /// [`LocalApi::publish`].
+    fn finish_blob(&mut self, id: BlobWriteId) -> Result<u64, Report>;
+
+    /// Drops a blob being written.
+    ///
+    /// # Errors
+    /// `api/unknown-id`.
+    fn abort_blob(&mut self, id: BlobWriteId) -> Result<(), Report>;
+
+    /// Fetches the blob of a retained publication from segment `first` on; the segments
+    /// arrive as [`Event::BlobSegment`]. Calling it again for the same publication restarts
+    /// the fetch from `first`, which resumes a fetch cut by a reboot.
+    ///
+    /// # Errors
+    /// `api/unknown-id` if the node holds no such publication with a blob or `first` is past
+    /// its last segment, `mem/halted`.
+    fn fetch_blob(&mut self, source: DeviceId, channel: Channel, number: u64, first: u32) -> Result<(), Report>;
+
+    /// The retained publications of a channel that this node holds, in number order; for an
+    /// own channel, the source's retained publications. The node holds what arrived under a
+    /// key it has: channels whose readers are all members grant the key without a request,
+    /// while for a channel with a reader list the key may not have arrived before
+    /// [`LocalApi::subscribe`].
     fn read(&self, source: DeviceId, channel: Channel) -> Vec<Publication>;
 
-    /// Asks the source for the channel key and from then on delivers the channel's
-    /// publications (R-CH-18).
+    /// Asks the source for the channel key if the node has none, delivers what is retained
+    /// at once, and from then on delivers the channel's publications as events (R-CH-18).
     ///
     /// # Errors
     /// `mem/halted`.
@@ -449,6 +553,14 @@ pub trait LocalApi {
     /// # Errors
     /// `api/name-too-long`, `mem/halted`.
     fn set_name(&mut self, name: &str) -> Result<(), Report>;
+
+    /// Sets the application part of the node info, opaque to the core; the core publishes
+    /// it on channel 0 with the name (R-CH-16). Every valid member with the read right
+    /// receives it and only the latest is kept, so it suits slowly changing state.
+    ///
+    /// # Errors
+    /// `api/app-info-too-large`, `mem/halted`.
+    fn set_app_info(&mut self, app: &[u8]) -> Result<(), Report>;
 
     /// A snapshot of the bus state.
     fn state(&self) -> BusState;

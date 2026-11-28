@@ -86,7 +86,7 @@ not know about them.
 | Sealing key | `SealKey` | X-Wing key, rotated by epoch. Held by the core | R-KEY-2..4 |
 | Channel key | `ChannelKey` | 32 bytes per pair (source, channel) | R-CH-1 |
 | Content key | `content_key` | Derived from the channel key and the publication header | R-CH-3, B.8 |
-| Blob key | `blob_key` | Derived the same way, with a different label | R-CH-3, B.8 |
+| Blob key | `blob_key` | 32 random bytes per blob, carried in the publication content | R-CH-3, B.5 |
 | Reply key | `reply_key` | Exported from the HPKE context of the call | R-CALL-9, B.8 |
 | Stream keys | `stream_key_out`, `stream_key_in` | One per direction, exported from the HPKE context of the call | R-STR-1, B.8 |
 | Relay epoch secret | `relay_secret` | 32 bytes per relay epoch, known to members only | R-REL-13, B.10 |
@@ -163,7 +163,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Blob segment | `BlobSegment` | One binary frame | R-CH-15, B.7 |
 | Blob segment request | `BlobGet` | | B.5 |
 | Content padding | `pad` | Up to a padding bucket | R-CH-14 |
-| Node info channel | `CHANNEL_NODE_INFO = 0` | Device name and description | R-CH-16 |
+| Node info channel | `CHANNEL_NODE_INFO = 0` | Device name and the application part | R-CH-16 |
 | Node info | `NodeInfo` | Content of channel 0 | R-CH-16, B.5 |
 
 ## 8. Calls and Streams
@@ -236,6 +236,8 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Take effects | `cpb_next_out` | In emission order | R-API-1 |
 | Host table | `HostKeys { random, generate, public_key, sign }` | Randomness and three key operations | R-ARC-9 |
 | Publish | `publish` | | R-API-2 |
+| Publish with a blob | `begin_blob`, `write_blob`, `finish_blob` | The blob is written in pieces and encrypted into host storage | R-API-2, R-CH-15 |
+| Fetch a blob | `fetch_blob` | From any segment; segments arrive in order | R-API-2, R-CH-15 |
 | Read a channel | `read` | | R-API-2 |
 | Subscribe to a channel | `subscribe` | | R-API-2 |
 | Set the readers of a channel | `set_readers` | A list of devices, or all valid members with the read right | R-API-2 |
@@ -244,7 +246,9 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Register an action handler | `on_action` | | R-API-2 |
 | Write and read a stream | `stream_write`, `stream_read` | | R-API-2 |
 | Set the node name | `set_node_name` | Publishes a new node info | R-API-2 |
+| Set the application node info | `set_app_info` | Publishes a new node info with the application part | R-API-2 |
 | Read the bus state | `bus_state` | A snapshot without side effects and without secrets | R-API-2 |
+| Membership change | `MembershipChanged` | Reported after a checkpoint or a passport is accepted | R-API-2, R-CORE-2 |
 
 ## 12. Errors and Codes
 

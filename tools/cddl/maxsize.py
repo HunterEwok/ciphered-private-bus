@@ -87,7 +87,8 @@ name64 = "x" * 64
 join_sealed = {1: P256, 2: name64, 3: B(32), 4: P256, 5: SIG}
 # data + pad <= 4096: the two-header split is the largest encoding
 pub_content = max(
-    ({1: 65535, 3: B(d), 4: B(4096 - d)} if d < 4096 else {1: 65535, 3: B(4096)}
+    ({1: 65535, 3: B(d), 4: B(4096 - d), 5: B(32)} if d < 4096
+     else {1: 65535, 3: B(4096), 5: B(32)}
      for d in range(1, 4097)),
     key=lambda m: len(enc(m)))
 command = {1: 64, 2: B(4096), 3: 1, 4: 2**32 - 1}
@@ -194,7 +195,7 @@ inner = {  # decoded on their own (R-FMT-4)
     "ReplyPlain": reply_plain,
     "PairBus": {1: B(32), 2: P256, 3: SLH, 4: P256, 5: SEQ},
     "PairDevice": {1: P256, 2: P256, 3: name64, 4: SIG},
-    "NodeInfo": {1: name64},
+    "NodeInfo": {1: name64, 2: B(4024)},
     "RelayAccessPlain": relay_access_plain,
 }
 

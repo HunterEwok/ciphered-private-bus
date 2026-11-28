@@ -61,6 +61,24 @@ core follows the same choices.
 - On its own "reset nonces" a node also forgets the nonces it holds as a commander, so its next
   call starts with a nonce request instead of a stale nonce that would end as "outcome unknown".
 
+## Blobs, node info and membership events
+
+- **Blobs** (R-CH-15). `begin_blob`, `write_blob` in pieces of any size, and `finish_blob`
+  publish a blob; the publication carries `BlobInfo` (size, segment count, segment size), and
+  `fetch_blob` from any segment delivers `Event::BlobSegment` in order, the last one marked.
+  The source serves a blob while it retains the publication, so a blob needs depth 1 or more;
+  a fetch whose publication leaves retention ends with `Event::BlobFailed` (`blob/gone`). The
+  simulator fetches one segment at a time from the source and asks again for the outstanding
+  segment when the link to the source comes back; calling `fetch_blob` again restarts a fetch.
+  The segment size is `Profile::blob_segment`, by default the 4096-byte segment frame of
+  Section 13.2 less the frame header and the authentication tag.
+- **Node info** (R-CH-16). `set_name` and `set_app_info` publish the name and the application
+  part on channel 0; every member receives `Event::NodeInfo`. Until `set_name`, a node's name is
+  its device identifier, standing in for the name from pairing.
+- **Membership** (R-API-2). Every accepted checkpoint or passport raises
+  `Event::MembershipChanged`; `state()` then gives the members, the root generation, the
+  checkpoint and the root device.
+
 ## Scope of this version
 
 Milestone M1: membership without enrollment, channels, calls. Enrollment (pairing and join

@@ -31,6 +31,8 @@ cases = {
  "Relayed publication without depth": ("Relayed", {0:19,1:3,2:B(16),4:B(16),6:1,9:B(32),10:B(100)}),
  "Relayed body 16281": ("Relayed", {0:19,1:6,2:B(16),9:B(32),10:B(16281)}),
  "Call enc 5249": ("Call", [{1:B(32),2:B(32),3:B(16),4:B(16),5:B(16),6:1,7:1,8:1,9:B(5249)}, SIG]),
+ "PubContent blob key 31 bytes": ("PubContent", {1:16,3:B(10),5:B(31)}),
+ "NodeInfo app 4025 bytes": ("NodeInfo", {1:"n",2:B(4025)}),
 }
 for n,(rule,v) in cases.items():
     try: ok,_=validate(rule,v)

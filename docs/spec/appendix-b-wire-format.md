@@ -60,7 +60,7 @@ Encoding rules common to all sections:
 - Integers assembled from hash bytes, and all integers in binary headers, are big-endian. The
   ChaCha20-Poly1305 nonce is 12 bytes: the number or counter is written into the trailing bytes,
   big-endian, and the remaining bytes are zero. In binary frames (Section B.7) the associated data is
-  the header bytes as they are, without hashing.
+  the header bytes as they are, without hashing; a blob segment is the one exception (Section B.7).
 - The signature length is determined by the key algorithm. `bstr(64)` in the tables refers to ES256.
 - Unused bits in `Passport.rights` (4..7), `StreamChunk.flags` (4..7), and `BlobSegment.flags` (1..7)
   MUST be zero; otherwise the object is rejected.
@@ -348,6 +348,7 @@ The `blob` field:
 | 2 | `flags` | uint | Always 0 in version 1; the field is omitted |
 | 3 | `data` | bstr(≤ 4096) | Optional |
 | 4 | `pad` | bstr | Optional: absent when its length would be zero. Zero bytes. The length of `data` plus `pad` equals a padding bucket and does not exceed 4096: the largest bucket equals the largest data. A publication with a greater length or with a non-zero padding byte is rejected |
+| 5 | `blob_key` | bstr(32) | The blob key (R-CH-3): 32 random bytes drawn by the source for this blob. Present exactly when the header has the `blob` field; otherwise the publication is rejected |
 
 Largest publication: about 4.3 KiB. The retention depth of a channel is set by the latest accepted
 publication: when the depth decreases, surplus older publications are deleted immediately. A clearing
@@ -374,8 +375,11 @@ after enrollment and after the "set node name" operation (R-API-2). The retentio
 | No. | Field | Type | Notes |
 | --- | --- | --- | --- |
 | 1 | `name` | tstr, 1..64 bytes | Node name. The initial value comes from pairing (`PairDevice` field 3) |
+| 2 | `app` | bstr, 1..4024 bytes | Optional. The application part, set by the application and not parsed by the core |
 
-Further fields go into the extension range 256..65535. The largest size without extensions is 68 bytes.
+`NodeInfo` is publication data, so its encoding is at most 4096 bytes. Without `app` it takes at most 68
+bytes, and the key and byte string header of `app` take 4 more, so `app` is at most 4096 - 68 - 4 = 4024
+bytes. The extension range 256..65535 is reserved for fields of the bus; applications use `app`.
 
 ## B.6. Calls
 
@@ -483,6 +487,12 @@ is just the 16-byte authentication tag.
 | 34 | 4 | `segment` | AEAD nonce |
 | 38 | ≤ 16346 | ciphertext | ChaCha20-Poly1305 under the blob key. The ciphertext of every segment except the last has length `seg` from the publication header; the last is not longer and carries at least one byte of data. The number of segments and the offset of each therefore follow from `size` and `seg` |
 
+Unlike the other binary frames, the associated data of a segment is the `flags` byte alone. The segment
+number is the nonce, and `pub_id` cannot be authenticated, because it is the hash of a header that
+contains the hash of the encrypted segments; it only names the blob for lookup. The blob key is unique
+to the blob and is carried inside the publication content, so a segment decrypts only as the segment
+of its own blob at its own position.
+
 ## B.8. Labels and Derivations
 
 A label is an ASCII string. It is always followed by the byte 0x00, so no label is a prefix of another
@@ -520,7 +530,6 @@ labelled input.
 | `cpb chan label v1` | Channel label |
 | `cpb chan commit v1` | Channel key commitment |
 | `cpb content v1` | Content key |
-| `cpb blob v1` | Blob key |
 | `cpb fingerprint v1` | Key fingerprint for comparison |
 | `cpb pair v1` | CPace channel identifier |
 | `cpb pair hash v1` | Pairing transcript hash |
@@ -537,7 +546,7 @@ Formulas:
 - `ChannelLabel = SHA-256("cpb chan label v1" || 0x00 || bus || source || channel as 2 bytes)[0..16]`
 - `KeyCommit = HKDF-SHA256(key = K, info = "cpb chan commit v1" || 0x00, length 32)`
 - `content_key = HKDF-SHA256(key = K, info = "cpb content v1" || 0x00 || pub_id, length 32)`
-- `blob_key` is derived the same way, with the label `cpb blob v1`
+- `blob_key` is not derived: it is 32 random bytes carried in the publication content (field 5)
 - `reply_key` and the stream keys: `Context.Export(label || 0x00, 32)` per [RFC9180], Section 5.3
 - Aliases, link and period keys, the bus alias, the wrapping key, and the members tree: Section B.10
 - `KeyFingerprint`: the first 8 bytes of `SHA-256("cpb fingerprint v1" || 0x00 || encode(Key))` as a

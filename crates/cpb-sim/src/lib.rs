@@ -50,5 +50,5 @@ mod node;
 mod rng;
 mod sim;
 
-pub use node::Profile;
+pub use node::{DEFAULT_BLOB_SEGMENT, Profile};
 pub use sim::{Config, ERROR_MODE_VAR, Faults, NodeApi, Sim, StepLimit};

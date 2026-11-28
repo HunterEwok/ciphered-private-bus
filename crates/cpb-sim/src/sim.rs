@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BusState, CallId, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestId, IncomingId,
+    Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestId, IncomingId,
     InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights,
 };
 
@@ -412,9 +412,29 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.publish(channel, data, depth)).unwrap_or(Err(e))
     }
 
-    fn publish_blob(&mut self, channel: Channel, data: &[u8], blob: &[u8], depth: u16) -> Result<u64, Report> {
+    fn begin_blob(&mut self, channel: Channel, data: &[u8], depth: u16) -> Result<BlobWriteId, Report> {
         let e = self.gone();
-        self.with(|n| n.publish_blob(channel, data, blob, depth)).unwrap_or(Err(e))
+        self.with(|n| n.begin_blob(channel, data, depth)).unwrap_or(Err(e))
+    }
+
+    fn write_blob(&mut self, id: BlobWriteId, bytes: &[u8]) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.write_blob(id, bytes)).unwrap_or(Err(e))
+    }
+
+    fn finish_blob(&mut self, id: BlobWriteId) -> Result<u64, Report> {
+        let e = self.gone();
+        self.with(|n| n.finish_blob(id)).unwrap_or(Err(e))
+    }
+
+    fn abort_blob(&mut self, id: BlobWriteId) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.abort_blob(id)).unwrap_or(Err(e))
+    }
+
+    fn fetch_blob(&mut self, source: DeviceId, channel: Channel, number: u64, first: u32) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.fetch_blob(source, channel, number, first)).unwrap_or(Err(e))
     }
 
     fn read(&self, source: DeviceId, channel: Channel) -> Vec<Publication> {
@@ -456,6 +476,11 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.set_name(name)).unwrap_or(Err(e))
     }
 
+    fn set_app_info(&mut self, app: &[u8]) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.set_app_info(app)).unwrap_or(Err(e))
+    }
+
     fn state(&self) -> BusState {
         self.sim.nodes.get(&self.id).map_or_else(
             || BusState {
@@ -463,6 +488,7 @@ impl LocalApi for NodeApi<'_> {
                 device: self.id,
                 generation: 0,
                 checkpoint: 0,
+                root_device: self.sim.root_device,
                 halted: false,
                 members: Vec::new(),
                 links: Vec::new(),

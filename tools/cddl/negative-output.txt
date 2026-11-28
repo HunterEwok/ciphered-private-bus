@@ -19,6 +19,8 @@ Relayed control of kind 17               rejected
 Relayed publication without depth        rejected
 Relayed body 16281                       rejected
 Call enc 5249                            rejected
+PubContent blob key 31 bytes             rejected
+NodeInfo app 4025 bytes                  rejected
 float in extension field                 rejected
 negative int in extension                rejected
 bool in extension                        rejected

@@ -14,9 +14,9 @@
 
 use cpb_api::{
     Action, ActionSet, CallOutcome, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestKind, InvokeOptions,
-    LocalApi, OwnerOperation, Permit, Readers, ResultCode, Rights, RuleCode,
+    LocalApi, MAX_APP_INFO, OwnerOperation, Permit, Readers, ResultCode, Rights, RuleCode,
 };
-use cpb_sim::{Config, Faults, Sim};
+use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, Faults, Sim};
 
 const ROOT: DeviceId = DeviceId::from_u64(1);
 const A: DeviceId = DeviceId::from_u64(2);
@@ -179,33 +179,135 @@ fn interface_refusals_have_rule_codes() {
     assert_eq!(e.code(), RuleCode::API_NOT_ROOT);
 }
 
-#[test]
-fn blobs_arrive_whole() {
-    let mut sim = triangle(ErrorMode::Release);
-    sim.node(B).unwrap().subscribe(A, CH).unwrap();
-    let blob = vec![7u8; 100_000];
-    sim.node(A).unwrap().publish_blob(CH, b"photo", &blob, 1).unwrap();
-    sim.settle().unwrap();
-    let got = sim.node(B).unwrap().read(A, CH);
-    assert_eq!(got[0].blob.as_deref(), Some(&blob[..]));
+/// A received segment: number, offset, bytes, last.
+type Segment = (u32, u64, Vec<u8>, bool);
+
+/// Collects the blob segments and blob failures from a node's events, in arrival order.
+fn segments(sim: &mut Sim, at: DeviceId) -> (Vec<Segment>, Vec<RuleCode>) {
+    let mut segs = Vec::new();
+    let mut failed = Vec::new();
+    for e in sim.drain_events(at) {
+        match e {
+            Event::BlobSegment { segment, offset, data, last, .. } => segs.push((segment, offset, data, last)),
+            Event::BlobFailed { report, .. } => failed.push(report.code()),
+            _ => {}
+        }
+    }
+    (segs, failed)
 }
 
 #[test]
-fn node_names_reach_every_member() {
+fn blobs_arrive_in_segments() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    let blob: Vec<u8> = (0..10_000u32).map(|i| u8::try_from(i % 251).unwrap()).collect();
+    let mut a = sim.node(A).unwrap();
+    let w = a.begin_blob(CH, b"photo", 1).unwrap();
+    for piece in blob.chunks(3_000) {
+        a.write_blob(w, piece).unwrap();
+    }
+    let no = a.finish_blob(w).unwrap();
+    sim.settle().unwrap();
+    let got = sim.node(B).unwrap().read(A, CH);
+    let info = got[0].blob.unwrap();
+    assert_eq!((info.size, info.segments, info.segment_size), (10_000, 3, DEFAULT_BLOB_SEGMENT));
+    sim.drain_events(B);
+
+    sim.node(B).unwrap().fetch_blob(A, CH, no, 0).unwrap();
+    sim.settle().unwrap();
+    let (segs, failed) = segments(&mut sim, B);
+    assert!(failed.is_empty());
+    assert_eq!(segs.iter().map(|s| (s.0, s.3)).collect::<Vec<_>>(), vec![(0, false), (1, false), (2, true)]);
+    let mut whole = Vec::new();
+    for (_, offset, data, _) in &segs {
+        assert_eq!(*offset, u64::try_from(whole.len()).unwrap());
+        whole.extend_from_slice(data);
+    }
+    assert_eq!(whole, blob);
+
+    // A fetch resumes from any segment.
+    sim.node(B).unwrap().fetch_blob(A, CH, no, 2).unwrap();
+    sim.settle().unwrap();
+    let (segs, _) = segments(&mut sim, B);
+    assert_eq!(segs.len(), 1);
+    assert_eq!(segs[0].2, blob[2 * 4042..]);
+}
+
+#[test]
+fn blob_fetch_ends_when_the_publication_leaves_retention() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    let mut a = sim.node(A).unwrap();
+    let w = a.begin_blob(CH, b"v1", 1).unwrap();
+    a.write_blob(w, &[1u8; 9_000]).unwrap();
+    let no = a.finish_blob(w).unwrap();
+    sim.settle().unwrap();
+    sim.drain_events(B);
+    sim.node(B).unwrap().fetch_blob(A, CH, no, 0).unwrap();
+    // A newer publication at depth 1 replaces it before the first segment is served.
+    sim.node(A).unwrap().publish(CH, b"v2", 1).unwrap();
+    sim.settle().unwrap();
+    let (segs, failed) = segments(&mut sim, B);
+    assert!(segs.is_empty());
+    assert_eq!(failed, vec![RuleCode::BLOB_GONE]);
+}
+
+#[test]
+fn blob_arguments_are_checked() {
+    let mut sim = triangle(ErrorMode::Release);
+    let mut a = sim.node(A).unwrap();
+    assert_eq!(a.begin_blob(CH, b"", 0).unwrap_err().code(), RuleCode::API_BAD_BLOB);
+    let w = a.begin_blob(CH, b"", 1).unwrap();
+    assert_eq!(a.finish_blob(w).unwrap_err().code(), RuleCode::API_BAD_BLOB);
+    assert_eq!(a.write_blob(w, b"x").unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    let w = a.begin_blob(CH, b"", 1).unwrap();
+    a.abort_blob(w).unwrap();
+    assert_eq!(a.finish_blob(w).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    assert_eq!(a.fetch_blob(B, CH, 1, 0).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+#[test]
+fn node_info_reaches_every_member() {
     let mut sim = triangle(ErrorMode::Release);
     sim.node(A).unwrap().set_name("Kitchen sensor").unwrap();
+    sim.node(A).unwrap().set_app_info(b"profile:on").unwrap();
     sim.settle().unwrap();
     for d in [ROOT, B] {
-        let names: Vec<String> = sim
+        let infos: Vec<(String, Vec<u8>)> = sim
             .drain_events(d)
             .into_iter()
             .filter_map(|e| match e {
-                Event::NodeName { device, name } if device == A => Some(name),
+                Event::NodeInfo { device, name, app } if device == A => Some((name, app)),
                 _ => None,
             })
             .collect();
-        assert_eq!(names, vec!["Kitchen sensor".to_string()], "at {d}");
+        assert_eq!(infos.last(), Some(&("Kitchen sensor".to_string(), b"profile:on".to_vec())), "at {d}");
     }
+    let e = sim.node(A).unwrap().set_app_info(&vec![0u8; MAX_APP_INFO + 1]).unwrap_err();
+    assert_eq!(e.code(), RuleCode::API_APP_INFO_TOO_LARGE);
+    sim.node(A).unwrap().set_app_info(&vec![0u8; MAX_APP_INFO]).unwrap();
+}
+
+#[test]
+fn membership_changes_are_announced() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.drain_events(A);
+    let before = sim.node(A).unwrap().state();
+    assert_eq!(before.root_device, ROOT);
+    sim.admit(RELAY, Rights::READER, false, Vec::new());
+    sim.settle().unwrap();
+    let after = sim.node(A).unwrap().state();
+    let announced: Vec<(u32, u32)> = sim
+        .drain_events(A)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::MembershipChanged { generation, checkpoint } => Some((generation, checkpoint)),
+            _ => None,
+        })
+        .collect();
+    assert!(!announced.is_empty());
+    assert_eq!(announced.last(), Some(&(after.generation, after.checkpoint)));
+    assert!(after.members.iter().any(|m| m.device == RELAY));
 }
 
 /// A commands B: action 1 automatic, action 2 confirmation-class.

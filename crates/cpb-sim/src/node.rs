@@ -6,9 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BusState, CallId, CallOutcome, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestId,
-    HostRequestKind, IncomingId, InvokeOptions, MAX_DATA, MAX_NAME, Member, OwnerOperation, Permit, Publication,
-    Readers, Report, ResultCode, Rights, RuleCode,
+    Action, BlobInfo, BlobWriteId, BusState, CallId, CallOutcome, Channel, DeviceId, ErrorMode, Event, HostAnswer,
+    HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO, MAX_BLOB_SEGMENTS, MAX_DATA, MAX_NAME,
+    Member, OwnerOperation, Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode,
 };
 
 use crate::engine::calls::{CallBody, CmdRights, Commander, Next, SigKey, Target, Verdict};
@@ -25,11 +25,17 @@ pub struct Profile {
     pub number_block: u64,
     /// Retained sealing key epochs.
     pub retained_epochs: u32,
+    /// Bytes of blob per segment, before encryption.
+    pub blob_segment: u32,
 }
+
+/// The default segment: the 4096-byte segment frame of Section 13.2, less the 38-byte frame
+/// header and the 16-byte authentication tag (Appendix B, Section B.7).
+pub const DEFAULT_BLOB_SEGMENT: u32 = 4096 - 38 - 16;
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { max_depth: 16, number_block: 16, retained_epochs: 4 }
+        Self { max_depth: 16, number_block: 16, retained_epochs: 4, blob_segment: DEFAULT_BLOB_SEGMENT }
     }
 }
 
@@ -49,6 +55,8 @@ pub(crate) enum Body {
     StaleEpoch { epoch: u32, call: u64 },
     Call { body: CallBody, args: Vec<u8> },
     Reply { call: u64, code: ResultCode, data: Vec<u8>, next: u64 },
+    BlobGet { channel: Channel, number: u64, segment: u32 },
+    BlobSegment { channel: Channel, number: u64, segment: u32, data: Vec<u8>, last: bool },
 }
 
 impl Body {
@@ -71,6 +79,8 @@ impl Body {
             Self::StaleEpoch { .. } => "StaleEpoch",
             Self::Call { .. } => "Call",
             Self::Reply { .. } => "Reply",
+            Self::BlobGet { .. } => "BlobGet",
+            Self::BlobSegment { .. } => "BlobSegment",
         }
     }
 }
@@ -128,6 +138,15 @@ enum HostWait {
     Revoke(DeviceId),
 }
 
+/// A blob being written; in the core it goes to host storage segment by segment.
+#[derive(Clone, Debug)]
+struct Draft {
+    channel: Channel,
+    data: Vec<u8>,
+    depth: u16,
+    bytes: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Incoming {
     commander: DeviceId,
@@ -160,6 +179,13 @@ pub(crate) struct Node {
     pub(crate) links: BTreeSet<DeviceId>,
     pub(crate) log: Vec<String>,
     halt_reported: bool,
+    name: String,
+    app: Vec<u8>,
+    drafts: BTreeMap<BlobWriteId, Draft>,
+    /// Blobs of own retained publications, as host storage holds them.
+    blobs: BTreeMap<(Channel, u64), Vec<u8>>,
+    /// Blob fetches in progress: the next segment expected.
+    fetches: BTreeMap<(DeviceId, Channel, u64), u32>,
 }
 
 fn too_large(n: usize) -> Result<(), Report> {
@@ -198,6 +224,11 @@ impl Node {
             links: BTreeSet::new(),
             log: Vec::new(),
             halt_reported: false,
+            name: id.to_string(),
+            app: Vec::new(),
+            drafts: BTreeMap::new(),
+            blobs: BTreeMap::new(),
+            fetches: BTreeMap::new(),
         };
         n.refresh_target();
         n
@@ -329,6 +360,8 @@ impl Node {
     }
 
     fn membership_changed(&mut self) {
+        let (generation, checkpoint) = (self.view.checkpoint.generation, self.view.checkpoint.number);
+        self.events.push_back(Event::MembershipChanged { generation, checkpoint });
         self.refresh_target();
         self.refresh_channels();
         let gone: Vec<DeviceId> = self.cmds.keys().filter(|t| self.view.valid(**t).is_none()).copied().collect();
@@ -339,16 +372,21 @@ impl Node {
 
     /// Applies a checkpoint and a passport made by this node's Root (R-MEM-3).
     pub(crate) fn root_records(&mut self, c: Checkpoint, p: Option<Passport>) {
-        if self.view.on_checkpoint(&c).is_ok() {
+        let mut accepted = false;
+        if self.view.on_checkpoint(&c) == Ok(Change::Accepted) {
+            accepted = true;
             self.flood(&Body::Checkpoint(c), None);
         }
         if let Some(p) = p {
-            if self.view.on_passport(&p).is_ok() {
+            if self.view.on_passport(&p) == Ok(Change::Accepted) {
+                accepted = true;
                 self.flood(&Body::Passport(p), None);
             }
         }
         self.check_halt();
-        self.membership_changed();
+        if accepted {
+            self.membership_changed();
+        }
     }
 
     fn on_checkpoint(&mut self, from: DeviceId, c: &Checkpoint) {
@@ -449,15 +487,20 @@ impl Node {
         }
     }
 
-    fn publish_inner(&mut self, ch: Channel, data: &[u8], blob: Option<&[u8]>, depth: u16) -> Result<u64, Report> {
-        self.halted_err()?;
-        too_large(data.len())?;
+    fn check_depth(&self, depth: u16) -> Result<(), Report> {
         if depth > self.profile.max_depth {
             return Err(Report::new(
                 RuleCode::API_DEPTH_TOO_LARGE,
                 format!("depth {depth}, limit {}", self.profile.max_depth),
             ));
         }
+        Ok(())
+    }
+
+    fn publish_inner(&mut self, ch: Channel, data: &[u8], blob: Option<BlobInfo>, depth: u16) -> Result<u64, Report> {
+        self.halted_err()?;
+        too_large(data.len())?;
+        self.check_depth(depth)?;
         if !self.own_passport().is_some_and(|p| p.rights.publish) && ch != Channel::NODE_INFO {
             return Err(Report::new(RuleCode::PUB_NO_RIGHT, format!("{} has no publish right", self.id)));
         }
@@ -476,14 +519,102 @@ impl Node {
         let oc = self.own.get_mut(&ch).ok_or_else(|| Report::new(RuleCode::API_RESERVED_CHANNEL, "no channel"))?;
         let p = oc
             .src
-            .publish(depth, data.to_vec(), blob.map(<[u8]>::to_vec), &readers, block)
+            .publish(depth, data.to_vec(), blob, &readers, block)
             .ok_or_else(|| Report::new(RuleCode::STORE_FAILED, format!("channel {} cannot publish now", ch.0)))?;
         let to: Vec<DeviceId> = oc.src.granted.iter().copied().collect();
         let no = p.no;
         for d in to {
             self.send(d, Body::Publication { channel: ch, publication: p.clone() });
         }
+        self.prune_blobs(ch);
         Ok(no)
+    }
+
+    /// Host storage keeps a blob while its publication is retained (R-CH-15).
+    fn prune_blobs(&mut self, ch: Channel) {
+        let retained: BTreeSet<u64> =
+            self.own.get(&ch).map(|oc| oc.src.retained.keys().copied().collect()).unwrap_or_default();
+        self.blobs.retain(|(c, n), _| *c != ch || retained.contains(n));
+    }
+
+    fn blob_info(&self, len: usize) -> Option<BlobInfo> {
+        let size = u64::try_from(len).ok()?;
+        let seg = u64::from(self.profile.blob_segment.max(1));
+        let segments = u32::try_from(size.div_ceil(seg)).ok().filter(|n| *n <= MAX_BLOB_SEGMENTS)?;
+        Some(BlobInfo { size, segments, segment_size: self.profile.blob_segment.max(1) })
+    }
+
+    /// The bytes of segment `i` of a blob held in host storage.
+    fn segment_of(blob: &[u8], info: BlobInfo, i: u32) -> Option<(u64, Vec<u8>, bool)> {
+        let seg = usize::try_from(info.segment_size).ok()?;
+        let start = usize::try_from(i).ok()?.checked_mul(seg)?;
+        let end = start.checked_add(seg)?.min(blob.len());
+        let bytes = blob.get(start..end)?.to_vec();
+        let last = i.checked_add(1)? == info.segments;
+        Some((u64::try_from(start).ok()?, bytes, last))
+    }
+
+    /// The retained publication `(s, ch, n)` as this node holds it.
+    fn held(&self, s: DeviceId, ch: Channel, n: u64) -> Option<&Pub> {
+        if s == self.id {
+            self.own.get(&ch).and_then(|oc| oc.src.retained.get(&n))
+        } else {
+            self.reading.get(&(s, ch)).and_then(|r| r.retained.get(&n))
+        }
+    }
+
+    /// Fetches whose publication left retention end here.
+    fn drop_gone_fetches(&mut self, s: DeviceId, ch: Channel) {
+        let gone: Vec<u64> = self
+            .fetches
+            .keys()
+            .filter(|(fs, fc, n)| *fs == s && *fc == ch && self.held(s, ch, *n).is_none())
+            .map(|(_, _, n)| *n)
+            .collect();
+        for n in gone {
+            self.fetches.remove(&(s, ch, n));
+            let report = Report::new(RuleCode::BLOB_GONE, format!("publication {n} of {s} on channel {}", ch.0));
+            self.log.push(format!("{} {}", self.id, report.log_line()));
+            self.events.push_back(Event::BlobFailed { source: s, channel: ch, number: n, report });
+        }
+    }
+
+    fn on_blob_get(&mut self, from: DeviceId, ch: Channel, n: u64, i: u32) {
+        let Some(info) = self.held(self.id, ch, n).and_then(|p| p.blob) else {
+            self.note(&format!("blob {n} on channel {} asked by {from} is not retained", ch.0));
+            return;
+        };
+        let seg = self.blobs.get(&(ch, n)).and_then(|b| Self::segment_of(b, info, i));
+        if let Some((_, data, last)) = seg {
+            self.send(from, Body::BlobSegment { channel: ch, number: n, segment: i, data, last });
+        }
+    }
+
+    fn on_blob_segment(&mut self, from: DeviceId, ch: Channel, n: u64, i: u32, data: Vec<u8>, last: bool) {
+        if self.fetches.get(&(from, ch, n)) != Some(&i) {
+            return;
+        }
+        let Some(info) = self.held(from, ch, n).and_then(|p| p.blob) else {
+            self.drop_gone_fetches(from, ch);
+            return;
+        };
+        let offset = u64::from(i).saturating_mul(u64::from(info.segment_size));
+        self.events.push_back(Event::BlobSegment {
+            source: from,
+            channel: ch,
+            number: n,
+            segment: i,
+            offset,
+            data,
+            last,
+        });
+        if last {
+            self.fetches.remove(&(from, ch, n));
+        } else {
+            let next = i.saturating_add(1);
+            self.fetches.insert((from, ch, n), next);
+            self.send(from, Body::BlobGet { channel: ch, number: n, segment: next });
+        }
     }
 
     fn request_key(&mut self, s: DeviceId, ch: Channel) {
@@ -538,6 +669,7 @@ impl Node {
             Ok(acc) => {
                 let retained = r.retained.contains_key(&p.no);
                 self.deliver(m.from, ch, p, acc, retained);
+                self.drop_gone_fetches(m.from, ch);
             }
             Err(RuleCode::PUB_NO_KEY) => {
                 self.reject(RuleCode::PUB_NO_KEY, format!("publication {} from {} on channel {}", p.no, m.from, ch.0));
@@ -549,17 +681,15 @@ impl Node {
 
     fn deliver(&mut self, s: DeviceId, ch: Channel, p: &Pub, acc: Accepted, retained: bool) {
         if ch == Channel::NODE_INFO {
-            if !p.is_empty() {
-                let name = String::from_utf8_lossy(&p.data).into_owned();
-                self.events.push_back(Event::NodeName { device: s, name });
+            if let Some((name, app)) = decode_node_info(&p.data) {
+                self.events.push_back(Event::NodeInfo { device: s, name, app });
             }
             return;
         }
         if !self.subscribed.contains(&(s, ch)) {
             return;
         }
-        let publication =
-            Publication { source: s, channel: ch, number: p.no, data: p.data.clone(), blob: p.blob.clone() };
+        let publication = Publication { source: s, channel: ch, number: p.no, data: p.data.clone(), blob: p.blob };
         match acc {
             Accepted::New { .. } if p.is_empty() && p.depth > 0 => {
                 self.events.push_back(Event::Cleared { source: s, channel: ch });
@@ -769,6 +899,12 @@ impl Node {
         let epoch = self.target.tepoch;
         self.send(peer, Body::Hello { passport, epoch });
         self.send_records(peer);
+        // A segment request lost with the old link is asked again.
+        let resume: Vec<(Channel, u64, u32)> =
+            self.fetches.iter().filter(|((s, _, _), _)| *s == peer).map(|((_, c, n), i)| (*c, *n, *i)).collect();
+        for (channel, number, segment) in resume {
+            self.send(peer, Body::BlobGet { channel, number, segment });
+        }
     }
 
     pub(crate) fn link_down(&mut self, peer: DeviceId) {
@@ -837,6 +973,16 @@ impl Node {
             Body::Reply { call, code, data, next } => {
                 self.on_reply(m.from, *call, *code, data.clone(), *next);
             }
+            Body::BlobGet { channel, number, segment } => {
+                if self.sender(m).is_some() {
+                    self.on_blob_get(m.from, *channel, *number, *segment);
+                }
+            }
+            Body::BlobSegment { channel, number, segment, data, last } => {
+                if self.sender(m).is_some() {
+                    self.on_blob_segment(m.from, *channel, *number, *segment, data.clone(), *last);
+                }
+            }
         }
     }
 
@@ -879,6 +1025,11 @@ impl Node {
         self.incoming.clear();
         self.host.clear();
         self.key_requested.clear();
+        // The retained publications are gone from RAM, so their blobs are no longer served;
+        // blobs being written and fetched are lost with the core state.
+        self.blobs.clear();
+        self.drafts.clear();
+        self.fetches.clear();
         self.links.clear();
         self.outbox.clear();
         self.note("reboot");
@@ -891,14 +1042,87 @@ impl Node {
         self.publish_inner(ch, data, None, depth)
     }
 
-    pub(crate) fn publish_blob(&mut self, ch: Channel, data: &[u8], blob: &[u8], depth: u16) -> Result<u64, Report> {
+    pub(crate) fn begin_blob(&mut self, ch: Channel, data: &[u8], depth: u16) -> Result<BlobWriteId, Report> {
         app_channel(ch)?;
-        self.publish_inner(ch, data, Some(blob), depth)
+        self.halted_err()?;
+        too_large(data.len())?;
+        self.check_depth(depth)?;
+        if depth == 0 {
+            return Err(Report::new(RuleCode::API_BAD_BLOB, "a blob at depth 0 would never be served"));
+        }
+        let id = BlobWriteId(self.fresh_id());
+        self.drafts.insert(id, Draft { channel: ch, data: data.to_vec(), depth, bytes: Vec::new() });
+        Ok(id)
+    }
+
+    pub(crate) fn write_blob(&mut self, id: BlobWriteId, bytes: &[u8]) -> Result<(), Report> {
+        let len = self.drafts.get(&id).map(|d| d.bytes.len().saturating_add(bytes.len()));
+        let Some(len) = len else {
+            return Err(Report::new(RuleCode::API_UNKNOWN_ID, format!("blob write {}", id.0)));
+        };
+        if self.blob_info(len).is_none() {
+            return Err(Report::new(RuleCode::API_DATA_TOO_LARGE, format!("{len} bytes exceed the largest blob")));
+        }
+        if let Some(d) = self.drafts.get_mut(&id) {
+            d.bytes.extend_from_slice(bytes);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_blob(&mut self, id: BlobWriteId) -> Result<u64, Report> {
+        let d = self
+            .drafts
+            .remove(&id)
+            .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("blob write {}", id.0)))?;
+        if d.bytes.is_empty() {
+            return Err(Report::new(RuleCode::API_BAD_BLOB, "the blob is empty"));
+        }
+        let info = self.blob_info(d.bytes.len()).ok_or_else(|| Report::new(RuleCode::API_DATA_TOO_LARGE, "blob"))?;
+        let no = self.publish_inner(d.channel, &d.data, Some(info), d.depth)?;
+        self.blobs.insert((d.channel, no), d.bytes);
+        self.prune_blobs(d.channel);
+        Ok(no)
+    }
+
+    pub(crate) fn abort_blob(&mut self, id: BlobWriteId) -> Result<(), Report> {
+        self.drafts
+            .remove(&id)
+            .map(|_| ())
+            .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("blob write {}", id.0)))
+    }
+
+    pub(crate) fn fetch_blob(&mut self, s: DeviceId, ch: Channel, n: u64, first: u32) -> Result<(), Report> {
+        self.halted_err()?;
+        let unknown = || Report::new(RuleCode::API_UNKNOWN_ID, format!("no blob {n} of {s} on channel {}", ch.0));
+        let info = self.held(s, ch, n).and_then(|p| p.blob).ok_or_else(unknown)?;
+        if first >= info.segments {
+            return Err(unknown());
+        }
+        if s == self.id {
+            // An own blob is in host storage already.
+            let blob = self.blobs.get(&(ch, n)).cloned().unwrap_or_default();
+            for i in first..info.segments {
+                if let Some((offset, data, last)) = Self::segment_of(&blob, info, i) {
+                    self.events.push_back(Event::BlobSegment {
+                        source: s,
+                        channel: ch,
+                        number: n,
+                        segment: i,
+                        offset,
+                        data,
+                        last,
+                    });
+                }
+            }
+            return Ok(());
+        }
+        self.fetches.insert((s, ch, n), first);
+        self.send(s, Body::BlobGet { channel: ch, number: n, segment: first });
+        Ok(())
     }
 
     pub(crate) fn read(&self, s: DeviceId, ch: Channel) -> Vec<Publication> {
-        let to_pub =
-            |p: &Pub| Publication { source: s, channel: ch, number: p.no, data: p.data.clone(), blob: p.blob.clone() };
+        let to_pub = |p: &Pub| Publication { source: s, channel: ch, number: p.no, data: p.data.clone(), blob: p.blob };
         if s == self.id {
             return self.own.get(&ch).map(|oc| oc.src.retained.values().map(to_pub).collect()).unwrap_or_default();
         }
@@ -966,10 +1190,32 @@ impl Node {
     }
 
     pub(crate) fn set_name(&mut self, name: &str) -> Result<(), Report> {
-        if name.len() > MAX_NAME {
-            return Err(Report::new(RuleCode::API_NAME_TOO_LONG, format!("{} bytes, limit {MAX_NAME}", name.len())));
+        if name.is_empty() || name.len() > MAX_NAME {
+            return Err(Report::new(
+                RuleCode::API_NAME_TOO_LONG,
+                format!("{} bytes, allowed 1..{MAX_NAME}", name.len()),
+            ));
         }
-        self.publish_inner(Channel::NODE_INFO, name.as_bytes(), None, 1).map(|_| ())
+        self.halted_err()?;
+        name.clone_into(&mut self.name);
+        self.publish_node_info()
+    }
+
+    pub(crate) fn set_app_info(&mut self, app: &[u8]) -> Result<(), Report> {
+        if app.len() > MAX_APP_INFO {
+            return Err(Report::new(
+                RuleCode::API_APP_INFO_TOO_LARGE,
+                format!("{} bytes, limit {MAX_APP_INFO}", app.len()),
+            ));
+        }
+        self.halted_err()?;
+        self.app = app.to_vec();
+        self.publish_node_info()
+    }
+
+    fn publish_node_info(&mut self) -> Result<(), Report> {
+        let data = encode_node_info(&self.name, &self.app);
+        self.publish_inner(Channel::NODE_INFO, &data, None, 1).map(|_| ())
     }
 
     pub(crate) fn state(&self) -> BusState {
@@ -979,13 +1225,14 @@ impl Node {
             .values()
             .flat_map(|r| r.retained.values())
             .chain(self.own.values().flat_map(|o| o.src.retained.values()))
-            .map(|p| p.data.len().saturating_add(p.blob.as_ref().map_or(0, Vec::len)))
+            .map(|p| p.data.len())
             .fold(0usize, usize::saturating_add);
         BusState {
             bus: self.bus,
             device: self.id,
             generation: self.view.checkpoint.generation,
             checkpoint: self.view.checkpoint.number,
+            root_device: self.view.checkpoint.root_device,
             halted: self.view.halted,
             members,
             links: self.links.iter().copied().collect(),
@@ -1063,6 +1310,24 @@ impl Node {
     pub(crate) fn revoke(&mut self, device: DeviceId) -> Result<HostRequestId, Report> {
         self.owner_request(device, OwnerOperation::Revoke, HostWait::Revoke(device))
     }
+}
+
+/// The simulator's encoding of the node info: the name length, the name, the application
+/// part. The core encodes `NodeInfo` as CBOR (Appendix B, Section B.5); the simulator only
+/// needs the two values back.
+fn encode_node_info(name: &str, app: &[u8]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(name.len().saturating_add(app.len()).saturating_add(1));
+    v.push(u8::try_from(name.len()).unwrap_or(u8::MAX));
+    v.extend_from_slice(name.as_bytes());
+    v.extend_from_slice(app);
+    v
+}
+
+fn decode_node_info(data: &[u8]) -> Option<(String, Vec<u8>)> {
+    let (&len, rest) = data.split_first()?;
+    let name = rest.get(..usize::from(len))?;
+    let app = rest.get(usize::from(len)..)?;
+    Some((String::from_utf8_lossy(name).into_owned(), app.to_vec()))
 }
 
 fn app_channel(ch: Channel) -> Result<(), Report> {

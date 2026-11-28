@@ -59,8 +59,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   dependency policy checks with `cargo-deny`.
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
 - Local application interface crate `cpb-api` (R-API-2): the `LocalApi` trait, non-blocking and
-  without callbacks, events through `poll_event`; the single list of rule codes `area/rule`
-  (R-ERR-1); error reports with the debug and release modes (R-ERR-2, R-ERR-3).
+  without callbacks, events through `poll_event`; blobs written in pieces and fetched by segment,
+  the application part of the node info, membership change events and the root device in the bus
+  state; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
+  release modes (R-ERR-2, R-ERR-3).
 - In-memory bus simulator `cpb-sim` for application authors: several nodes in one process behind
   `LocalApi`, an engine written from the channels and calls models and Section 6, a deterministic
   harness with loss, duplication, reordering, sleeping and rebooting nodes and a member relay, owner
@@ -72,9 +74,20 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 ### Changed
 - Gate S in Section 14.3: the application simulator after G1, so profiles can start before the
   core; R-API-2 names the default readers of a channel, the delivery of retained publications on
-  subscription, and the owner's operations on the root device; R-CALL-8 makes a commander forget its
+  subscription, the owner's operations on the root device, blobs written in pieces and fetched by
+  segment, the application node info, the root device in the bus state, and the membership change
+  report (also in R-CORE-2); R-CALL-8 makes a commander forget its
   held nonces on its own "reset nonces"; Appendix B, Section B.9 keeps the rule code list in
   `cpb-api`.
+- Specification: the blob key is 32 random bytes per blob carried in the publication content
+  (field 5), and a blob segment authenticates only its last-segment flag (R-CH-3, R-CH-15, R-FMT-10,
+  Appendix B, Sections B.1, B.5, B.7, B.8). A reader delivers verified segments in order, and a blob
+  is published only at depth 1 or more. Reason: the blob key was derived from the header hash, and the
+  header holds the hash of the encrypted blob, so neither could be computed first.
+- Specification: `NodeInfo` has an optional application part `app` of up to 4024 bytes that the
+  core does not parse; the extension range stays reserved for the bus (R-CH-16, Appendix B, Section
+  B.5, Appendix C). Reason: a profile needs per-node state, and a channel of its own only for that
+  costs every reader a key and a grant.
 - Specification: an external relay sees a bus only under aliases that differ per relay and per relay
   epoch (new property S18, R-REL-13..R-REL-20, R-KEY-11, Section 15.9, decision D15, Appendix B,
   Section B.10, Appendix C). The Root starts a new relay epoch with every revocation and issues each

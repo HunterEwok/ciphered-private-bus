@@ -126,7 +126,7 @@ A device from `add_device` has no bus: `state` is `None` and bus operations retu
 It joins as Section 7 and Appendix B, Section B.11 describe.
 
 - **Pairing** (R-JOIN-1, R-JOIN-3). The new device calls `show_pairing_code` and gets a code: a
-  16-byte secret and the fingerprint of its device key. A member with the accept right, or the
+  16-byte secret and the fingerprint of its device key. Any member, or the
   root device, reads it and calls `enter_pairing_code`. A wrong secret ends the acceptor's
   pairing with `join/wrong-code`, and a joiner with another device key than the code names ends
   it with `join/fingerprint` (R-JOIN-7). Runs are not counted: the joiner's code stays good until

@@ -1153,7 +1153,7 @@ const NEW: DeviceId = DeviceId::from_u64(9);
 /// Root and an acceptor A, linked; NEW is not on the bus and is linked to `near`.
 fn before_pairing(near: DeviceId) -> Sim {
     let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), ..Config::default() }, ROOT);
-    sim.admit(A, Rights { accept: true, ..Rights::MEMBER }, false, Vec::new());
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
     sim.link(ROOT, A);
     assert!(sim.add_device(NEW, true));
     sim.link(near, NEW);
@@ -1401,7 +1401,7 @@ fn a_replaced_code_is_dead() {
 }
 
 #[test]
-fn pairing_roles_and_rights_are_checked() {
+fn pairing_roles_are_checked() {
     let mut sim = before_pairing(A);
     sim.admit(B, Rights::MEMBER, false, Vec::new());
     sim.settle().unwrap();
@@ -1409,8 +1409,6 @@ fn pairing_roles_and_rights_are_checked() {
     assert_eq!(sim.node(A).unwrap().show_pairing_code().unwrap_err().code(), RuleCode::JOIN_ON_BUS);
     let (pairing, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
     assert_eq!(sim.node(NEW).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::API_NO_BUS);
-    // A member without the accept right does not pair (R-JOIN-4).
-    assert_eq!(sim.node(B).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::JOIN_NO_RIGHT);
     // One pairing at a time.
     assert_eq!(sim.node(NEW).unwrap().show_pairing_code().unwrap_err().code(), RuleCode::JOIN_BUSY);
     sim.node(NEW).unwrap().cancel_pairing(pairing).unwrap();
@@ -1422,7 +1420,7 @@ fn pairing_roles_and_rights_are_checked() {
 fn a_relay_holds_join_requests_while_the_root_is_away() {
     let profile = Profile { join_buffer: 1, ..Profile::default() };
     let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), profile, ..Config::default() }, ROOT);
-    sim.admit(A, Rights { accept: true, ..Rights::MEMBER }, false, Vec::new());
+    sim.admit(A, Rights::MEMBER, false, Vec::new());
     sim.admit(RELAY, Rights { relay: true, ..Rights::MEMBER }, false, Vec::new());
     sim.link(A, RELAY);
     sim.add_device(NEW, false);

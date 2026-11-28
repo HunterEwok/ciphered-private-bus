@@ -125,7 +125,6 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Read right | `RIGHT_READ` | | Section 6.1 |
 | Publish right | `RIGHT_PUBLISH` | | Section 6.1 |
 | Relay right | `RIGHT_RELAY` | | Section 6.1 |
-| Accept join requests right | `RIGHT_ACCEPT` | | Section 6.1 |
 | Permit | `Permit { commander, auto, confirm }` | Part of a passport | Section 6.1 |
 | Action set | `ActionSet` | 8 bytes, one bit per action | R-FMT-5 |
 | Valid passport bitmap | `valid_bits` | Checkpoint field | R-MEM-2 |
@@ -140,7 +139,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | --- | --- | --- | --- |
 | Pairing | `Pairing` | CPace exchange between the joiner and the acceptor | R-JOIN-1, B.11 |
 | Joiner | `joiner` | The device that is joining | Section 7 |
-| Acceptor | `acceptor` | A node with the accept right, or the root device | Section 7 |
+| Acceptor | `acceptor` | A valid member that pairs with a joiner, or the root device | Section 7 |
 | Pairing secret | `PairSecret` | 16 bytes | R-JOIN-1 |
 | Pairing transcript hash | `pairing_hash` | Field of the join request | R-JOIN-4, B.11 |
 | Joiner signature | `joiner_sig` | The joiner's `PairDevice` signature, carried in the join request | B.3 |

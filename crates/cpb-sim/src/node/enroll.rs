@@ -133,9 +133,6 @@ impl Node {
     pub(crate) fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report> {
         self.halted_err()?;
         self.pairing_free()?;
-        if self.root.is_none() && !self.own_passport().is_some_and(|p| p.rights.accept) {
-            return Err(Report::new(RuleCode::JOIN_NO_RIGHT, format!("{} has no accept right", self.id)));
-        }
         let id = self.arm(code);
         let waiting: Vec<(DeviceId, u64)> = self.enroll.pair_inits.iter().map(|(d, n)| (*d, *n)).collect();
         self.enroll.pair_inits.clear();
@@ -357,11 +354,11 @@ impl Node {
 
     pub(super) fn on_join_request(&mut self, r: &Request) {
         if self.root.is_some() {
-            let accepts = r.acceptor == self.id || self.view.valid(r.acceptor).is_some_and(|p| p.rights.accept);
+            let accepts = r.acceptor == self.id || self.view.valid(r.acceptor).is_some();
             if accepts {
                 self.root_receive(r.clone());
             } else {
-                self.reject(RuleCode::JOIN_NOT_ACCEPTOR, format!("join request from {}", r.acceptor));
+                self.reject(RuleCode::MEM_NOT_MEMBER, format!("join request from {}", r.acceptor));
             }
         } else if self.own_passport().is_some_and(|p| p.rights.relay) {
             // A relay makes no decisions about requests: it holds them for the Root.

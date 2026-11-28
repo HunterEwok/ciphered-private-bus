@@ -95,6 +95,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   says that a device has one pairing code at a time, that a member keeps an early `PairInit` until
   it gets a code, and where join requests wait and within which bound. Reason: the rules of
   Section 7 had no operations at the interface.
+- Specification: the right to accept join requests is removed. Any valid member pairs with a joiner
+  and sends its join request; the passport rights are read, publish and relay (Sections 6.1 and 7,
+  R-JOIN-4, R-API-2; Appendix B, Sections B.3 and B.11). Reason: admission depends only on the check
+  the root device makes (R-JOIN-7), so the right guarded nothing. In the interface `Rights` loses
+  `accept`, and the codes `join/no-right` and `join/not-acceptor` are gone; a join request from a
+  device that is not a valid member is refused with `mem/not-member`.
 - Specification: one way to pair, and the root device, not the owner, checks the joiner. The joiner
   generates a code, a 16-byte secret and the 32-byte fingerprint of its device key, and presents it
   as a QR code or a tag; the acceptor reads it through its own camera, reader or keyboard and refuses

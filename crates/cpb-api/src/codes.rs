@@ -255,9 +255,6 @@ impl RuleCode {
     /// The node already has a pairing in progress.
     pub const JOIN_BUSY: Self =
         Self::new("join", "busy", ErrorKind::Refused, "R-JOIN-1", "This device is already pairing.");
-    /// A member without the accept right tried to accept a joiner.
-    pub const JOIN_NO_RIGHT: Self =
-        Self::new("join", "no-right", ErrorKind::Refused, "R-JOIN-4", "This device may not add new devices.");
     /// A device that is on a bus asked for a code to join one.
     pub const JOIN_ON_BUS: Self =
         Self::new("join", "on-bus", ErrorKind::Refused, "R-JOIN-1", "This device is already on a bus.");
@@ -279,14 +276,6 @@ impl RuleCode {
     /// join request.
     pub const JOIN_SIGNATURE: Self =
         Self::new("join", "signature", ErrorKind::Refused, "R-JOIN-4", "A join request was altered on the way.");
-    /// A join request from a device without the accept right.
-    pub const JOIN_NOT_ACCEPTOR: Self = Self::new(
-        "join",
-        "not-acceptor",
-        ErrorKind::Refused,
-        "R-JOIN-4",
-        "A join request came from a device that may not add new devices.",
-    );
     /// The fingerprint presented from the joiner is not that of the device key in the
     /// code it read or in the join request.
     pub const JOIN_FINGERPRINT: Self =
@@ -396,13 +385,11 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::MEM_APP_SIGNATURE,
     RuleCode::MEM_HALTED,
     RuleCode::JOIN_BUSY,
-    RuleCode::JOIN_NO_RIGHT,
     RuleCode::JOIN_ON_BUS,
     RuleCode::JOIN_WRONG_CODE,
     RuleCode::JOIN_STOPPED,
     RuleCode::JOIN_TRANSCRIPT,
     RuleCode::JOIN_SIGNATURE,
-    RuleCode::JOIN_NOT_ACCEPTOR,
     RuleCode::JOIN_FINGERPRINT,
     RuleCode::PUB_NO_RIGHT,
     RuleCode::PUB_NO_KEY,

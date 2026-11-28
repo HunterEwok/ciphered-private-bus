@@ -104,7 +104,7 @@ impl Sim {
         let seed = rng.next_u64();
         let mut node = Node::new(root_device, bus, View::first(key), config.profile, mode, seed);
         node.root = Some(Root::new(1, key, root_device, config.profile.window));
-        let rights = Rights { read: true, publish: true, relay: false, accept: true };
+        let rights = Rights { read: true, publish: true, relay: false };
         node.root_issue(root_device, rights, true, Vec::new());
         let _first = node.poll_event();
         node.outbox.clear();

@@ -118,7 +118,7 @@ fields 4–7 form `rest`.
 | 2 | `gen` | uint | ≤ 6 | Root generation |
 | 3 | `no` | uint | ≤ 6 | Passport number |
 | 4 | `device_key` | Key | 70 | P-256, 65 bytes |
-| 5 | `rights` | bstr(1) | 3 | Bit 0 read, 1 publish, 2 relay, 3 accept join requests |
+| 5 | `rights` | bstr(1) | 3 | Bit 0 read, 1 publish, 2 relay |
 | 6 | `presence_key` | Key | 70 | Optional |
 | 7 | `permits` | array ≤ 128 | ≤ 4611 | Element `[commander bstr(16), auto bstr(8), confirm bstr(8)]`, 36 bytes |
 
@@ -909,8 +909,8 @@ Exactly one of fields 1 and 4 is present.
 ## B.11. Pairing Step by Step
 
 This section specifies the pairing messages that gate G0 required and refines requirements
-R-JOIN-1..10. Participants: the joiner; the acceptor (a member of the bus with the right to accept join
-requests, or the root device itself); the Root; and the owner.
+R-JOIN-1..10. Participants: the joiner; the acceptor (any valid member of the bus, or the root
+device itself); the Root; and the owner.
 
 ### Code
 

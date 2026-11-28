@@ -381,7 +381,7 @@ the Root; root change records only by the recovery key.
 | Checkpoint | Root | Bus, root generation, checkpoint number, window start, bitmap of valid passports, next free passport number, list of relays, root device. |
 | Root change record | K1 and K2 | Bus, generation number, new root key. |
 
-Passport rights: read, publish, relay, and accept join requests. A permit is a triple: commander, set of
+Passport rights: read, publish, and relay. A permit is a triple: commander, set of
 automatic actions, set of actions requiring confirmation. An action set is an 8-byte string; bit i - 1
 corresponds to action i.
 
@@ -487,8 +487,9 @@ corresponds to action i.
 
 ## 7. Device Enrollment
 
-A device joins a bus in two steps: pairing with any member that has the right to accept join requests,
-and a Root signature after the owner confirms.
+A device joins a bus in two steps: pairing with any valid member, which is the acceptor, and a Root
+signature after the owner confirms. There is no right to accept join requests: admission depends only
+on the check the root device makes (R-JOIN-7), so such a right would guard nothing.
 
 > **R-JOIN-1.** Pairing is a password-authenticated key exchange using CPace [CPACE] between the joiner
 > and the acceptor. The password is a fresh 16-byte secret that the joiner generates and presents
@@ -513,7 +514,8 @@ and a Root signature after the owner confirms.
 > signature. The transcript hash is that of the acceptor's own pairing session, and the acceptor checks
 > the joiner's signature before sending the request, so a payload signed in another session and relayed
 > by a man in the middle is refused. The Root verifies the joiner's signature, so the acceptor can
-> substitute neither the presence key nor the name. A join request is a control-plane object, not a
+> substitute neither the presence key nor the name. The Root takes a request only from a valid member
+> (R-MEM-2). A join request is a control-plane object, not a
 > publication: an open header (bus, acceptor, its checkpoint number) and a body sealed to the sealing
 > key of the root device. A relay sees who submitted the request but not the joiner's name or key.
 > *Serves:* S4. *Verified by:* model.
@@ -1242,7 +1244,7 @@ Appendix B, Section B.10.
 > device key (R-JOIN-7), and the pairing operations: on a node without a bus, start a pairing with a
 > code the core generates for this device to present (R-JOIN-1); on a member, start a pairing with a
 > code read from a joiner, whose device key the core then holds the peer to (R-JOIN-7); cancel a
-> pairing. A node without a bus pairs as the joiner; a member with the accept right, or the
+> pairing. A node without a bus pairs as the joiner; a member, or the
 > root device (R-JOIN-9), pairs as the acceptor. The core reports the end of a pairing with its result (R-JOIN-3). After accepting a
 > checkpoint or a passport the core reports a membership change with the root generation and the
 > checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
@@ -1349,7 +1351,7 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Stream chunk and blob segment, including header | up to 16384 bytes | 4096 bytes | A quarter of a frame: a short chunk does not occupy the link for long, and other messages pass between chunks. The source writes the blob segment size into the publication header (Appendix B, field `seg`), so readers and relays learn it without configuration, and the value can change after measurement without a format change. A segment other than the last is at least 1024 bytes of ciphertext (Appendix B, Section B.5). Starting value pending measurement. | Computed |
 | Initial stream credit | up to 1 MiB | 16 KiB | The recipient grants credit and must have that much memory. 64 KiB consumed all the memory of the smallest participant. 16 KiB is four chunks, so the link does not idle during one round trip. | Computed; default chosen |
 | Content padding buckets | chosen by the sender | 64, 256, 1024, 4096 | The source chooses the buckets; the recipient does not care. A factor of four leaves the relay four size classes and inflates content at most fourfold. A factor of two would give eight classes and twofold inflation. | Chosen |
-| Join requests held by a relay | 1 .. 256 | 16 | As many as an owner can review at once. Only members with the accept right can create requests. | Chosen |
+| Join requests held by a relay | 1 .. 256 | 16 | As many as an owner can review at once. Only valid members can create requests, and a request names the member that created it. | Chosen |
 | "Reset nonces" period | set by the host | 30 s | The longest delay with which a network adversary can deliver an intercepted call. It cannot be made shorter without cost: a nonce issued just before a reset is lost, and the share of such refusals equals the round-trip time divided by the period; at 0.3 s that is 1%. | Chosen |
 
 The memory of the smallest participant, "on the order of 64 KiB" in R-LIM-4, is an estimate, not a

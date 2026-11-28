@@ -732,7 +732,7 @@ fn signer(generation: u32) -> RootKey {
 
 fn member_rights(bits: &str) -> Rights {
     let r: u8 = bits.parse().unwrap();
-    Rights { read: r % 2 == 1, publish: (r / 2) % 2 == 1, relay: false, accept: false }
+    Rights { read: r % 2 == 1, publish: (r / 2) % 2 == 1, relay: false }
 }
 
 fn rights_bits(r: Rights) -> u8 {

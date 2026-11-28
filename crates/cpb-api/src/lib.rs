@@ -158,7 +158,6 @@ impl ActionSet {
 
 /// Passport rights (Section 6.1).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
-#[allow(clippy::struct_excessive_bools, reason = "the four rights of the passport")]
 pub struct Rights {
     /// Receives channel keys.
     pub read: bool,
@@ -166,15 +165,13 @@ pub struct Rights {
     pub publish: bool,
     /// Serves as a member relay.
     pub relay: bool,
-    /// Accepts join requests.
-    pub accept: bool,
 }
 
 impl Rights {
     /// Read and publish, the rights of an ordinary device.
-    pub const MEMBER: Self = Self { read: true, publish: true, relay: false, accept: false };
+    pub const MEMBER: Self = Self { read: true, publish: true, relay: false };
     /// Read only.
-    pub const READER: Self = Self { read: true, publish: false, relay: false, accept: false };
+    pub const READER: Self = Self { read: true, publish: false, relay: false };
 }
 
 /// A permit in a target's passport: which actions a commander may invoke (Section 6.1).
@@ -887,14 +884,14 @@ pub trait LocalApi {
     /// `join/busy`, `join/on-bus`.
     fn show_pairing_code(&mut self) -> Result<(PairingId, PairingCode), Report>;
 
-    /// On a member with the accept right, or on the root device: starts a pairing as the
+    /// On a member, or on the root device: starts a pairing as the
     /// acceptor with the code this device read from a joiner. The acceptor answers the
     /// joiner on any link and ends the pairing with `join/fingerprint` if the joiner holds
     /// another device key than the code names (R-JOIN-7), and with `join/wrong-code` if the
     /// joiner holds another secret.
     ///
     /// # Errors
-    /// `api/no-bus`, `join/busy`, `join/no-right`, `mem/halted`.
+    /// `api/no-bus`, `join/busy`, `mem/halted`.
     fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report>;
 
     /// Cancels a pairing. A code this node generated is discarded.

@@ -88,6 +88,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   Section B.10); the channel number row
   of Section 13.1 says which numbers belong to the application. Reason: the interface was narrower
   than the rules it serves, and the refusal of a stream reached no one.
+- Specification: a root change names a root key never used on the bus before, and a node rejects a
+  record that names the root key it holds now (R-MEM-11, Appendix B, Section B.3). Reason: the proofs
+  assume a fresh root key per generation, and the text did not require it.
 - Specification: the root key signs application data under its own label `cpb app v1`, bound to the
   bus, the root generation and an application tag, and every node verifies it without the
   application seeing the root key (new R-KEY-12, R-API-2, Appendix B, Section B.8, Section 13.1).

@@ -151,7 +151,7 @@ Fields 1–2 form `head`; field 3 forms `rest`.
 | --- | --- | --- | --- | --- |
 | 1 | `bus` | bstr(32) | 35 | |
 | 2 | `gen` | uint | ≤ 6 | New generation |
-| 3 | `root_key` | Key | 70 | Key of the new Root |
+| 3 | `root_key` | Key | 70 | Key of the new Root, never used on this bus before (R-MEM-11) |
 
 Size: 8046 bytes (7.9 KiB), of which 7856 bytes are the K2 signature.
 

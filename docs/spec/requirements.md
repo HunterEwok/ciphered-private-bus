@@ -449,8 +449,11 @@ corresponds to action i.
 > **R-MEM-11.** A root change record MUST be accepted if it is signed by both K1 and K2 from the bus
 > identifier and its generation is greater than the current one. The node moves to that generation
 > directly: intermediate records are not needed, because each record is signed by K1 and K2, not by the
-> previous Root. Every participant, including the root device and the relay, stores the one most recent
-> accepted record and returns it on request.
+> previous Root. The record names a root key that has never been a root key of this bus: the host
+> generates a new key for every root change, since a change that kept or brought back an old key would
+> leave its holder in power (S9). A node cannot know every earlier key, so it checks what it can: it
+> MUST reject a record that names the root key it holds now. Every participant, including the root
+> device and the relay, stores the one most recent accepted record and returns it on request.
 > *Serves:* S9. *Verified by:* Tamarin, model.
 
 > **R-MEM-12.** After a root change only records of the Root of the new generation are valid. Passport

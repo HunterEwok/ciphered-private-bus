@@ -213,6 +213,14 @@ impl RuleCode {
     /// Two records of one author with one number and different bodies.
     pub const MEM_FORK: Self =
         Self::new("mem", "fork", ErrorKind::Refused, "R-MEM-8", "The bus has stopped: the owner's records conflict.");
+    /// A root change record names the root key the node already holds.
+    pub const MEM_ROOT_KEY_REUSED: Self = Self::new(
+        "mem",
+        "root-key-reused",
+        ErrorKind::Refused,
+        "R-MEM-11",
+        "The owner's new key must differ from the current one.",
+    );
     /// Application data does not carry the signature of the current Root of this bus under
     /// the given tag.
     pub const MEM_APP_SIGNATURE: Self = Self::new(
@@ -323,6 +331,7 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::MEM_STALE_CHECKPOINT,
     RuleCode::MEM_EARLY_PASSPORT,
     RuleCode::MEM_FORK,
+    RuleCode::MEM_ROOT_KEY_REUSED,
     RuleCode::MEM_APP_SIGNATURE,
     RuleCode::MEM_HALTED,
     RuleCode::PUB_NO_RIGHT,

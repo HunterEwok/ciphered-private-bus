@@ -179,6 +179,7 @@ These limitations are accepted as part of this specification. An implementation 
 | L6 | Two different root change records with the same generation halt the bus permanently. The owner creates a new bus. |
 | L7 | A call is executed at most once, but a commander that received no reply does not know whether it was executed. |
 | L8 | A reader that receives a channel for the first time or anew, and only through a relay, may receive a state of the channel that is not the newest. It converges with the first message from the source or an honest relay. The source's answer to a key request (R-CH-18) provides freshness immediately. |
+| L9 | The bus does not know which physical device a key belongs to. The owner names a device to the root device by the fingerprint of its key; the bus admits that key and no other. |
 
 ## 4. Architecture
 
@@ -216,9 +217,9 @@ The CPB standard consists of three contracts and a conformance suite, not of one
 > reliable delivery from the link it uses.
 > *Serves:* S17. *Verified by:* simulator with reordering and loss.
 
-> **R-ARC-7.** The bus does not hide open headers on a link and puts no requirement on the transport
-> for it. Limitation L5 for a network observer holds only on a link whose transport encrypts; no other
-> property depends on the transport.
+> **R-ARC-7.** The bus does not hide open headers on a link: an observer of a link sees what L5 lists
+> for a member relay. No property of the bus depends on the transport; a transport that encrypts hides
+> more, and that is outside the bus.
 > *Serves:* L5. *Verified by:* the models, whose network adversary reads and writes every link.
 
 > **R-ARC-8.** The host MUST provide storage with atomic replacement of a single record: after a power
@@ -542,10 +543,10 @@ on the check the root device makes (R-JOIN-7), so such a right would guard nothi
 > acceptor refuses a peer whose device key has another fingerprint than the code it was given, so
 > someone who only knows the secret cannot stand in for the joiner. The interface gives every node the
 > fingerprint of its device key and, on a member, the fingerprint of its bus.
-> The bus puts no requirement on where an application takes a fingerprint from: it cannot check that.
-> What follows from the rule is a conditional property: the admitted device is the one the owner means
-> if the fingerprint reached the root device over a channel the adversary cannot write to (Section
-> 15.7).
+> The fingerprint is how the owner names a device to the bus. The guarantee has no condition: the key
+> that becomes a member is the key that was named on the root device, whatever anyone else does. Which
+> key the owner names is the owner's input, like the rights; the bus does not know which physical
+> device a key belongs to (L9).
 > *Serves:* S4. *Verified by:* model, Tamarin, scenario test.
 
 > **R-JOIN-8.** A relay holds join requests for the Root while it is offline. It recognizes them by
@@ -1584,10 +1585,10 @@ the code. The core of the root device admits only the device key whose fingerpri
 passed to the admission, and the core of an acceptor refuses a peer whose device key has another
 fingerprint than the code names (R-JOIN-7).
 
-The bus checks the fingerprint it is given; it cannot check where the application took it from, and it
-puts no requirement on that. The property is conditional: the admitted device is the one the owner
-means if the fingerprint reached the root device over a channel the adversary cannot write to. The
-choice of that channel belongs to the application, and so does its strength:
+The fingerprint is how the owner names a device to the bus, and the bus admits the named key and no
+other; that holds without conditions. Which physical device a key belongs to is outside the bus (L9):
+no protocol can know it, and the application decides how the owner learns the fingerprint. The usual
+ways, and what each means:
 
 - Read from the joiner itself by the camera or the reader of the root device, or typed by the owner
   from the joiner's screen or label. The adversary has to be at the device. The presentation of

@@ -97,10 +97,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   Section 7 had no operations at the interface.
 - Specification: the bus requires of an application only what its core checks. R-JOIN-7 no longer
   forbids a user interface to take a fingerprint from the network: the core admits only the key whose
-  fingerprint it is given, and the admitted device is the intended one if the fingerprint came over a
-  channel the adversary cannot write to. Section 15.7 describes the channels an application may
-  choose, with an invitation issued by the root device among them, and what each is worth. R-JOIN-1
-  and R-JOIN-5 describe the core, not screens, and R-ARC-7 states what depends on an encrypting
+  fingerprint it is given, and no other, without conditions: the fingerprint is how
+  the owner names a device to the bus. Which physical device a key belongs to is outside the bus (new
+  limitation L9). Section 15.7 describes the ways an application may let the owner learn a
+  fingerprint, with an invitation issued by the root device among them. R-JOIN-1
+  and R-JOIN-5 describe the core, not screens, and R-ARC-7 states what an observer of a link sees
   transport instead of recommending one.
 - Specification: the right to accept join requests is removed. Any valid member pairs with a joiner
   and sends its join request; the passport rights are read, publish and relay (Sections 6.1 and 7,

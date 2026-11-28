@@ -275,10 +275,9 @@ impl fmt::Display for Fingerprint {
 }
 
 /// The fingerprint of a device key, 32 bytes (R-JOIN-7; Appendix B, Section B.8). The root
-/// device admits only the key whose fingerprint the application gives it. The bus cannot check
-/// where the application took it from: the admitted device is the intended one if the
-/// fingerprint came over a channel an adversary cannot write to, such as a camera reading the
-/// joiner's screen (requirements, Section 15.7).
+/// device admits only the key whose fingerprint the application gives it: the fingerprint is
+/// how the owner names a device to the bus. Which physical device a key belongs to is outside
+/// the bus (limitation L9; requirements, Section 15.7).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct KeyFingerprint(pub [u8; 32]);
 

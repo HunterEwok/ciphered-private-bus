@@ -194,3 +194,5 @@ Every run prints the model hash: the first 12 hex digits of the SHA-256 of `extr
 
 | Date | Model | Run | Bounds | Result |
 | --- | --- | --- | --- | --- |
+| 2026-11-28 | `4eb354135f7f` (commit 8dfd3dd) | TLC 1.7.4, `run-tlc.ps1 -Probes`, maintainer's server (6 workers, 7 GB heap) | 11 probes against `safety` at the size of `small`, 6 witnesses on `tiny`, breadth-first until the first violation | 17 of 17 violated as expected, depth 3 to 9, 1.0 to 2.0 min each (compilation included), 20 min in total |
+| 2026-11-28 | `4eb354135f7f` (commit 8dfd3dd) | TLC 1.7.4, `run-tlc.ps1`, maintainer's server (6 workers, 7 GB heap) | exhaustive check of `safety` on `tiny`, every reachable state | no error found: 8,099,194 distinct states (69,298,607 generated), depth 31, 5 min; probability of a fingerprint collision 2.7E-5 (TLC's optimistic estimate), 2.4E-4 (from the actual fingerprints) |

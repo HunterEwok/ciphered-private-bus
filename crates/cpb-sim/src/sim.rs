@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestId, IncomingId,
-    InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights,
+    Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestId,
+    IncomingId, InvokeOptions, LocalApi, Permit, Publication, Readers, Report, ResultCode, Rights,
 };
 
 use crate::engine::membership::{Root, View};
@@ -381,6 +381,7 @@ impl Sim {
                 v.push(e);
             }
         }
+        self.flush();
         v
     }
 }
@@ -432,9 +433,21 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.abort_blob(id)).unwrap_or(Err(e))
     }
 
-    fn fetch_blob(&mut self, source: DeviceId, channel: Channel, number: u64, first: u32) -> Result<(), Report> {
+    fn fetch_blob(
+        &mut self,
+        source: DeviceId,
+        channel: Channel,
+        number: u64,
+        first: u32,
+        count: u32,
+    ) -> Result<FetchId, Report> {
         let e = self.gone();
-        self.with(|n| n.fetch_blob(source, channel, number, first)).unwrap_or(Err(e))
+        self.with(|n| n.fetch_blob(source, channel, number, first, count)).unwrap_or(Err(e))
+    }
+
+    fn cancel_fetch(&mut self, fetch: FetchId) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.cancel_fetch(fetch)).unwrap_or(Err(e))
     }
 
     fn read(&self, source: DeviceId, channel: Channel) -> Vec<Publication> {
@@ -499,7 +512,7 @@ impl LocalApi for NodeApi<'_> {
     }
 
     fn poll_event(&mut self) -> Option<Event> {
-        self.sim.nodes.get_mut(&self.id).and_then(Node::poll_event)
+        self.with(Node::poll_event).flatten()
     }
 
     fn answer_host(&mut self, id: HostRequestId, answer: HostAnswer) -> Result<(), Report> {

@@ -749,8 +749,11 @@ distinguishes channels by it but does not know which channel it is.
 > SHA-256 of the whole encrypted blob: a relay verifies the blob by it without the key and does not
 > serve it to readers before verification. The source and relays serve a blob while they retain its
 > publication, so a source publishes a blob only at depth 1 or more. A reader requests segments by
-> publication header hash and segment number, from any position, and delivers each verified segment to
-> the application in order; the segment with the last-segment flag completes the blob.
+> publication header hash and segment number, in any order. The application asks for any range of
+> segments, several ranges at once if it wants, and may cancel a request. The core delivers the verified
+> segments of a range in order and requests the next segment only after the application has taken the
+> previous one: segments the application has not taken do not accumulate in the core (R-CORE-4), and
+> the application sets the pace.
 > *Serves:* S2. *Verified by:* vectors, fuzzing.
 
 > **R-CH-16.** Channel numbers 0..15 are reserved for the bus itself. Channel 0 is the node info: an
@@ -1182,7 +1185,8 @@ Appendix B, Section B.10.
 > *Serves:* R-ARC-1. *Verified by:* binding tests.
 
 > **R-API-2.** The local interface gives the application these operations: publish; publish with a
-> blob written in pieces of any size (R-CH-15); fetch a blob from any segment; read a channel;
+> blob written in pieces of any size (R-CH-15); fetch any range of segments of a blob and cancel the
+> fetch; read a channel;
 > subscribe to a channel; set the readers of its own channel (a list of devices, or all valid members
 > with the read right; a key request from a device outside the list is not answered); invoke an action
 > (with a flag stating whether it is idempotent, R-CALL-13); reply to a call; register an action handler;

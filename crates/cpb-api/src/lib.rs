@@ -223,6 +223,10 @@ pub struct Publication {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct BlobWriteId(pub u64);
 
+/// A blob fetch started by [`LocalApi::fetch_blob`].
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FetchId(pub u64);
+
 /// A call made by this node, as returned by [`LocalApi::invoke`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CallId(pub u64);
@@ -365,34 +369,26 @@ pub enum Event {
         /// The checkpoint number.
         checkpoint: u32,
     },
-    /// A verified segment of a blob being fetched. Segments arrive in order; the one with
-    /// `last` set completes the blob.
+    /// A verified segment of a blob being fetched. The segments of one fetch arrive in
+    /// order, and the core asks for the next one only after the application has taken this
+    /// event, so the application sets the pace.
     BlobSegment {
-        /// The source device.
-        source: DeviceId,
-        /// The channel.
-        channel: Channel,
-        /// The publication number.
-        number: u64,
+        /// The fetch.
+        fetch: FetchId,
         /// The segment number, from 0.
         segment: u32,
         /// The offset of the segment in the blob, in bytes.
         offset: u64,
         /// The segment's bytes.
         data: Vec<u8>,
-        /// This is the last segment.
-        last: bool,
     },
-    /// A blob fetch stopped and will not resume.
-    BlobFailed {
-        /// The source device.
-        source: DeviceId,
-        /// The channel.
-        channel: Channel,
-        /// The publication number.
-        number: u64,
-        /// Why.
-        report: Report,
+    /// A blob fetch ended: every requested segment was delivered, or the fetch stopped for
+    /// the reason given and will not resume. A cancelled fetch raises no event.
+    BlobFetchFinished {
+        /// The fetch.
+        fetch: FetchId,
+        /// How it ended.
+        result: Result<(), Report>,
     },
     /// A call to an action this node registered.
     IncomingCall {
@@ -502,14 +498,30 @@ pub trait LocalApi {
     /// `api/unknown-id`.
     fn abort_blob(&mut self, id: BlobWriteId) -> Result<(), Report>;
 
-    /// Fetches the blob of a retained publication from segment `first` on; the segments
-    /// arrive as [`Event::BlobSegment`]. Calling it again for the same publication restarts
-    /// the fetch from `first`, which resumes a fetch cut by a reboot.
+    /// Fetches `count` segments of the blob of a retained publication, starting with segment
+    /// `first`; [`BlobInfo`] gives the number of segments, so `(0, segments)` is the whole
+    /// blob. The segments arrive as [`Event::BlobSegment`] and the end as
+    /// [`Event::BlobFetchFinished`]. Several fetches may run at once, also on one blob. A
+    /// fetch does not survive a reboot; the application starts another from the segment it
+    /// needs next.
     ///
     /// # Errors
-    /// `api/unknown-id` if the node holds no such publication with a blob or `first` is past
-    /// its last segment, `mem/halted`.
-    fn fetch_blob(&mut self, source: DeviceId, channel: Channel, number: u64, first: u32) -> Result<(), Report>;
+    /// `api/unknown-id` if the node holds no such publication with a blob, `api/bad-range`,
+    /// `mem/halted`.
+    fn fetch_blob(
+        &mut self,
+        source: DeviceId,
+        channel: Channel,
+        number: u64,
+        first: u32,
+        count: u32,
+    ) -> Result<FetchId, Report>;
+
+    /// Stops a fetch. No further event of that fetch is delivered.
+    ///
+    /// # Errors
+    /// `api/unknown-id` if the fetch has ended.
+    fn cancel_fetch(&mut self, fetch: FetchId) -> Result<(), Report>;
 
     /// The retained publications of a channel that this node holds, in number order; for an
     /// own channel, the source's retained publications. The node holds what arrived under a

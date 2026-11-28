@@ -160,6 +160,14 @@ impl RuleCode {
         "R-CH-15",
         "A blob needs at least one byte and a retention depth of 1 or more.",
     );
+    /// A blob fetch for no segments, or for segments past the end of the blob.
+    pub const API_BAD_RANGE: Self = Self::new(
+        "api",
+        "bad-range",
+        ErrorKind::InvalidArgument,
+        "R-CH-15",
+        "The requested part of the file does not exist.",
+    );
     /// The application part of the node info exceeds 4024 bytes.
     pub const API_APP_INFO_TOO_LARGE: Self = Self::new(
         "api",
@@ -267,6 +275,7 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::API_NOT_ROOT,
     RuleCode::API_BUS_RESULT,
     RuleCode::API_BAD_BLOB,
+    RuleCode::API_BAD_RANGE,
     RuleCode::API_APP_INFO_TOO_LARGE,
     RuleCode::MEM_NOT_MEMBER,
     RuleCode::MEM_BEHIND,

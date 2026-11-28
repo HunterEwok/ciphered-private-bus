@@ -6,9 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobInfo, BlobWriteId, BusState, CallId, CallOutcome, Channel, DeviceId, ErrorMode, Event, HostAnswer,
-    HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO, MAX_BLOB_SEGMENTS, MAX_DATA, MAX_NAME,
-    Member, OwnerOperation, Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode,
+    Action, BlobInfo, BlobWriteId, BusState, CallId, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId,
+    HostAnswer, HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO, MAX_BLOB_SEGMENTS, MAX_DATA,
+    MAX_NAME, Member, OwnerOperation, Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode,
 };
 
 use crate::engine::calls::{CallBody, CmdRights, Commander, Next, SigKey, Target, Verdict};
@@ -147,6 +147,26 @@ struct Draft {
     bytes: Vec<u8>,
 }
 
+/// What a blob fetch waits for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FetchWait {
+    /// The segment `next`, asked from the source.
+    Segment,
+    /// The application, to take the segment event already queued.
+    Application,
+}
+
+/// A blob fetch in progress: segments `next..end` are still to be delivered.
+#[derive(Clone, Copy, Debug)]
+struct Fetch {
+    source: DeviceId,
+    channel: Channel,
+    number: u64,
+    next: u32,
+    end: u32,
+    wait: FetchWait,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Incoming {
     commander: DeviceId,
@@ -184,8 +204,7 @@ pub(crate) struct Node {
     drafts: BTreeMap<BlobWriteId, Draft>,
     /// Blobs of own retained publications, as host storage holds them.
     blobs: BTreeMap<(Channel, u64), Vec<u8>>,
-    /// Blob fetches in progress: the next segment expected.
-    fetches: BTreeMap<(DeviceId, Channel, u64), u32>,
+    fetches: BTreeMap<FetchId, Fetch>,
 }
 
 fn too_large(n: usize) -> Result<(), Report> {
@@ -267,6 +286,7 @@ impl Node {
                 cmd.current = None;
                 cmd.queue.clear();
             }
+            self.fetches.clear();
         }
     }
 
@@ -571,17 +591,17 @@ impl Node {
 
     /// Fetches whose publication left retention end here.
     fn drop_gone_fetches(&mut self, s: DeviceId, ch: Channel) {
-        let gone: Vec<u64> = self
+        let gone: Vec<(FetchId, u64)> = self
             .fetches
-            .keys()
-            .filter(|(fs, fc, n)| *fs == s && *fc == ch && self.held(s, ch, *n).is_none())
-            .map(|(_, _, n)| *n)
+            .iter()
+            .filter(|(_, f)| f.source == s && f.channel == ch && self.held(s, ch, f.number).is_none())
+            .map(|(id, f)| (*id, f.number))
             .collect();
-        for n in gone {
-            self.fetches.remove(&(s, ch, n));
+        for (id, n) in gone {
+            self.fetches.remove(&id);
             let report = Report::new(RuleCode::BLOB_GONE, format!("publication {n} of {s} on channel {}", ch.0));
             self.log.push(format!("{} {}", self.id, report.log_line()));
-            self.events.push_back(Event::BlobFailed { source: s, channel: ch, number: n, report });
+            self.events.push_back(Event::BlobFetchFinished { fetch: id, result: Err(report) });
         }
     }
 
@@ -596,30 +616,62 @@ impl Node {
         }
     }
 
-    fn on_blob_segment(&mut self, from: DeviceId, ch: Channel, n: u64, i: u32, data: Vec<u8>, last: bool) {
-        if self.fetches.get(&(from, ch, n)) != Some(&i) {
+    /// Takes the next step of a fetch: an own blob is read from host storage, any other is
+    /// asked from its source, one segment at a time.
+    fn fetch_step(&mut self, id: FetchId) {
+        let Some(f) = self.fetches.get(&id).copied() else { return };
+        if f.source == self.id {
+            let seg = self.held(f.source, f.channel, f.number).and_then(|p| p.blob).and_then(|info| {
+                self.blobs.get(&(f.channel, f.number)).and_then(|b| Self::segment_of(b, info, f.next))
+            });
+            match seg {
+                Some((offset, data, _)) => self.push_segment(id, f.next, offset, data),
+                None => self.drop_gone_fetches(f.source, f.channel),
+            }
+        } else {
+            if let Some(f) = self.fetches.get_mut(&id) {
+                f.wait = FetchWait::Segment;
+            }
+            self.send(f.source, Body::BlobGet { channel: f.channel, number: f.number, segment: f.next });
+        }
+    }
+
+    /// Queues a segment for the application. The next one is asked for when the application
+    /// takes this event, so undelivered segments do not pile up (R-CORE-4).
+    fn push_segment(&mut self, id: FetchId, segment: u32, offset: u64, data: Vec<u8>) {
+        let Some(f) = self.fetches.get_mut(&id) else { return };
+        self.events.push_back(Event::BlobSegment { fetch: id, segment, offset, data });
+        f.next = segment.saturating_add(1);
+        f.wait = FetchWait::Application;
+        if f.next >= f.end {
+            self.fetches.remove(&id);
+            self.events.push_back(Event::BlobFetchFinished { fetch: id, result: Ok(()) });
+        }
+    }
+
+    fn on_blob_segment(&mut self, from: DeviceId, ch: Channel, n: u64, i: u32, data: &[u8], last: bool) {
+        let waiting: Vec<FetchId> = self
+            .fetches
+            .iter()
+            .filter(|(_, f)| {
+                f.source == from && f.channel == ch && f.number == n && f.next == i && f.wait == FetchWait::Segment
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if waiting.is_empty() {
             return;
         }
         let Some(info) = self.held(from, ch, n).and_then(|p| p.blob) else {
             self.drop_gone_fetches(from, ch);
             return;
         };
+        // The last-segment flag is authenticated (R-CH-15): it must agree with the header.
+        if last != (i.saturating_add(1) == info.segments) {
+            return;
+        }
         let offset = u64::from(i).saturating_mul(u64::from(info.segment_size));
-        self.events.push_back(Event::BlobSegment {
-            source: from,
-            channel: ch,
-            number: n,
-            segment: i,
-            offset,
-            data,
-            last,
-        });
-        if last {
-            self.fetches.remove(&(from, ch, n));
-        } else {
-            let next = i.saturating_add(1);
-            self.fetches.insert((from, ch, n), next);
-            self.send(from, Body::BlobGet { channel: ch, number: n, segment: next });
+        for id in waiting {
+            self.push_segment(id, i, offset, data.to_vec());
         }
     }
 
@@ -906,10 +958,14 @@ impl Node {
         self.send(peer, Body::Hello { passport, epoch });
         self.send_records(peer);
         // A segment request lost with the old link is asked again.
-        let resume: Vec<(Channel, u64, u32)> =
-            self.fetches.iter().filter(|((s, _, _), _)| *s == peer).map(|((_, c, n), i)| (*c, *n, *i)).collect();
-        for (channel, number, segment) in resume {
-            self.send(peer, Body::BlobGet { channel, number, segment });
+        let resume: Vec<FetchId> = self
+            .fetches
+            .iter()
+            .filter(|(_, f)| f.source == peer && f.wait == FetchWait::Segment)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in resume {
+            self.fetch_step(id);
         }
     }
 
@@ -986,7 +1042,7 @@ impl Node {
             }
             Body::BlobSegment { channel, number, segment, data, last } => {
                 if self.sender(m).is_some() {
-                    self.on_blob_segment(m.from, *channel, *number, *segment, data.clone(), *last);
+                    self.on_blob_segment(m.from, *channel, *number, *segment, data, *last);
                 }
             }
         }
@@ -1097,33 +1153,37 @@ impl Node {
             .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("blob write {}", id.0)))
     }
 
-    pub(crate) fn fetch_blob(&mut self, s: DeviceId, ch: Channel, n: u64, first: u32) -> Result<(), Report> {
+    pub(crate) fn fetch_blob(
+        &mut self,
+        s: DeviceId,
+        ch: Channel,
+        n: u64,
+        first: u32,
+        count: u32,
+    ) -> Result<FetchId, Report> {
         self.halted_err()?;
-        let unknown = || Report::new(RuleCode::API_UNKNOWN_ID, format!("no blob {n} of {s} on channel {}", ch.0));
-        let info = self.held(s, ch, n).and_then(|p| p.blob).ok_or_else(unknown)?;
-        if first >= info.segments {
-            return Err(unknown());
-        }
-        if s == self.id {
-            // An own blob is in host storage already.
-            let blob = self.blobs.get(&(ch, n)).cloned().unwrap_or_default();
-            for i in first..info.segments {
-                if let Some((offset, data, last)) = Self::segment_of(&blob, info, i) {
-                    self.events.push_back(Event::BlobSegment {
-                        source: s,
-                        channel: ch,
-                        number: n,
-                        segment: i,
-                        offset,
-                        data,
-                        last,
-                    });
-                }
-            }
-            return Ok(());
-        }
-        self.fetches.insert((s, ch, n), first);
-        self.send(s, Body::BlobGet { channel: ch, number: n, segment: first });
+        let info = self
+            .held(s, ch, n)
+            .and_then(|p| p.blob)
+            .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("no blob {n} of {s} on channel {}", ch.0)))?;
+        let end = first.checked_add(count).filter(|e| count > 0 && *e <= info.segments).ok_or_else(|| {
+            Report::new(
+                RuleCode::API_BAD_RANGE,
+                format!("{count} segments from {first}, the blob has {}", info.segments),
+            )
+        })?;
+        let id = FetchId(self.fresh_id());
+        let fetch = Fetch { source: s, channel: ch, number: n, next: first, end, wait: FetchWait::Segment };
+        self.fetches.insert(id, fetch);
+        self.fetch_step(id);
+        Ok(id)
+    }
+
+    pub(crate) fn cancel_fetch(&mut self, id: FetchId) -> Result<(), Report> {
+        self.fetches
+            .remove(&id)
+            .ok_or_else(|| Report::new(RuleCode::API_UNKNOWN_ID, format!("blob fetch {}", id.0)))?;
+        self.events.retain(|e| !matches!(e, Event::BlobSegment { fetch, .. } if *fetch == id));
         Ok(())
     }
 
@@ -1247,7 +1307,14 @@ impl Node {
     }
 
     pub(crate) fn poll_event(&mut self) -> Option<Event> {
-        self.events.pop_front()
+        let e = self.events.pop_front();
+        // The application took a segment: the fetch moves on.
+        if let Some(Event::BlobSegment { fetch, .. }) = &e {
+            if self.fetches.get(fetch).is_some_and(|f| f.wait == FetchWait::Application) {
+                self.fetch_step(*fetch);
+            }
+        }
+        e
     }
 
     pub(crate) fn answer_host(&mut self, id: HostRequestId, answer: HostAnswer) -> Result<(), Report> {

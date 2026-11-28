@@ -237,7 +237,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Host table | `HostKeys { random, generate, public_key, sign }` | Randomness and three key operations | R-ARC-9 |
 | Publish | `publish` | | R-API-2 |
 | Publish with a blob | `begin_blob`, `write_blob`, `finish_blob` | The blob is written in pieces and encrypted into host storage | R-API-2, R-CH-15 |
-| Fetch a blob | `fetch_blob` | From any segment; segments arrive in order | R-API-2, R-CH-15 |
+| Fetch a blob | `fetch_blob`, `cancel_fetch` | Any range of segments; they arrive in order, at the pace the application takes them | R-API-2, R-CH-15 |
 | Read a channel | `read` | | R-API-2 |
 | Subscribe to a channel | `subscribe` | | R-API-2 |
 | Set the readers of a channel | `set_readers` | A list of devices, or all valid members with the read right | R-API-2 |

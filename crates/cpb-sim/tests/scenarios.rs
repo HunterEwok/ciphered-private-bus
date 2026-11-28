@@ -13,8 +13,8 @@
 )]
 
 use cpb_api::{
-    Action, ActionSet, CallOutcome, Channel, DeviceId, ErrorMode, Event, HostAnswer, HostRequestKind, InvokeOptions,
-    LocalApi, MAX_APP_INFO, OwnerOperation, Permit, Readers, ResultCode, Rights, RuleCode,
+    Action, ActionSet, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
+    InvokeOptions, LocalApi, MAX_APP_INFO, OwnerOperation, Permit, Readers, ResultCode, Rights, RuleCode,
 };
 use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, Faults, Sim};
 
@@ -179,86 +179,172 @@ fn interface_refusals_have_rule_codes() {
     assert_eq!(e.code(), RuleCode::API_NOT_ROOT);
 }
 
-/// A received segment: number, offset, bytes, last.
-type Segment = (u32, u64, Vec<u8>, bool);
+/// What a node saw of its blob fetches: the segments (fetch, number, offset, bytes) and the
+/// endings, in arrival order.
+#[derive(Default)]
+struct Fetched {
+    segments: Vec<(FetchId, u32, u64, Vec<u8>)>,
+    ended: Vec<(FetchId, Result<(), RuleCode>)>,
+}
 
-/// Collects the blob segments and blob failures from a node's events, in arrival order.
-fn segments(sim: &mut Sim, at: DeviceId) -> (Vec<Segment>, Vec<RuleCode>) {
-    let mut segs = Vec::new();
-    let mut failed = Vec::new();
-    for e in sim.drain_events(at) {
-        match e {
-            Event::BlobSegment { segment, offset, data, last, .. } => segs.push((segment, offset, data, last)),
-            Event::BlobFailed { report, .. } => failed.push(report.code()),
-            _ => {}
+impl Fetched {
+    fn bytes(&self, fetch: FetchId) -> Vec<u8> {
+        self.segments.iter().filter(|s| s.0 == fetch).flat_map(|s| s.3.clone()).collect()
+    }
+
+    fn numbers(&self, fetch: FetchId) -> Vec<u32> {
+        self.segments.iter().filter(|s| s.0 == fetch).map(|s| s.1).collect()
+    }
+
+    fn take(&mut self, events: Vec<Event>) -> bool {
+        let mut any = false;
+        for e in events {
+            any = true;
+            match e {
+                Event::BlobSegment { fetch, segment, offset, data } => {
+                    self.segments.push((fetch, segment, offset, data));
+                }
+                Event::BlobFetchFinished { fetch, result } => self.ended.push((fetch, result.map_err(|r| r.code()))),
+                _ => {}
+            }
+        }
+        any
+    }
+}
+
+/// Runs the bus and takes the node's events until nothing more arrives. Taking a segment
+/// lets its fetch ask for the next one.
+fn fetch_until_quiet(sim: &mut Sim, at: DeviceId) -> Fetched {
+    let mut f = Fetched::default();
+    loop {
+        sim.settle().unwrap();
+        if !f.take(sim.drain_events(at)) {
+            return f;
         }
     }
-    (segs, failed)
+}
+
+fn pattern(len: u32) -> Vec<u8> {
+    (0..len).map(|i| u8::try_from(i % 251).unwrap()).collect()
+}
+
+fn publish_blob(sim: &mut Sim, from: DeviceId, ch: Channel, blob: &[u8]) -> u64 {
+    let mut a = sim.node(from).unwrap();
+    let w = a.begin_blob(ch, b"photo", 1).unwrap();
+    for piece in blob.chunks(3_000) {
+        a.write_blob(w, piece).unwrap();
+    }
+    a.finish_blob(w).unwrap()
 }
 
 #[test]
 fn blobs_arrive_in_segments() {
     let mut sim = triangle(ErrorMode::Release);
     sim.node(B).unwrap().subscribe(A, CH).unwrap();
-    let blob: Vec<u8> = (0..10_000u32).map(|i| u8::try_from(i % 251).unwrap()).collect();
-    let mut a = sim.node(A).unwrap();
-    let w = a.begin_blob(CH, b"photo", 1).unwrap();
-    for piece in blob.chunks(3_000) {
-        a.write_blob(w, piece).unwrap();
-    }
-    let no = a.finish_blob(w).unwrap();
+    let blob = pattern(10_000);
+    let no = publish_blob(&mut sim, A, CH, &blob);
     sim.settle().unwrap();
-    let got = sim.node(B).unwrap().read(A, CH);
-    let info = got[0].blob.unwrap();
+    let info = sim.node(B).unwrap().read(A, CH)[0].blob.unwrap();
     assert_eq!((info.size, info.segments, info.segment_size), (10_000, 3, DEFAULT_BLOB_SEGMENT));
     sim.drain_events(B);
 
     // The same bytes published again are another blob with another hash.
-    let mut a = sim.node(A).unwrap();
-    let w = a.begin_blob(Channel(17), b"photo", 1).unwrap();
-    a.write_blob(w, &blob).unwrap();
-    a.finish_blob(w).unwrap();
+    publish_blob(&mut sim, A, Channel(17), &blob);
     let again = sim.node(A).unwrap().read(A, Channel(17))[0].blob.unwrap();
     assert_ne!(again.hash, info.hash);
     assert_eq!(sim.node(A).unwrap().read(A, CH)[0].blob.unwrap().hash, info.hash);
 
-    sim.node(B).unwrap().fetch_blob(A, CH, no, 0).unwrap();
-    sim.settle().unwrap();
-    let (segs, failed) = segments(&mut sim, B);
-    assert!(failed.is_empty());
-    assert_eq!(segs.iter().map(|s| (s.0, s.3)).collect::<Vec<_>>(), vec![(0, false), (1, false), (2, true)]);
-    let mut whole = Vec::new();
-    for (_, offset, data, _) in &segs {
-        assert_eq!(*offset, u64::try_from(whole.len()).unwrap());
-        whole.extend_from_slice(data);
-    }
-    assert_eq!(whole, blob);
+    let whole = sim.node(B).unwrap().fetch_blob(A, CH, no, 0, info.segments).unwrap();
+    let got = fetch_until_quiet(&mut sim, B);
+    assert_eq!(got.numbers(whole), vec![0, 1, 2]);
+    assert_eq!(got.bytes(whole), blob);
+    assert_eq!(got.segments.iter().map(|s| s.2).collect::<Vec<_>>(), vec![0, 4042, 8084]);
+    assert_eq!(got.ended, vec![(whole, Ok(()))]);
 
-    // A fetch resumes from any segment.
-    sim.node(B).unwrap().fetch_blob(A, CH, no, 2).unwrap();
+    // The source reads its own blob from host storage.
+    let own = sim.node(A).unwrap().fetch_blob(A, CH, no, 0, 3).unwrap();
+    let got = fetch_until_quiet(&mut sim, A);
+    assert_eq!(got.bytes(own), blob);
+}
+
+#[test]
+fn a_blob_fetch_takes_any_range_and_two_run_at_once() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    let blob = pattern(30_000);
+    let no = publish_blob(&mut sim, A, CH, &blob);
     sim.settle().unwrap();
-    let (segs, _) = segments(&mut sim, B);
-    assert_eq!(segs.len(), 1);
-    assert_eq!(segs[0].2, blob[2 * 4042..]);
+    sim.drain_events(B);
+    let mut b = sim.node(B).unwrap();
+    let middle = b.fetch_blob(A, CH, no, 2, 3).unwrap();
+    let tail = b.fetch_blob(A, CH, no, 4, 4).unwrap();
+    let got = fetch_until_quiet(&mut sim, B);
+    assert_eq!(got.numbers(middle), vec![2, 3, 4]);
+    assert_eq!(got.numbers(tail), vec![4, 5, 6, 7]);
+    assert_eq!(got.bytes(middle), blob[2 * 4042..5 * 4042]);
+    assert_eq!(got.bytes(tail), blob[4 * 4042..]);
+    assert_eq!(got.ended.len(), 2);
+
+    let mut b = sim.node(B).unwrap();
+    assert_eq!(b.fetch_blob(A, CH, no, 0, 0).unwrap_err().code(), RuleCode::API_BAD_RANGE);
+    assert_eq!(b.fetch_blob(A, CH, no, 7, 2).unwrap_err().code(), RuleCode::API_BAD_RANGE);
+    assert_eq!(b.fetch_blob(A, CH, no + 1, 0, 1).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+#[test]
+fn the_application_sets_the_pace_of_a_blob_fetch_and_can_cancel_it() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    let no = publish_blob(&mut sim, A, CH, &pattern(30_000));
+    sim.settle().unwrap();
+    sim.drain_events(B);
+    let fetch = sim.node(B).unwrap().fetch_blob(A, CH, no, 0, 8).unwrap();
+    // However long the bus runs, one segment waits for the application and no more.
+    sim.settle().unwrap();
+    sim.settle().unwrap();
+    let first = sim.node(B).unwrap().poll_event();
+    assert!(matches!(first, Some(Event::BlobSegment { segment: 0, .. })));
+    assert!(sim.node(B).unwrap().poll_event().is_none());
+    // Taking it asked for the next one.
+    sim.settle().unwrap();
+    sim.node(B).unwrap().cancel_fetch(fetch).unwrap();
+    let got = fetch_until_quiet(&mut sim, B);
+    assert!(got.segments.is_empty() && got.ended.is_empty());
+    assert_eq!(sim.node(B).unwrap().cancel_fetch(fetch).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
 }
 
 #[test]
 fn blob_fetch_ends_when_the_publication_leaves_retention() {
     let mut sim = triangle(ErrorMode::Release);
     sim.node(B).unwrap().subscribe(A, CH).unwrap();
-    let mut a = sim.node(A).unwrap();
-    let w = a.begin_blob(CH, b"v1", 1).unwrap();
-    a.write_blob(w, &[1u8; 9_000]).unwrap();
-    let no = a.finish_blob(w).unwrap();
+    let no = publish_blob(&mut sim, A, CH, &pattern(9_000));
     sim.settle().unwrap();
     sim.drain_events(B);
-    sim.node(B).unwrap().fetch_blob(A, CH, no, 0).unwrap();
+    let fetch = sim.node(B).unwrap().fetch_blob(A, CH, no, 0, 3).unwrap();
     // A newer publication at depth 1 replaces it before the first segment is served.
     sim.node(A).unwrap().publish(CH, b"v2", 1).unwrap();
+    let got = fetch_until_quiet(&mut sim, B);
+    assert!(got.segments.is_empty());
+    assert_eq!(got.ended, vec![(fetch, Err(RuleCode::BLOB_GONE))]);
+}
+
+#[test]
+fn a_blob_fetch_survives_a_lost_link() {
+    let mut sim = triangle(ErrorMode::Release);
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    let blob = pattern(12_000);
+    let no = publish_blob(&mut sim, A, CH, &blob);
     sim.settle().unwrap();
-    let (segs, failed) = segments(&mut sim, B);
-    assert!(segs.is_empty());
-    assert_eq!(failed, vec![RuleCode::BLOB_GONE]);
+    sim.drain_events(B);
+    sim.unlink(A, B);
+    sim.unlink(ROOT, B);
+    let fetch = sim.node(B).unwrap().fetch_blob(A, CH, no, 0, 3).unwrap();
+    let got = fetch_until_quiet(&mut sim, B);
+    assert!(got.segments.is_empty() && got.ended.is_empty());
+    sim.link(A, B);
+    let got = fetch_until_quiet(&mut sim, B);
+    assert_eq!(got.bytes(fetch), blob);
+    assert_eq!(got.ended, vec![(fetch, Ok(()))]);
 }
 
 #[test]
@@ -272,7 +358,7 @@ fn blob_arguments_are_checked() {
     let w = a.begin_blob(CH, b"", 1).unwrap();
     a.abort_blob(w).unwrap();
     assert_eq!(a.finish_blob(w).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
-    assert_eq!(a.fetch_blob(B, CH, 1, 0).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    assert_eq!(a.fetch_blob(B, CH, 1, 0, 1).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
 }
 
 #[test]

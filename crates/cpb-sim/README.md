@@ -125,13 +125,13 @@ core follows the same choices.
 A device from `add_device` has no bus: `state` is `None` and bus operations return `api/no-bus`.
 It joins as Section 7 and Appendix B, Section B.11 describe.
 
-- **Pairing** (R-JOIN-1, R-JOIN-3). One device calls `show_pairing_code` (a short code or a QR
-  code) and the other `enter_pairing_code`; either of them may be the new device. A device without
-  a bus is the joiner; a member with the accept right, or the root device, is the acceptor. A
-  wrong code fails the run on both sides: the side that shows the code gets
-  `Event::PairingAttemptFailed` with the attempts left (`Profile::pairing_attempts`, 3 by default,
-  one for a QR code) and `join/attempts` when the code is spent; the side where it was entered gets
-  `join/wrong-code` and counts its runs per code. `Event::PairingFinished` ends a pairing.
+- **Pairing** (R-JOIN-1, R-JOIN-3). The new device calls `show_pairing_code` and gets a code: a
+  16-byte secret and the fingerprint of its device key. A member with the accept right, or the
+  root device, reads it and calls `enter_pairing_code`. A wrong secret ends the acceptor's
+  pairing with `join/wrong-code`, and a joiner with another device key than the code names ends
+  it with `join/fingerprint` (R-JOIN-7). Runs are not counted: the joiner's code stays good until
+  a pairing completes or the application cancels it, which is how a code is replaced.
+  `Event::PairingFinished` ends a pairing.
 - **The join request** (R-JOIN-4, R-JOIN-8). The acceptor sends its request to the Root over a
   direct link, or to a connected relay, which holds up to `Profile::join_buffer` requests (16 by
   default, the oldest evicted) and delivers them when the Root connects.
@@ -142,10 +142,7 @@ It joins as Section 7 and Appendix B, Section B.11 describe.
   refused with `join/fingerprint` and the request stays; a matching one raises the root-key host
   request. `decline_join` signs nothing. The admitted device sees `Event::MembershipChanged`, finds itself
   in `state().members`, and publishes its node info with the name it proposed.
-- **Scanned codes** (R-JOIN-7). A QR code names the device that shows it: a member's code its bus,
-  a joiner's code its device key. The node that enters such a code refuses another peer: a joiner
-  ends the pairing with `join/other-bus`, an acceptor with `join/fingerprint`.
-- **Stand-ins.** There is no CPace: the pairing messages carry the code itself, a session is named
+- **Stand-ins.** There is no CPace: the pairing messages carry the secret itself, a session is named
   by a value of its two nonces, and a key fingerprint is a value of the device identifier. The
   compromised acceptor and the network adversary of the model are exercised by the trace replay,
   not by the harness.

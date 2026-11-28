@@ -63,7 +63,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   streams opened by a call and its reply with data, credit, "end" and the reason a stream closed,
   the message of a reply, the key that signed an incoming call, root-signed application data,
   the application part of the node info, membership change events and the root device in the bus
-  state, pairing by a shown or entered code, where a scanned code names the device that shows it,
+  state, pairing by a code the joiner presents and the acceptor reads,
   the device key and bus fingerprints, and the owner's answer to a join request with the fingerprint
   the root device got from the joiner; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
   release modes (R-ERR-2, R-ERR-3).
@@ -93,17 +93,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Specification: R-API-2 names the state of a node without a bus, the pairing operations, the two
   fingerprints, and what the owner sees and answers for a join request; Appendix B, Section B.11
   says that a device has one pairing code at a time, that a member keeps an early `PairInit` until
-  it gets a code, how an entered code's runs are counted, and where join requests wait and within
-  which bound. Reason: the rules of Section 7 had no operations at the interface, and the order in
-  which the two devices get the code was left open.
-- Specification: the root device, not the owner, compares the joiner's device key fingerprint. The
-  joiner presents the 32-byte fingerprint as a QR code or a tag, the root device takes it through its
-  own camera or reader in an admission the owner started there, and its core refuses a key that does
-  not match; the 20-digit form of the key fingerprint is removed. A QR code with a pairing secret
-  names the device that shows it, the bus of an acceptor or the device key of a joiner, and the
-  device that scans it refuses another peer with the new `PairAbort` code 5 (R-JOIN-5, R-JOIN-7,
-  R-JOIN-9, R-API-2, Section 15.7; Appendix B, Sections B.8 and B.11). Reason: people confirm
-  mismatching strings, and a code shown on a screen is known to everyone who sees the screen.
+  it gets a code, and where join requests wait and within which bound. Reason: the rules of
+  Section 7 had no operations at the interface.
+- Specification: one way to pair, and the root device, not the owner, checks the joiner. The joiner
+  generates a code, a 16-byte secret and the 32-byte fingerprint of its device key, and presents it
+  as a QR code or a tag; the acceptor reads it through its own camera, reader or keyboard and refuses
+  a peer with another device key (`PairAbort` code 5). The root device admits a joiner only with the
+  fingerprint it read from the joiner itself, and its core refuses a request with another key. The
+  short code, a code shown by the acceptor, the count of runs per code with its profile parameter,
+  and the 20-digit form of the key fingerprint are removed (R-JOIN-1, R-JOIN-3, R-JOIN-5, R-JOIN-7,
+  R-JOIN-9, R-API-2, Sections 13 and 15.7; Appendix B, Sections B.8 and B.11). Reason: people confirm
+  mismatching strings, a code on a screen is known to everyone who sees the screen, and once the
+  root device must read the fingerprint from the joiner, the same reading carries the secret.
 - Specification: a root change names a root key never used on the bus before, and a node rejects a
   record that names the root key it holds now (R-MEM-11, Appendix B, Section B.3). Reason: the proofs
   assume a fresh root key per generation, and the text did not require it.

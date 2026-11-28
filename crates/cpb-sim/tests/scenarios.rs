@@ -13,10 +13,10 @@
 )]
 
 use cpb_api::{
-    Action, ActionSet, CallKey, CallOutcome, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, HostAnswer,
-    HostRequestKind, InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, MAX_APP_INFO, MAX_APP_TAG,
-    MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Paired, PairingCode, Permit, Readers, ResultCode, Rights,
-    RuleCode, Shower, StreamEnd, StreamId, StreamMode, StreamRequest,
+    Action, ActionSet, CallKey, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
+    InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, MAX_APP_INFO, MAX_APP_TAG, MAX_INITIAL_CREDIT, MAX_MESSAGE,
+    OwnerOperation, Paired, PairingCode, Permit, Readers, ResultCode, Rights, RuleCode, StreamEnd, StreamId,
+    StreamMode, StreamRequest,
 };
 use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, DEFAULT_STREAM_CHUNK, Faults, Profile, Sim};
 
@@ -1151,8 +1151,8 @@ fn the_root_signs_application_data_and_every_node_verifies_it() {
 const NEW: DeviceId = DeviceId::from_u64(9);
 
 /// Root and an acceptor A, linked; NEW is not on the bus and is linked to `near`.
-fn before_pairing(near: DeviceId, profile: Profile) -> Sim {
-    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), profile, ..Config::default() }, ROOT);
+fn before_pairing(near: DeviceId) -> Sim {
+    let mut sim = Sim::new(Config { mode: Some(ErrorMode::Debug), ..Config::default() }, ROOT);
     sim.admit(A, Rights { accept: true, ..Rights::MEMBER }, false, Vec::new());
     sim.link(ROOT, A);
     assert!(sim.add_device(NEW, true));
@@ -1194,7 +1194,15 @@ fn scanned(sim: &mut Sim, d: DeviceId) -> KeyFingerprint {
     sim.node(d).unwrap().device_fingerprint()
 }
 
-/// The owner scans the new device with the root device and confirms the admission there.
+/// The new device `d` presents a code and the acceptor `at` reads it; the exchange runs.
+fn pair(sim: &mut Sim, d: DeviceId, at: DeviceId) -> PairingCode {
+    let (_, code) = sim.node(d).unwrap().show_pairing_code().unwrap();
+    sim.node(at).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    code
+}
+
+/// The owner reads the new device's code with the root device and confirms the admission.
 fn admit(sim: &mut Sim, request: JoinRequestId, rights: Rights) {
     let presented = scanned(sim, NEW);
     let host = sim.node(ROOT).unwrap().admit(request, presented, rights, Vec::new()).unwrap();
@@ -1210,18 +1218,15 @@ fn admit(sim: &mut Sim, request: JoinRequestId, rights: Rights) {
 
 #[test]
 fn a_device_joins_through_an_acceptor() {
-    let mut sim = before_pairing(A, Profile::default());
+    let mut sim = before_pairing(A);
     // Before pairing the device has no bus: no state, and bus operations are refused.
     assert!(sim.node(NEW).unwrap().state().is_none());
     assert_eq!(sim.node(NEW).unwrap().publish(CH, b"x", 1).unwrap_err().code(), RuleCode::API_NO_BUS);
     sim.node(NEW).unwrap().set_name("kitchen display").unwrap();
 
-    // The acceptor shows a short code; the person enters it on the new device.
-    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-    assert!(matches!(code, PairingCode::Short(n) if n <= 999_999));
-    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
-    sim.settle().unwrap();
-
+    // The new device presents a code with its device key; the acceptor reads it (R-JOIN-1).
+    let code = pair(&mut sim, NEW, A);
+    assert_eq!(code.device, sim.node(NEW).unwrap().device_fingerprint());
     let bus = sim.node(ROOT).unwrap().state().unwrap().bus;
     assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Ok(Paired::Joiner { bus })]);
     let at_acceptor = pairing_results(&sim.drain_events(A));
@@ -1259,14 +1264,12 @@ fn a_device_joins_through_an_acceptor() {
 
 /// Two devices paired through the acceptor; their requests wait at the Root.
 fn two_requests() -> (Sim, JoinRequestId, JoinRequestId) {
-    let mut sim = before_pairing(A, Profile::default());
+    let mut sim = before_pairing(A);
     sim.add_device(B, false);
     sim.link(A, B);
     sim.settle().unwrap();
     for d in [NEW, B] {
-        let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-        sim.node(d).unwrap().enter_pairing_code(code).unwrap();
-        sim.settle().unwrap();
+        pair(&mut sim, d, A);
     }
     let requests = join_requests(&sim.drain_events(ROOT));
     assert_eq!(requests.iter().map(|r| r.1).collect::<Vec<_>>(), vec![NEW, B]);
@@ -1276,8 +1279,8 @@ fn two_requests() -> (Sim, JoinRequestId, JoinRequestId) {
 #[test]
 fn the_root_device_admits_only_the_device_whose_fingerprint_it_was_given() {
     let (mut sim, of_new, of_other) = two_requests();
-    // The owner scanned the new device, and the request names another device key: this is
-    // what a request with a substituted key looks like to the Root (R-JOIN-7).
+    // The owner read the code of the new device, and the request names another device key:
+    // this is what a request with a substituted key looks like to the Root (R-JOIN-7).
     let presented = scanned(&mut sim, NEW);
     let refused = sim.node(ROOT).unwrap().admit(of_other, presented, Rights::MEMBER, Vec::new());
     assert_eq!(refused.unwrap_err().code(), RuleCode::JOIN_FINGERPRINT);
@@ -1304,57 +1307,36 @@ fn a_mistyped_fingerprint_admits_nobody() {
 }
 
 #[test]
-fn a_scanned_code_names_the_device_that_shows_it() {
-    let mut sim = before_pairing(A, Profile::default());
+fn the_acceptor_pairs_only_the_device_its_code_names() {
+    let mut sim = before_pairing(A);
     sim.add_device(B, false);
+    sim.settle().unwrap();
+    // Someone saw the code of the new device and stands in for it with another device key:
+    // the acceptor read the code of NEW and meets B, which knows the secret (R-JOIN-7).
+    let (_, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    sim.unlink(A, NEW);
+    let (_, of_b) = sim.node(B).unwrap().show_pairing_code().unwrap();
     sim.link(A, B);
-    sim.settle().unwrap();
-    let bus = sim.node(ROOT).unwrap().state().unwrap().bus;
-
-    // An acceptor's code names its bus. A new device that scanned the code of another bus
-    // refuses this one, even though the secret is right (R-JOIN-7).
-    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
-    let PairingCode::Qr { secret, shown_by } = code else { panic!("a QR code") };
-    assert_eq!(shown_by, Shower::Bus(bus));
-    let elsewhere = PairingCode::Qr { secret, shown_by: Shower::Bus([7; 32]) };
-    sim.node(NEW).unwrap().enter_pairing_code(elsewhere).unwrap();
-    sim.settle().unwrap();
-    assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(RuleCode::JOIN_OTHER_BUS)]);
-    assert!(sim.node(NEW).unwrap().state().is_none());
-    assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
-    sim.drain_events(A);
-
-    // A joiner's code names its device key. An acceptor that scanned the code of another
-    // device refuses this one.
-    let (_, code) = sim.node(NEW).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
-    let PairingCode::Qr { secret, shown_by } = code else { panic!("a QR code") };
-    assert_eq!(shown_by, Shower::Device(sim.node(NEW).unwrap().device_fingerprint()));
-    let of_other = PairingCode::Qr { secret, shown_by: Shower::Device(sim.node(B).unwrap().device_fingerprint()) };
-    sim.node(A).unwrap().enter_pairing_code(of_other).unwrap();
+    let seen = PairingCode { secret: of_b.secret, device: code.device };
+    sim.node(A).unwrap().enter_pairing_code(seen).unwrap();
     sim.settle().unwrap();
     assert_eq!(pairing_results(&sim.drain_events(A)), vec![Err(RuleCode::JOIN_FINGERPRINT)]);
     assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
-
-    // A code is scanned by a device of the other role.
-    assert_eq!(sim.node(B).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
-    let of_bus = PairingCode::Qr { secret, shown_by: Shower::Bus(bus) };
-    assert_eq!(sim.node(A).unwrap().enter_pairing_code(of_bus).unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
 }
 
 #[test]
-fn the_root_pairs_a_device_itself_and_the_joiner_may_show_the_code() {
-    let mut sim = before_pairing(ROOT, Profile::default());
-    // Only the joiner has a screen: it shows a QR code and the Root takes it (R-JOIN-9).
-    let (_, code) = sim.node(NEW).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
-    let PairingCode::Qr { shown_by: Shower::Device(key), .. } = code else { panic!("a joiner's QR code") };
+fn the_root_pairs_a_device_itself_with_one_reading_of_its_code() {
+    let mut sim = before_pairing(ROOT);
+    // The new device presents its code before the Root has read it (R-JOIN-9).
+    let (_, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
     sim.settle().unwrap();
     sim.node(ROOT).unwrap().enter_pairing_code(code).unwrap();
     sim.settle().unwrap();
     let requests = join_requests(&sim.drain_events(ROOT));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].3, ROOT);
-    // One scan gave the root device both the secret and the fingerprint.
-    let host = sim.node(ROOT).unwrap().admit(requests[0].0, key, Rights::READER, Vec::new()).unwrap();
+    // The one reading gave the root device both the secret and the fingerprint.
+    let host = sim.node(ROOT).unwrap().admit(requests[0].0, code.device, Rights::READER, Vec::new()).unwrap();
     sim.node(ROOT).unwrap().answer_host(host, HostAnswer::Approve).unwrap();
     sim.settle().unwrap();
     assert!(is_member(&mut sim, NEW, NEW));
@@ -1362,10 +1344,8 @@ fn the_root_pairs_a_device_itself_and_the_joiner_may_show_the_code() {
 
 #[test]
 fn a_declined_request_admits_nobody() {
-    let mut sim = before_pairing(A, Profile::default());
-    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
-    sim.settle().unwrap();
+    let mut sim = before_pairing(A);
+    pair(&mut sim, NEW, A);
     let request = join_requests(&sim.drain_events(ROOT))[0].0;
     // Only the root device answers a request.
     assert_eq!(sim.node(A).unwrap().decline_join(request).unwrap_err().code(), RuleCode::API_NOT_ROOT);
@@ -1385,77 +1365,57 @@ fn a_declined_request_admits_nobody() {
     assert!(!is_member(&mut sim, NEW, NEW));
 }
 
-/// Another code of the same form; different `k` below a million give different codes.
-fn wrong(code: PairingCode, k: u8) -> PairingCode {
-    match code {
-        PairingCode::Short(n) => PairingCode::Short(n.wrapping_add(u32::from(k)).checked_rem(1_000_000).unwrap()),
-        PairingCode::Qr { mut secret, shown_by } => {
-            secret[0] ^= k;
-            PairingCode::Qr { secret, shown_by }
-        }
-    }
-}
-
 #[test]
-fn a_shown_code_allows_a_bounded_number_of_runs() {
-    let mut sim = before_pairing(A, Profile::default());
-    let (pairing, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-    let mut left = Vec::new();
-    for bad in [wrong(code, 1), wrong(code, 2), wrong(code, 3)] {
-        sim.node(NEW).unwrap().enter_pairing_code(bad).unwrap();
+fn a_wrong_secret_fails_the_run_and_the_code_stays_good() {
+    let mut sim = before_pairing(A);
+    let (_, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    // Runs are not counted (R-JOIN-3): several wrong secrets do not spend the code.
+    for k in 1..=4u8 {
+        let mut guess = code;
+        guess.secret[0] ^= k;
+        sim.node(A).unwrap().enter_pairing_code(guess).unwrap();
         sim.settle().unwrap();
-        assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(RuleCode::JOIN_WRONG_CODE)]);
-        left.extend(sim.drain_events(A));
+        assert_eq!(pairing_results(&sim.drain_events(A)), vec![Err(RuleCode::JOIN_WRONG_CODE)]);
+        assert!(pairing_results(&sim.drain_events(NEW)).is_empty());
     }
-    // Two failed runs leave the code armed; the third spends it (R-JOIN-3).
-    let attempts: Vec<u8> = left
-        .iter()
-        .filter_map(|e| match e {
-            Event::PairingAttemptFailed { pairing: p, attempts_left } if *p == pairing => Some(*attempts_left),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(attempts, vec![2, 1]);
-    assert_eq!(pairing_results(&left), vec![Err(RuleCode::JOIN_ATTEMPTS)]);
-    // The right code comes too late: nobody answers, and no request is made.
-    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
-    sim.settle().unwrap();
-    assert!(sim.node(NEW).unwrap().state().is_none());
     assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
+    sim.node(A).unwrap().enter_pairing_code(code).unwrap();
+    sim.settle().unwrap();
+    assert!(sim.node(NEW).unwrap().state().is_some());
+    assert_eq!(join_requests(&sim.drain_events(ROOT)).len(), 1);
 }
 
 #[test]
-fn an_entered_code_is_refused_after_its_runs() {
-    let mut sim = before_pairing(A, Profile { pairing_attempts: 2, ..Profile::default() });
-    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-    // The person enters the same wrong code twice on the new device.
-    let typo = wrong(code, 1);
-    for expected in [RuleCode::JOIN_WRONG_CODE, RuleCode::JOIN_ATTEMPTS] {
-        sim.node(NEW).unwrap().enter_pairing_code(typo).unwrap();
-        sim.settle().unwrap();
-        assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(expected)]);
-    }
-    // The new device counted its runs with that code and refuses it (R-JOIN-3).
-    assert_eq!(sim.node(NEW).unwrap().enter_pairing_code(typo).unwrap_err().code(), RuleCode::JOIN_ATTEMPTS);
-    // Another code starts its own count.
-    sim.node(NEW).unwrap().enter_pairing_code(wrong(code, 2)).unwrap();
+fn a_replaced_code_is_dead() {
+    let mut sim = before_pairing(A);
+    // The application replaces the code, as it may every few seconds.
+    let (pairing, old) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    sim.node(NEW).unwrap().cancel_pairing(pairing).unwrap();
+    let (_, new) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    assert_ne!(old.secret, new.secret);
+    assert_eq!(old.device, new.device);
+    sim.node(A).unwrap().enter_pairing_code(old).unwrap();
+    sim.settle().unwrap();
+    assert_eq!(pairing_results(&sim.drain_events(A)), vec![Err(RuleCode::JOIN_WRONG_CODE)]);
+    assert!(sim.node(NEW).unwrap().state().is_none());
 }
 
 #[test]
-fn pairing_arguments_and_rights_are_checked() {
-    let mut sim = before_pairing(A, Profile::default());
+fn pairing_roles_and_rights_are_checked() {
+    let mut sim = before_pairing(A);
     sim.admit(B, Rights::MEMBER, false, Vec::new());
     sim.settle().unwrap();
+    // The joiner presents and a member reads; never the other way.
+    assert_eq!(sim.node(A).unwrap().show_pairing_code().unwrap_err().code(), RuleCode::JOIN_ON_BUS);
+    let (pairing, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    assert_eq!(sim.node(NEW).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::API_NO_BUS);
     // A member without the accept right does not pair (R-JOIN-4).
-    assert_eq!(sim.node(B).unwrap().show_pairing_code(CodeForm::Qr).unwrap_err().code(), RuleCode::JOIN_NO_RIGHT);
-    let bad = sim.node(A).unwrap().enter_pairing_code(PairingCode::Short(1_000_000));
-    assert_eq!(bad.unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
-    let (pairing, _) = sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    assert_eq!(sim.node(B).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::JOIN_NO_RIGHT);
     // One pairing at a time.
-    assert_eq!(sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap_err().code(), RuleCode::JOIN_BUSY);
-    sim.node(A).unwrap().cancel_pairing(pairing).unwrap();
-    assert_eq!(sim.node(A).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
-    sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    assert_eq!(sim.node(NEW).unwrap().show_pairing_code().unwrap_err().code(), RuleCode::JOIN_BUSY);
+    sim.node(NEW).unwrap().cancel_pairing(pairing).unwrap();
+    assert_eq!(sim.node(NEW).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    sim.node(NEW).unwrap().show_pairing_code().unwrap();
 }
 
 #[test]
@@ -1471,9 +1431,7 @@ fn a_relay_holds_join_requests_while_the_root_is_away() {
     sim.link(A, B);
     sim.settle().unwrap();
     for d in [NEW, B] {
-        let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-        sim.node(d).unwrap().enter_pairing_code(code).unwrap();
-        sim.settle().unwrap();
+        pair(&mut sim, d, A);
         assert!(sim.node(d).unwrap().state().is_some(), "{d} paired");
     }
     // The Root comes back to the relay: of two requests the relay kept the newest (R-JOIN-8).
@@ -1486,15 +1444,14 @@ fn a_relay_holds_join_requests_while_the_root_is_away() {
 
 #[test]
 fn a_reboot_forgets_a_pairing_in_progress() {
-    let mut sim = before_pairing(A, Profile::default());
-    let (pairing, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
-    sim.reboot(A);
-    assert_eq!(sim.node(A).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+    let mut sim = before_pairing(A);
+    let (pairing, code) = sim.node(NEW).unwrap().show_pairing_code().unwrap();
+    sim.reboot(NEW);
+    assert_eq!(sim.node(NEW).unwrap().cancel_pairing(pairing).unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
     sim.link(A, NEW);
-    sim.link(ROOT, A);
-    sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
+    sim.node(A).unwrap().enter_pairing_code(code).unwrap();
     sim.settle().unwrap();
-    // The code died with the reboot: the new device is still waiting, unpaired.
+    // The code died with the reboot: the acceptor is still waiting, and nobody is paired.
     assert!(sim.node(NEW).unwrap().state().is_none());
-    assert!(pairing_results(&sim.drain_events(NEW)).is_empty());
+    assert!(pairing_results(&sim.drain_events(A)).is_empty());
 }

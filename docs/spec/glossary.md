@@ -141,8 +141,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Pairing | `Pairing` | CPace exchange between the joiner and the acceptor | R-JOIN-1, B.11 |
 | Joiner | `joiner` | The device that is joining | Section 7 |
 | Acceptor | `acceptor` | A node with the accept right, or the root device | Section 7 |
-| Short code | `PairCode` | 6 digits | R-JOIN-1 |
-| QR secret | `PairSecret` | 16 bytes | R-JOIN-1 |
+| Pairing secret | `PairSecret` | 16 bytes | R-JOIN-1 |
 | Pairing transcript hash | `pairing_hash` | Field of the join request | R-JOIN-4, B.11 |
 | Joiner signature | `joiner_sig` | The joiner's `PairDevice` signature, carried in the join request | B.3 |
 | Pairing messages | `PairInit`, `PairReply`, `PairConfirm`, `PairDone`, `PairSealed`, `PairAbort` | | B.11 |
@@ -290,8 +289,7 @@ A halted target does not answer with a refusal or a result code; it answers with
 | Actions per device | `ACTIONS_MAX` | 64 |
 | Device name | `NAME_MAX` | 64 bytes |
 | System channels | `SYSTEM_CHANNELS` | 16 |
-| Short code digits | `PAIR_CODE_DIGITS` | 6 |
-| QR secret length | `PAIR_SECRET_LEN` | 16 |
+| Pairing secret length | `PAIR_SECRET_LEN` | 16 |
 | Bus fingerprint bits | `FINGERPRINT_BITS` | 64 |
 
 ## 14. Profile Parameters
@@ -306,6 +304,5 @@ A halted target does not answer with a refusal or a result code; it answers with
 | Stream chunk and blob segment | `chunk_len` | up to 16384 | 4096 |
 | Initial stream credit | `initial_credit` | up to 1 MiB | 16 KiB |
 | Content padding buckets | `pad_steps` | chosen by the source | 64, 256, 1024, 4096 |
-| Pairing attempts per code | `pair_attempts` | 1..10 | 3 |
 | Join requests held by a relay | `join_requests_max` | 1..256 | 16 |
 | "Reset nonces" period | `nonce_reset_period` | set by the host | 30 s |

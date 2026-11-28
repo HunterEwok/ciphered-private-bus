@@ -21,7 +21,7 @@ use crate::rng::Rng;
 
 mod enroll;
 
-use crate::engine::enrollment::{Attempts, Buffer, Payload, Request};
+use crate::engine::enrollment::{Buffer, Payload, Request};
 use cpb_api::{JoinRequestId, PairingCode};
 pub(crate) use enroll::key_fingerprint;
 use enroll::{Bootstrap, Pairing};
@@ -46,8 +46,6 @@ pub struct Profile {
     pub stream_buffer: u32,
     /// The checkpoint bitmap length, 64 to 32768 bits (R-MEM-14).
     pub window: u32,
-    /// Pairing runs one short code allows, 1 to 10 (R-JOIN-3).
-    pub pairing_attempts: u8,
     /// Join requests a relay holds for the Root, and the Root for the owner, 1 to 256
     /// (R-JOIN-8).
     pub join_buffer: u16,
@@ -67,9 +65,6 @@ pub const DEFAULT_MAX_STREAMS: u16 = 8;
 /// The default checkpoint bitmap length, in bits (Section 13.2).
 pub const DEFAULT_WINDOW: u32 = 4096;
 
-/// The default number of pairing runs per short code (Section 13.2).
-pub const DEFAULT_PAIRING_ATTEMPTS: u8 = 3;
-
 /// The default number of join requests held (Section 13.2).
 pub const DEFAULT_JOIN_BUFFER: u16 = 16;
 
@@ -85,7 +80,6 @@ impl Default for Profile {
             // What an ordered stream holds under the default initial credit.
             stream_buffer: DEFAULT_INITIAL_CREDIT,
             window: DEFAULT_WINDOW,
-            pairing_attempts: DEFAULT_PAIRING_ATTEMPTS,
             join_buffer: DEFAULT_JOIN_BUFFER,
         }
     }
@@ -332,8 +326,6 @@ struct Enrollment {
     /// The node publishes its node info once it is admitted (R-CH-16).
     announce: bool,
     pairing: Option<Pairing>,
-    /// The code last entered here and the runs made with it (R-JOIN-3).
-    entered: Option<(PairingCode, Attempts)>,
     /// `PairInit` nonces of joiners that started before this node had a code.
     pair_inits: BTreeMap<DeviceId, u64>,
     bootstrap: Option<Bootstrap>,
@@ -353,7 +345,6 @@ impl Enrollment {
             has_presence: false,
             announce: false,
             pairing: None,
-            entered: None,
             pair_inits: BTreeMap::new(),
             bootstrap: None,
             own_joins: buffer(),

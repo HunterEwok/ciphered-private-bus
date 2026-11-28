@@ -491,8 +491,9 @@ A device joins a bus in two steps: pairing with any member that has the right to
 and a Root signature after the owner confirms.
 
 > **R-JOIN-1.** Pairing is a password-authenticated key exchange using CPace [CPACE] between the joiner
-> and the acceptor. The password is either a 16-byte secret from an on-screen QR code or a 6-digit short
-> code that a person carries from one device to the other.
+> and the acceptor. The password is a fresh 16-byte secret that the joiner generates and presents
+> together with the fingerprint of its device key, as a QR code or a tag, and that the acceptor reads
+> through its own camera, reader or keyboard (R-JOIN-7). There is no other way to pair.
 > *Serves:* S4. *Verified by:* Tamarin.
 
 > **R-JOIN-2.** During pairing the joiner receives the bus identifier, the first root key, and the keys K1
@@ -503,7 +504,8 @@ and a Root signature after the owner confirms.
 > *Serves:* S4, S9. *Verified by:* Tamarin, vectors.
 
 > **R-JOIN-3.** A failed pairing attempt MUST NOT let the adversary test more than one password guess.
-> The number of attempts per code is bounded by a profile limit.
+> The secret has 128 bits, so guessing it online is infeasible and the runs with a secret are not
+> counted. The joiner discards a secret when a pairing completes with it or when it presents a new one.
 > *Serves:* S4. *Verified by:* Tamarin, test.
 
 > **R-JOIN-4.** The acceptor prepares a join request: the joiner's key, an optional user-presence key,
@@ -535,11 +537,9 @@ and a Root signature after the owner confirms.
 > the root device compares the presented fingerprint with the device key in the request and refuses a
 > mismatch; the local interface has no operation that admits a device without a presented fingerprint,
 > and it does not give out the fingerprint of the key in a request. Otherwise a compromised acceptor
-> substitutes its own key for the joiner's in the request. A QR code with a pairing secret also names
-> the device that shows it: an acceptor's code names its bus, and a joiner's code its device key. The
-> device that scans the code refuses a peer that is not the one named, so someone who only saw the code
-> cannot stand in for the device that showed it. After admission the joiner shows the fingerprint of
-> the bus it has joined.
+> substitutes its own key for the joiner's in the request. The acceptor that read a joiner's code
+> refuses a peer with another device key, so someone who only saw the code cannot stand in for the
+> joiner. After admission the joiner shows the fingerprint of the bus it has joined.
 > *Serves:* S4. *Verified by:* model, Tamarin, scenario test.
 
 > **R-JOIN-8.** A relay holds join requests for the Root while it is offline. It recognizes them by
@@ -549,8 +549,8 @@ and a Root signature after the owner confirms.
 
 > **R-JOIN-9.** The Root MAY pair a joiner itself, without an acceptor. It is the same exchange; no join
 > request is prepared. The root device checks the presented fingerprint here too (R-JOIN-5, R-JOIN-7):
-> the pairing secret is shown on a screen, so knowing it does not prove which device knows it. When the
-> root device scans the joiner's code, that one scan gives it both the secret and the fingerprint.
+> the pairing secret is shown on a screen, so knowing it does not prove which device knows it. The one
+> reading of the joiner's code gives the root device both the secret and the fingerprint.
 > *Serves:* S4. *Verified by:* Tamarin.
 
 > **R-JOIN-10.** Bus creation: the root device asks the host to generate the root key, generates K1 and
@@ -1239,12 +1239,11 @@ Appendix B, Section B.10.
 > operation takes), connected links, core memory usage, and the bus fingerprint (R-JOIN-7). The snapshot contains no secrets.
 > A node that has not completed a pairing has no bus: it has no bus state, and every operation that needs
 > a bus is refused. On every node the interface gives the device identifier and the fingerprint of the
-> device key (R-JOIN-7), and the pairing operations: start a pairing with a code the core
-> generates for this device's screen, in either form (R-JOIN-1); start a pairing with a code entered on
-> this device, where a scanned code also names the device that showed it and the core refuses another
-> peer (R-JOIN-7); cancel a pairing. A node without a bus pairs as the joiner; a member with the accept right, or the
-> root device (R-JOIN-9), pairs as the acceptor. The core reports every failed run of a code shown on
-> this device with the attempts the code has left, and the end of a pairing with its result (R-JOIN-3). After accepting a
+> device key (R-JOIN-7), and the pairing operations: on a node without a bus, start a pairing with a
+> code the core generates for this device to present (R-JOIN-1); on a member, start a pairing with a
+> code read from a joiner, whose device key the core then holds the peer to (R-JOIN-7); cancel a
+> pairing. A node without a bus pairs as the joiner; a member with the accept right, or the
+> root device (R-JOIN-9), pairs as the acceptor. The core reports the end of a pairing with its result (R-JOIN-3). After accepting a
 > checkpoint or a passport the core reports a membership change with the root generation and the
 > checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
 > members with the read right. Subscribing delivers the channel's retained publications at once. With a
@@ -1334,8 +1333,7 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Bus system channels | 0 .. 15 | One is in use: channel 0 for node info. The other 15 are reserved for future needs of the bus; the number occupies one byte in any case. | Chosen |
 | Channel number | 0 .. 65535; 16 and above belong to the application (R-CH-16) | The number is not visible outside, only its hash in the label, so its size costs nothing. Every retained channel occupies recipient memory; an application needs no more than 65 thousand. | Chosen |
 | Frame | body up to 16384 bytes, 2-byte big-endian length | Every participant must accept a root change record (8046 bytes, about 7.9 KiB, because of the K2 signature) and a checkpoint with the largest bitmap (6432 bytes, about 6.3 KiB, today, and 14225 bytes, about 13.9 KiB, with a post-quantum root signature; computed in Appendix B, Section B.9). The nearest power of two is 16384. No object needs more: a publication takes up to 4.3 KiB, a key grant 1.4 KiB, and streams and blobs are cut into chunks. The limit is therefore the same for everyone and not part of the passport. A TLS record has the same size. A length up to 16384 fits in 2 bytes. On an external relay link every frame travels inside a wrapped object, so the largest stream chunk or blob segment there is shorter by the wrapping overhead (Appendix B, Section B.10); every map object fits with room to spare. | Computed |
-| Pairing short code | 6 decimal digits | CPace allows one guess per attempt. The probability of guessing is the number of attempts divided by 10^6: 3 in a million with three attempts. This matches Bluetooth numeric comparison. After the attempts are exhausted the code changes. | Computed |
-| QR secret | 16 bytes | 128 bits; brute force is impossible, no attempt limit is needed. | Computed |
+| Pairing secret | 16 bytes | 128 bits; guessing is infeasible at one guess per run, so the runs are not counted. | Computed |
 | Device key fingerprint | 32 bytes | The whole SHA-256 output: a camera or a reader carries it at no cost to the person, and finding another key with the same fingerprint is infeasible. | Computed |
 | Bus fingerprint shown after admission | 64 bits, 20 decimal digits | A person reads it. To pass for the owner's bus, another bus would need keys that give the same fingerprint. P-256 key search is estimated at 10^7 keys per second per core. 40 bits (12 digits) fall to one core in a day. 64 bits need about 58 thousand core-years. The search rate is an estimate, to be refined by measurement. | Computed |
 
@@ -1351,7 +1349,6 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Stream chunk and blob segment, including header | up to 16384 bytes | 4096 bytes | A quarter of a frame: a short chunk does not occupy the link for long, and other messages pass between chunks. The source writes the blob segment size into the publication header (Appendix B, field `seg`), so readers and relays learn it without configuration, and the value can change after measurement without a format change. A segment other than the last is at least 1024 bytes of ciphertext (Appendix B, Section B.5). Starting value pending measurement. | Computed |
 | Initial stream credit | up to 1 MiB | 16 KiB | The recipient grants credit and must have that much memory. 64 KiB consumed all the memory of the smallest participant. 16 KiB is four chunks, so the link does not idle during one round trip. | Computed; default chosen |
 | Content padding buckets | chosen by the sender | 64, 256, 1024, 4096 | The source chooses the buckets; the recipient does not care. A factor of four leaves the relay four size classes and inflates content at most fourfold. A factor of two would give eight classes and twofold inflation. | Chosen |
-| Pairing attempts per code | 1 .. 10 | 3 | The probability of guessing the code is the number of attempts per million. Three attempts forgive a typo; ten give 1 in 100 thousand, the accepted bound. | Computed |
 | Join requests held by a relay | 1 .. 256 | 16 | As many as an owner can review at once. Only members with the accept right can create requests. | Chosen |
 | "Reset nonces" period | set by the host | 30 s | The longest delay with which a network adversary can deliver an intercepted call. It cannot be made shorter without cost: a nonce issued just before a reset is lost, and the share of such refusals equals the round-trip time divided by the period; at 0.3 s that is 1%. | Chosen |
 
@@ -1569,9 +1566,8 @@ post-quantum signature algorithm identifier without creating a new bus.
 ### 15.7. Pairing
 
 Pairing uses CPace [CPACE], which lets an active adversary test exactly one password guess per pairing
-attempt (R-JOIN-3). With a 6-digit short code the success probability of an online guessing attack is the
-number of permitted attempts divided by 10^6 (Section 13.2); a 16-byte QR secret makes online guessing
-infeasible. Pairing gives the joiner the bus identifier and the recovery key halves, from which it checks
+attempt (R-JOIN-3). The secret has 16 random bytes, so online guessing is infeasible and no attempt
+limit is needed. Pairing gives the joiner the bus identifier and the recovery key halves, from which it checks
 the identifier (R-JOIN-2); it does not admit the joiner. Admission requires a Root signature after the
 owner confirms the join request.
 
@@ -1579,10 +1575,12 @@ The pairing code is shown on a screen, so it is not a secret from someone who ca
 an adversary, active on the link, can run the exchange with each side under the real code. Two checks
 that do not depend on the secrecy of the code stop it. The root device admits only the device key whose
 fingerprint it got from the joiner itself, through its own camera or reader (R-JOIN-7); the
-owner compares nothing, because people confirm mismatching strings [KAINDA]. And a device that scans
-a code takes from it the bus or the device key of the device that shows it, and refuses any other peer.
-A joiner that typed a short code has no such check of the bus and relies on the bus fingerprint it shows
-after admission. What no check in the bus can stop is an owner persuaded to scan the code of a device
+owner compares nothing, because people confirm mismatching strings [KAINDA]. And the acceptor takes the joiner's
+device key fingerprint from the code it read and refuses any other peer. The joiner has no such check
+of the bus: someone who saw its code and answered first can take it into another bus. That admits
+nobody to the owner's bus, the owner's acceptor finds no joiner to pair with, and
+the joiner shows the fingerprint of the bus it joined. An application that needs more gives the joiner
+the bus identifier beforehand and compares. What no check in the bus can stop is an owner persuaded to scan the code of a device
 that is not theirs; the rule that an admission starts only on the root device, never from a link or a
 message, removes the remote form of that attack.
 

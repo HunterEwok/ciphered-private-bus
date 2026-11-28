@@ -13,17 +13,16 @@
 use std::collections::BTreeSet;
 
 use cpb_api::{
-    CodeForm, DeviceId, Event, Fingerprint, HostRequestId, HostRequestKind, JoinRequestId, KeyFingerprint,
-    MAX_SHORT_CODE, OwnerOperation, Paired, PairingCode, PairingId, Permit, Report, Rights, RuleCode, Shower,
+    DeviceId, Event, Fingerprint, HostRequestId, HostRequestKind, JoinRequestId, KeyFingerprint, OwnerOperation,
+    Paired, PairingCode, PairingId, Permit, Report, Rights, RuleCode,
 };
 
 use super::{Body, HostWait, Node, digest};
-use crate::engine::enrollment::{Attempts, Payload, Request};
+use crate::engine::enrollment::{Payload, Request};
 use crate::engine::membership::{Checkpoint, View};
 
 /// `PairAbort` codes (Appendix B, Section B.11).
 const ABORT_WRONG_CODE: u8 = 1;
-const ABORT_ATTEMPTS: u8 = 2;
 const ABORT_DECLINED: u8 = 4;
 const ABORT_OTHER_PEER: u8 = 5;
 
@@ -47,9 +46,6 @@ struct JoinerRun {
 pub(super) struct Pairing {
     id: PairingId,
     code: PairingCode,
-    /// This node generated the code and shows it; otherwise it was entered here.
-    shown: bool,
-    attempts: Attempts,
     /// The joiner's nonce of the current `PairInit`.
     nonce: u64,
     joiner: Option<JoinerRun>,
@@ -67,16 +63,6 @@ pub(super) struct Bootstrap {
 /// device.
 pub(crate) fn key_fingerprint(d: DeviceId) -> KeyFingerprint {
     KeyFingerprint(digest(u64::from_be_bytes(*b"cpb fpr\0"), &d.0))
-}
-
-/// The stand-in for the exchange: two sides finish a run if they hold one password. A QR
-/// code's password is its secret; what the code says about its shower is checked apart.
-fn same_password(a: PairingCode, b: PairingCode) -> bool {
-    match (a, b) {
-        (PairingCode::Qr { secret: x, .. }, PairingCode::Qr { secret: y, .. }) => x == y,
-        (PairingCode::Short(x), PairingCode::Short(y)) => x == y,
-        _ => false,
-    }
 }
 
 /// The stand-in for the bus fingerprint (Appendix B, Section B.11).
@@ -102,108 +88,67 @@ fn transcript(nonce_n: u64, nonce_a: u64) -> u64 {
 impl Node {
     // -------------------------------------------------------------------- pairing
 
-    fn limit_of(&self, code: PairingCode) -> u8 {
-        match code {
-            // A QR code is single-use (Appendix B, Section B.11).
-            PairingCode::Qr { .. } => 1,
-            PairingCode::Short(_) => self.profile.pairing_attempts,
-        }
+    fn arm(&mut self, code: PairingCode) -> PairingId {
+        let id = PairingId(self.fresh_id());
+        let nonce = self.rng.nonzero();
+        self.enroll.pairing =
+            Some(Pairing { id, code, nonce, joiner: None, acceptor: std::collections::BTreeMap::new() });
+        id
     }
 
-    fn may_pair(&self) -> Result<(), Report> {
-        self.halted_err()?;
+    fn pairing_free(&self) -> Result<(), Report> {
         if self.enroll.pairing.is_some() || self.enroll.bootstrap.is_some() {
             return Err(Report::new(RuleCode::JOIN_BUSY, format!("{} has a pairing in progress", self.id)));
-        }
-        let accepts = self.root.is_some() || self.own_passport().is_some_and(|p| p.rights.accept);
-        if self.on_bus && !accepts {
-            return Err(Report::new(RuleCode::JOIN_NO_RIGHT, format!("{} has no accept right", self.id)));
         }
         Ok(())
     }
 
-    fn arm(&mut self, code: PairingCode, shown: bool, attempts: Attempts) -> PairingId {
-        let id = PairingId(self.fresh_id());
-        let nonce = self.rng.nonzero();
-        self.enroll.pairing = Some(Pairing {
-            id,
-            code,
-            shown,
-            attempts,
-            nonce,
-            joiner: None,
-            acceptor: std::collections::BTreeMap::new(),
-        });
+    /// The joiner generates a code and starts the exchange on every link (R-JOIN-1).
+    pub(crate) fn show_pairing_code(&mut self) -> Result<(PairingId, PairingCode), Report> {
         if self.on_bus {
-            // Joiners that started before this node had a code are answered now.
-            let waiting: Vec<(DeviceId, u64)> = self.enroll.pair_inits.iter().map(|(d, n)| (*d, *n)).collect();
-            self.enroll.pair_inits.clear();
-            for (peer, nonce_n) in waiting {
-                self.on_pair_init(peer, nonce_n);
-            }
-        } else {
-            let links: Vec<DeviceId> = self.links.iter().copied().collect();
-            for l in links {
-                self.send(l, Body::PairInit { nonce });
-            }
+            return Err(Report::new(RuleCode::JOIN_ON_BUS, format!("{} is on a bus", self.id)));
         }
-        id
+        self.pairing_free()?;
+        let mut secret = [0u8; 16];
+        for chunk in secret.chunks_mut(8) {
+            chunk.copy_from_slice(&self.rng.next_u64().to_be_bytes());
+        }
+        let code = PairingCode { secret, device: key_fingerprint(self.id) };
+        let id = self.arm(code);
+        self.start_runs();
+        Ok((id, code))
     }
 
-    pub(crate) fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report> {
-        self.may_pair()?;
-        let code = match form {
-            CodeForm::Qr => {
-                let mut bytes = [0u8; 16];
-                for chunk in bytes.chunks_mut(8) {
-                    chunk.copy_from_slice(&self.rng.next_u64().to_be_bytes());
-                }
-                // The code names its shower: a member its bus, a joiner its device key.
-                let shown_by =
-                    if self.on_bus { Shower::Bus(self.bus) } else { Shower::Device(key_fingerprint(self.id)) };
-                PairingCode::Qr { secret: bytes, shown_by }
-            }
-            CodeForm::Short => {
-                let span = u64::from(MAX_SHORT_CODE).saturating_add(1);
-                let n = self.rng.next_u64().checked_rem(span).unwrap_or(0);
-                PairingCode::Short(u32::try_from(n).unwrap_or(0))
-            }
-        };
-        let attempts = Attempts::new(self.limit_of(code));
-        Ok((self.arm(code, true, attempts), code))
+    /// The joiner sends `PairInit` on every link it has.
+    fn start_runs(&mut self) {
+        let Some(nonce) = self.enroll.pairing.as_ref().map(|p| p.nonce) else { return };
+        let links: Vec<DeviceId> = self.links.iter().copied().collect();
+        for l in links {
+            self.send(l, Body::PairInit { nonce });
+        }
     }
 
+    /// The acceptor takes the code it read from a joiner and answers the joiners that
+    /// started before it had one.
     pub(crate) fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report> {
-        if matches!(code, PairingCode::Short(n) if n > MAX_SHORT_CODE) {
-            return Err(Report::new(RuleCode::JOIN_BAD_CODE, "a short code is 0..999999".to_owned()));
+        self.halted_err()?;
+        self.pairing_free()?;
+        if self.root.is_none() && !self.own_passport().is_some_and(|p| p.rights.accept) {
+            return Err(Report::new(RuleCode::JOIN_NO_RIGHT, format!("{} has no accept right", self.id)));
         }
-        self.may_pair()?;
-        // A joiner scans an acceptor's code and an acceptor a joiner's.
-        let other_role = match code {
-            PairingCode::Qr { shown_by: Shower::Bus(_), .. } => !self.on_bus,
-            PairingCode::Qr { shown_by: Shower::Device(_), .. } => self.on_bus,
-            PairingCode::Short(_) => true,
-        };
-        if !other_role {
-            let who = if self.on_bus { "a member" } else { "a device without a bus" };
-            return Err(Report::new(RuleCode::JOIN_BAD_CODE, format!("the code is shown by {who}, as this device is")));
+        let id = self.arm(code);
+        let waiting: Vec<(DeviceId, u64)> = self.enroll.pair_inits.iter().map(|(d, n)| (*d, *n)).collect();
+        self.enroll.pair_inits.clear();
+        for (peer, nonce_n) in waiting {
+            self.on_pair_init(peer, nonce_n);
         }
-        // The runs with one entered code are counted across entries of the same code.
-        let attempts = match self.enroll.entered {
-            Some((c, a)) if c == code => a,
-            _ => Attempts::new(self.limit_of(code)),
-        };
-        if attempts.left() == 0 {
-            return Err(Report::new(RuleCode::JOIN_ATTEMPTS, "the attempts with this code are spent".to_owned()));
-        }
-        Ok(self.arm(code, false, attempts))
+        Ok(id)
     }
 
     pub(crate) fn cancel_pairing(&mut self, id: PairingId) -> Result<(), Report> {
         let Some(p) = self.enroll.pairing.take_if(|p| p.id == id) else {
             return Err(Report::new(RuleCode::API_UNKNOWN_ID, format!("pairing {}", id.0)));
         };
-        self.remember_entered(&p);
         let peers: Vec<DeviceId> = p.acceptor.keys().copied().chain(p.joiner.map(|r| r.peer)).collect();
         for peer in peers {
             self.send(peer, Body::PairAbort { code: ABORT_DECLINED });
@@ -211,16 +156,9 @@ impl Node {
         Ok(())
     }
 
-    fn remember_entered(&mut self, p: &Pairing) {
-        if !p.shown {
-            self.enroll.entered = Some((p.code, p.attempts));
-        }
-    }
-
     /// Ends the pairing with a result.
     fn end_pairing(&mut self, result: Result<Paired, Report>) {
         if let Some(p) = self.enroll.pairing.take() {
-            self.remember_entered(&p);
             if let Err(r) = &result {
                 self.log.push(format!("{} {}", self.id, r.log_line()));
             }
@@ -228,24 +166,17 @@ impl Node {
         }
     }
 
-    /// A run failed: the two sides held different codes, or the other side gave up. A code
-    /// shown here stays good while it has attempts; an entered code is asked for again.
+    /// A run failed: the two sides held different secrets, or the other side gave up. Runs
+    /// are not counted (R-JOIN-3). The joiner keeps its code and starts again; the acceptor
+    /// ends the pairing, and its application reads the joiner's code again.
     fn run_failed(&mut self, code: RuleCode) {
         let Some(p) = self.enroll.pairing.as_mut() else { return };
-        p.joiner = None;
-        let (id, left, shown, nonce) = (p.id, p.attempts.left(), p.shown, p.nonce);
-        if left == 0 {
-            self.end_pairing(Err(Report::new(RuleCode::JOIN_ATTEMPTS, "the code is spent".to_owned())));
-        } else if shown {
-            self.events.push_back(Event::PairingAttemptFailed { pairing: id, attempts_left: left });
-            if !self.on_bus {
-                let links: Vec<DeviceId> = self.links.iter().copied().collect();
-                for l in links {
-                    self.send(l, Body::PairInit { nonce });
-                }
-            }
+        if self.on_bus {
+            self.end_pairing(Err(Report::new(code, "the run with the joiner failed".to_owned())));
         } else {
-            self.end_pairing(Err(Report::new(code, format!("{left} attempts left with this code"))));
+            p.joiner = None;
+            self.note("a pairing run failed; the code stays");
+            self.start_runs();
         }
     }
 
@@ -268,7 +199,6 @@ impl Node {
         if let Some(p) = self.enroll.pairing.as_mut() {
             p.acceptor.remove(&peer);
             if p.joiner.is_some_and(|r| r.peer == peer) {
-                // The run was counted when the reply arrived; how it ended does not matter.
                 self.run_failed(RuleCode::JOIN_STOPPED);
             }
         }
@@ -282,15 +212,8 @@ impl Node {
             self.enroll.pair_inits.insert(from, nonce_n);
             return;
         };
-        // The acceptor counts every run in which it sends its reply.
-        if !p.attempts.take() {
-            self.send(from, Body::PairAbort { code: ABORT_ATTEMPTS });
-            return;
-        }
         let nonce_a = self.rng.nonzero();
-        if let Some(p) = self.enroll.pairing.as_mut() {
-            p.acceptor.insert(from, AcceptorRun { tid: transcript(nonce_n, nonce_a), confirmed: false });
-        }
+        p.acceptor.insert(from, AcceptorRun { tid: transcript(nonce_n, nonce_a), confirmed: false });
         self.send(from, Body::PairReply { nonce: nonce_a });
     }
 
@@ -302,10 +225,6 @@ impl Node {
         if p.joiner.is_some() {
             return;
         }
-        // The joiner counts every run in which it receives the reply.
-        if !p.attempts.take() {
-            return;
-        }
         p.joiner = Some(JoinerRun { peer: from, tid: transcript(p.nonce, nonce_a) });
         let code = p.code;
         self.send(from, Body::PairConfirm { code });
@@ -314,7 +233,7 @@ impl Node {
     pub(super) fn on_pair_confirm(&mut self, from: DeviceId, code: PairingCode) {
         let Some(p) = self.enroll.pairing.as_mut() else { return };
         let Some(run) = p.acceptor.get_mut(&from) else { return };
-        if same_password(p.code, code) {
+        if p.code.secret == code.secret {
             run.confirmed = true;
             let bus = self.bus;
             self.send(from, Body::PairDone { code, bus });
@@ -328,24 +247,13 @@ impl Node {
     pub(super) fn on_pair_done(&mut self, from: DeviceId, code: PairingCode, bus: [u8; 32]) {
         let Some(p) = self.enroll.pairing.as_ref() else { return };
         let Some(run) = p.joiner.filter(|r| r.peer == from) else { return };
-        if !same_password(p.code, code) {
-            // The other side did not know the code: its confirmation fails.
+        if p.code.secret != code.secret {
+            // The other side did not know the secret: its confirmation fails.
             self.run_failed(RuleCode::JOIN_WRONG_CODE);
             return;
         }
-        // A scanned code names the acceptor's bus: whoever else learned the secret cannot
-        // take this device into another bus (R-JOIN-7).
-        if let (false, PairingCode::Qr { shown_by: Shower::Bus(named), .. }) = (p.shown, p.code) {
-            if named != bus {
-                self.send(from, Body::PairAbort { code: ABORT_OTHER_PEER });
-                self.end_pairing(Err(Report::new(RuleCode::JOIN_OTHER_BUS, format!("the acceptor {from}"))));
-                return;
-            }
-        }
         let id = p.id;
-        if let Some(p) = self.enroll.pairing.take() {
-            self.remember_entered(&p);
-        }
+        self.enroll.pairing = None;
         self.bus = bus;
         self.enroll.bootstrap = Some(Bootstrap { pairing: id, acceptor: from });
         let presence = self.enroll.has_presence.then_some(self.id);
@@ -365,13 +273,11 @@ impl Node {
     pub(super) fn on_pair_device(&mut self, from: DeviceId, payload: &Payload) {
         let Some(p) = self.enroll.pairing.as_ref() else { return };
         let Some(run) = p.acceptor.get(&from).filter(|r| r.confirmed) else { return };
-        // A scanned code names the joiner's device key (R-JOIN-7).
-        if let (false, PairingCode::Qr { shown_by: Shower::Device(named), .. }) = (p.shown, p.code) {
-            if named != key_fingerprint(payload.key) {
-                self.send(from, Body::PairAbort { code: ABORT_OTHER_PEER });
-                self.end_pairing(Err(Report::new(RuleCode::JOIN_FINGERPRINT, format!("the device key of {from}"))));
-                return;
-            }
+        // The code names the joiner's device key (R-JOIN-7).
+        if p.code.device != key_fingerprint(payload.key) {
+            self.send(from, Body::PairAbort { code: ABORT_OTHER_PEER });
+            self.end_pairing(Err(Report::new(RuleCode::JOIN_FINGERPRINT, format!("the device key of {from}"))));
+            return;
         }
         match Request::from_session(run.tid, self.id, payload) {
             Ok(r) => {
@@ -555,7 +461,6 @@ impl Node {
     /// Pairing state is in RAM (R-CORE-5 does not list it).
     pub(super) fn reboot_enrollment(&mut self) {
         self.enroll.pairing = None;
-        self.enroll.entered = None;
         self.enroll.pair_inits.clear();
         self.enroll.own_joins.drain();
         self.enroll.relay_joins.drain();

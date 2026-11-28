@@ -258,15 +258,12 @@ impl RuleCode {
     /// A member without the accept right tried to accept a joiner.
     pub const JOIN_NO_RIGHT: Self =
         Self::new("join", "no-right", ErrorKind::Refused, "R-JOIN-4", "This device may not add new devices.");
-    /// A short code above 999999.
-    pub const JOIN_BAD_CODE: Self =
-        Self::new("join", "bad-code", ErrorKind::InvalidArgument, "R-JOIN-1", "The code has six digits.");
+    /// A device that is on a bus asked for a code to join one.
+    pub const JOIN_ON_BUS: Self =
+        Self::new("join", "on-bus", ErrorKind::Refused, "R-JOIN-1", "This device is already on a bus.");
     /// A pairing run in which the two sides held different codes.
     pub const JOIN_WRONG_CODE: Self =
         Self::new("join", "wrong-code", ErrorKind::Refused, "R-JOIN-3", "The code did not match.");
-    /// The runs a code allows are spent.
-    pub const JOIN_ATTEMPTS: Self =
-        Self::new("join", "attempts", ErrorKind::Refused, "R-JOIN-3", "Too many attempts; a new code is needed.");
     /// The other side stopped the pairing.
     pub const JOIN_STOPPED: Self =
         Self::new("join", "stopped", ErrorKind::Refused, "R-JOIN-1", "The other device stopped the pairing.");
@@ -291,22 +288,9 @@ impl RuleCode {
         "A join request came from a device that may not add new devices.",
     );
     /// The fingerprint presented from the joiner is not that of the device key in the
-    /// exchange or in the join request.
-    pub const JOIN_FINGERPRINT: Self = Self::new(
-        "join",
-        "fingerprint",
-        ErrorKind::Refused,
-        "R-JOIN-7",
-        "This is not the device whose code was scanned or typed.",
-    );
-    /// The acceptor is on another bus than the one its QR code named.
-    pub const JOIN_OTHER_BUS: Self = Self::new(
-        "join",
-        "other-bus",
-        ErrorKind::Refused,
-        "R-JOIN-7",
-        "The other device is not on the bus whose code was scanned.",
-    );
+    /// code it read or in the join request.
+    pub const JOIN_FINGERPRINT: Self =
+        Self::new("join", "fingerprint", ErrorKind::Refused, "R-JOIN-7", "This is not the device whose code was read.");
 
     // ------------------------------------------------------------------- channels
 
@@ -413,15 +397,13 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::MEM_HALTED,
     RuleCode::JOIN_BUSY,
     RuleCode::JOIN_NO_RIGHT,
-    RuleCode::JOIN_BAD_CODE,
+    RuleCode::JOIN_ON_BUS,
     RuleCode::JOIN_WRONG_CODE,
-    RuleCode::JOIN_ATTEMPTS,
     RuleCode::JOIN_STOPPED,
     RuleCode::JOIN_TRANSCRIPT,
     RuleCode::JOIN_SIGNATURE,
     RuleCode::JOIN_NOT_ACCEPTOR,
     RuleCode::JOIN_FINGERPRINT,
-    RuleCode::JOIN_OTHER_BUS,
     RuleCode::PUB_NO_RIGHT,
     RuleCode::PUB_NO_KEY,
     RuleCode::PUB_OUTSIDE_WINDOW,

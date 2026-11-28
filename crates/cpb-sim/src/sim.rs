@@ -6,9 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobWriteId, BusState, CallId, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, HostAnswer,
-    HostRequestId, IncomingId, InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, PairingCode, PairingId, Permit,
-    Publication, Readers, Report, ResultCode, Rights, StreamId,
+    Action, BlobWriteId, BusState, CallId, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestId,
+    IncomingId, InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, PairingCode, PairingId, Permit, Publication,
+    Readers, Report, ResultCode, Rights, StreamId,
 };
 
 use crate::engine::membership::{Root, View};
@@ -556,14 +556,13 @@ impl LocalApi for NodeApi<'_> {
         crate::node::key_fingerprint(self.id)
     }
 
-    fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report> {
+    fn show_pairing_code(&mut self) -> Result<(PairingId, PairingCode), Report> {
         let e = self.gone();
-        self.with(|n| n.show_pairing_code(form)).unwrap_or(Err(e))
+        self.with(Node::show_pairing_code).unwrap_or(Err(e))
     }
 
     fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report> {
-        let e = self.gone();
-        self.with(|n| n.enter_pairing_code(code)).unwrap_or(Err(e))
+        self.on_bus(|n| n.enter_pairing_code(code))
     }
 
     fn cancel_pairing(&mut self, pairing: PairingId) -> Result<(), Report> {

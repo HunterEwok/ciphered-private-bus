@@ -53,8 +53,6 @@ pub const DEFAULT_INITIAL_CREDIT: u32 = 16 << 10;
 pub const MAX_APP_TAG: usize = 64;
 /// Largest message of a reply, in bytes of UTF-8 (Appendix B, Section B.6).
 pub const MAX_MESSAGE: usize = 256;
-/// The highest short pairing code: 6 decimal digits (Section 13.1).
-pub const MAX_SHORT_CODE: u32 = 999_999;
 /// Highest number of segments of a blob: the segment number is a 4-byte AEAD nonce
 /// (Appendix B, Section B.5).
 pub const MAX_BLOB_SEGMENTS: u32 = 0x7fff_ffff;
@@ -301,38 +299,16 @@ impl fmt::Display for KeyFingerprint {
     }
 }
 
-/// What the QR code of a pairing says about the device that shows it (Appendix B,
-/// Section B.11). The device that scans the code refuses any other peer.
+/// A pairing code (R-JOIN-1; Appendix B, Section B.11). The joiner generates it and presents
+/// it as a QR code or a tag; the acceptor reads it through its own camera, reader or
+/// keyboard. The secret is a password: the application keeps it nowhere.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Shower {
-    /// An acceptor shows the code: the bus it is on.
-    Bus([u8; 32]),
-    /// A joiner shows the code: its device key.
-    Device(KeyFingerprint),
-}
-
-/// The form of a pairing code (R-JOIN-1).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum CodeForm {
-    /// 16 random bytes for an on-screen QR code; one attempt.
-    Qr,
-    /// 6 decimal digits a person carries from one device to the other.
-    Short,
-}
-
-/// A pairing code (R-JOIN-1). It is a password: the application shows it to the person in
-/// front of the device, or takes it from them, and keeps it nowhere.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum PairingCode {
-    /// The contents of a QR code.
-    Qr {
-        /// The 16 secret bytes.
-        secret: [u8; 16],
-        /// Who shows the code.
-        shown_by: Shower,
-    },
-    /// A short code, 0 to [`MAX_SHORT_CODE`], shown with leading zeros.
-    Short(u32),
+pub struct PairingCode {
+    /// The 16 secret bytes.
+    pub secret: [u8; 16],
+    /// The fingerprint of the joiner's device key. The acceptor refuses a peer with another
+    /// key, and the root device needs it for [`LocalApi::admit`] (R-JOIN-7).
+    pub device: KeyFingerprint,
 }
 
 /// What a completed pairing gave this node.
@@ -631,16 +607,8 @@ pub enum Event {
         /// What is asked.
         kind: HostRequestKind,
     },
-    /// A pairing run failed on the node that shows the code, and the code is still good for
-    /// `attempts_left` more runs (R-JOIN-3).
-    PairingAttemptFailed {
-        /// The pairing.
-        pairing: PairingId,
-        /// Runs the code still allows, at least 1.
-        attempts_left: u8,
-    },
     /// A pairing ended: the two devices are paired, or the pairing stopped for the reason
-    /// given and its code is spent. A pairing the application cancelled raises no event.
+    /// given. A pairing the application cancelled raises no event.
     PairingFinished {
         /// The pairing.
         pairing: PairingId,
@@ -909,30 +877,27 @@ pub trait LocalApi {
     /// as a QR code for the camera of the root device (R-JOIN-7).
     fn device_fingerprint(&self) -> KeyFingerprint;
 
-    /// Starts a pairing with a code the core generates, for the application to show on this
-    /// device's screen (R-JOIN-1). A node that is not on a bus pairs as the joiner; a member
-    /// pairs as the acceptor and needs the accept right. The joiner starts the exchange on
-    /// every connected link; the acceptor answers on any link. A node has one pairing at a
-    /// time. The code allows a profile number of runs (R-JOIN-3), a QR code one. A QR code
-    /// names the device that shows it: its bus on a member, its device key on a joiner.
+    /// On a node that is not on a bus: starts a pairing as the joiner with a code the core
+    /// generates, for the application to present as a QR code or a tag (R-JOIN-1). The joiner
+    /// starts the exchange on every connected link. A node has one pairing at a time. The
+    /// code is good until a pairing completes with it or this pairing is cancelled; the
+    /// application may cancel and ask for a new code as often as it likes (R-JOIN-3).
     ///
     /// # Errors
-    /// `join/busy`, `join/no-right`, `mem/halted`.
-    fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report>;
+    /// `join/busy`, `join/on-bus`.
+    fn show_pairing_code(&mut self) -> Result<(PairingId, PairingCode), Report>;
 
-    /// Starts a pairing with the code shown on the other device and entered here. The roles
-    /// and the rules are those of [`LocalApi::show_pairing_code`]. The node counts the runs
-    /// with one code and refuses the code once they are spent (R-JOIN-3). With a QR code the
-    /// node also checks who showed it: a joiner ends the pairing with `join/other-bus` if the
-    /// acceptor is on another bus, and an acceptor ends it with `join/fingerprint` if the
-    /// joiner holds another device key.
+    /// On a member with the accept right, or on the root device: starts a pairing as the
+    /// acceptor with the code this device read from a joiner. The acceptor answers the
+    /// joiner on any link and ends the pairing with `join/fingerprint` if the joiner holds
+    /// another device key than the code names (R-JOIN-7), and with `join/wrong-code` if the
+    /// joiner holds another secret.
     ///
     /// # Errors
-    /// `join/busy`, `join/no-right`, `join/bad-code` (also for a QR code shown by a device
-    /// of this node's own role), `join/attempts`, `mem/halted`.
+    /// `api/no-bus`, `join/busy`, `join/no-right`, `mem/halted`.
     fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report>;
 
-    /// Cancels a pairing. A code this node showed is spent.
+    /// Cancels a pairing. A code this node generated is discarded.
     ///
     /// # Errors
     /// `api/unknown-id`.

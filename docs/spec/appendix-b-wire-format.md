@@ -914,44 +914,44 @@ requests, or the root device itself); the Root; and the owner.
 
 ### Code
 
-The acceptor generates the code and shows it on its screen. There are two forms, and both yield the
-CPace password:
+There is one way to pair. The joiner generates the code and presents it; the acceptor reads it. The
+code is two values:
 
-- QR: 16 random bytes, carried in a QR code with the name of the device that shows it (see "QR
-  Codes" below). The code is single-use; one attempt.
-- Short code: 6 decimal digits. Three attempts per code (a profile parameter); then the code expires
-  and the acceptor shows a new one.
+- `secret`: 16 random bytes, the CPace password.
+- `key_fingerprint`: the `KeyFingerprint` of the joiner's device key, 32 bytes (Section B.8).
 
-Both parties count attempts, each for its own code. The acceptor counts every run in which it sent
-`PairReply`. The joiner counts every run in which it received `PairReply`. How the run ended does not
-matter. Otherwise an adversary could break the connection before the check and try codes without being
-counted.
+The acceptor holds its peer to the code it read: it aborts with `PairAbort` code 5 if the fingerprint
+of `device_key` in `PairDevice` differs. The fingerprint does not enter the exchange: it is public, and
+the check is local to the acceptor.
 
-If only the joiner has a screen, the joiner shows the code and the owner enters it on the acceptor. The
-messages do not change. When the attempts are exhausted, the party that showed the code discards it and
-generates a new one, and the party where the code was entered asks for it again. Counting on both sides
-is needed because an adversary can impersonate the acceptor to the joiner as well as the joiner to the
-acceptor.
+Runs with a code are not counted. The secret has 128 bits, so an adversary that does not know it
+cannot guess it however many runs it starts, and a limit would only let that adversary spend the
+owner's code. A secret is good until a pairing completes with it, until the joiner replaces it, or
+until the joiner reboots. The joiner's application MAY replace the code at any time, for example every
+few seconds: the secret changes and the fingerprint stays.
 
-### QR Codes
+### Presenting a Code
 
-A QR code holds bytes: one byte for the kind, then the fields at fixed lengths.
+A code is presented as bytes: one byte for the kind, then the fields at fixed lengths.
 
-| Kind | Fields | Shown by | Read by |
+| Kind | Fields | Presented by | Read by |
 | --- | --- | --- | --- |
-| 1 | `secret` (16), `bus` (32) | An acceptor, with the code | The joiner |
-| 2 | `secret` (16), `key_fingerprint` (32) | A joiner, with the code | The acceptor |
-| 3 | `key_fingerprint` (32) | A joiner that waits for the owner | The root device |
+| 1 | `secret` (16), `key_fingerprint` (32) | A joiner that wants to pair | The acceptor |
+| 2 | `key_fingerprint` (32) | A joiner that waits for the owner | The root device |
 
-The `secret` is the pairing code. The other field names the device that shows the code, and the device
-that reads the code holds its peer to it. A joiner that read kind 1 aborts if `PairBus` carries another
-`bus`. An acceptor that read kind 2 aborts if the fingerprint of `device_key` in `PairDevice` differs.
-Both send `PairAbort` with code 5 and count the run. The name does not enter the exchange: it is public,
-and the check is local to the device that scanned.
+The bytes are shown as a QR code on the joiner's screen, held by a tag for a reader, or, for a device
+that reads neither, shown as hexadecimal digits in groups of four and typed. A device without a screen
+carries kind 2 on its label; kind 1 holds a fresh secret and cannot be printed. A reader ignores a code
+of an unknown kind.
 
-Kind 3, and kind 2 read by the root device, give the root device the fingerprint it needs for the
-admission (R-JOIN-7). A device with a label instead of a screen carries kind 3 on the label. A tag for
-a reader holds the same bytes. A reader ignores a code of an unknown kind.
+Kind 2, and kind 1 read by the root device, give the root device the fingerprint it needs for the
+admission (R-JOIN-7). The device that reads a code takes it only through its own camera, reader or
+keyboard.
+
+The bus has no code that an acceptor shows and no short code. An application that wants the joiner to
+check the bus before it pairs gives the joiner the bus identifier by its own means; the identifier is
+public, and the joiner's application compares it with the one the pairing reports. That check is
+outside the bus and does not replace any check of the bus.
 
 ### Messages
 
@@ -967,7 +967,7 @@ Sections 4.1 and 10.9).
 | 42 | `PairConfirm` | Joiner to acceptor | 1 `yn` bstr(32); 2 `confirm` bstr(32) |
 | 45 | `PairDone` | Acceptor to joiner | 1 `confirm` bstr(32) |
 | 43 | `PairSealed` | Both directions | 1 `ct` bstr(157..291): the encrypted body of `PairBus` (215..219 bytes) or `PairDevice` (141..275) and a 16-byte tag |
-| 44 | `PairAbort` | Both directions | 1 `code` uint: 1 wrong code, 2 attempts exhausted, 3 no common version, 4 declined by the owner on the acceptor, 5 not the device the scanned code named |
+| 44 | `PairAbort` | Both directions | 1 `code` uint: 1 wrong code, 2 reserved, 3 no common version, 4 declined by the owner on the acceptor, 5 not the device the code named |
 
 The `PairBus` body, from the acceptor to the joiner:
 
@@ -1003,8 +1003,8 @@ bus.
 ### Computations
 
 - Exchange: CPace per draft-irtf-cfrg-cpace-21 [CPACE], suite `CPACE-X25519-SHA512`, initiator-responder
-  mode. Party A in the draft's terms is the acceptor; party B is the joiner. Inputs: `PRS` is the code
-  (16 raw bytes from the QR, or the 6 digits of the short code in ASCII); `CI = "cpb pair v1"`;
+  mode. Party A in the draft's terms is the acceptor; party B is the joiner. Inputs: `PRS` is the
+  `secret` of the code, 16 raw bytes; `CI = "cpb pair v1"`;
   `sid = nonce_n || nonce_a`; `ADa = SHA-256(encode(PairInit))`; `ADb` is empty. `Ya` is the field `ya`;
   `Yb` is the field `yn`. The output of the exchange is the shared key `ISK`. A party aborts if the
   X25519 result is 32 zero bytes ([CPACE], Section 7.2).
@@ -1036,12 +1036,12 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
 
 | Step | What happens | Acceptor screen | Joiner screen | Root screen |
 | --- | --- | --- | --- | --- |
-| 1 | The owner selects "Add device" on the acceptor | Code or QR, caption "Enter this code on the new device", remaining attempts counter | | |
-| 2 | The owner enters the code or scans the QR on the joiner. The transport brings up a link | Code | Code entry field | |
+| 1 | The joiner is ready to pair: it generates a code and sends `PairInit` on its links | | The code of kind 1 as a QR code | |
+| 2 | The owner selects "Add device" on the acceptor and reads the joiner's code with it. The transport brings up a link | Camera view | Code | |
 | 3 | `PairInit`, `PairReply`, `PairConfirm`; the fourth message, `PairDone`, completes the exchange | "Connecting to the new device" | "Checking the code" | |
-| 3a | Confirmation failed: `PairAbort` with code 1 or 2 | "Wrong code, attempts left: N", or a new code | "Wrong code, try again" | |
-| 4 | `PairBus` and `PairDevice` in `PairSealed`. The joiner checks the bus identifier | | | |
-| 5 | The acceptor prepares a `JoinRequest` and sends it to the Root directly or through a relay | "Request for 'name' sent to the owner" | "Waiting for the owner's approval", and the device key fingerprint as a QR code of kind 3 | |
+| 3a | Confirmation failed: `PairAbort` with code 1 | "Read the code of the new device again" | Code | |
+| 4 | `PairBus` and `PairDevice` in `PairSealed`. The joiner checks the bus identifier; the acceptor checks the fingerprint of the device key against the code | | | |
+| 5 | The acceptor prepares a `JoinRequest` and sends it to the Root directly or through a relay | "Request for 'name' sent to the owner" | "Waiting for the owner's approval", and the device key fingerprint as a QR code of kind 2 | |
 | 6 | The owner opens the join request on the root device | | Fingerprint | The joiner's name, who accepted the request, the prompt "Scan the code on the new device", button "Decline" |
 | 6a | The root device reads the code and compares the fingerprint with the device key in the request. They differ | | Fingerprint | "This request is not from the device you scanned". No passport is issued; the request stays until the owner declines it |
 | 7 | The fingerprint matches. The owner sets the rights and confirms with the root key. The Root issues a passport and a new checkpoint and delivers them to the relays and the acceptor | "'Name' accepted" | | The name, the rights, button "Accept"; then "Device added" |
@@ -1058,24 +1058,22 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
    request. How long to wait is decided by the joiner's application: the core has no clock.
 3. If the root device itself is the acceptor (R-JOIN-9), steps 5 and 6 merge: there is no join request,
    and the Root shows the admission screen at once. The root device checks the presented fingerprint
-   here too, as in every pairing: one procedure, and the pairing code is never the only barrier. The
-   order depends on who shows the code. If the joiner shows it (kind 2), the root device scans it in
-   step 2, has the fingerprint from that scan, and step 6 asks for nothing more. If the root device
-   shows it (kind 1) or a short code is typed, the joiner presents its fingerprint in step 5 and the
-   root device takes it in step 6, as with any acceptor.
+   here too, as in every pairing: one procedure, and the pairing secret is never the only barrier. The
+   root device read the code in step 2 and has the fingerprint from it, so step 6 asks the owner for
+   nothing more.
 4. The bus fingerprint is the first 8 bytes of `SHA-256("cpb bus fingerprint v1" || 0x00 || bus)` as a
    big-endian integer, shown as 20 decimal digits with leading zeros.
-5. The pairing keys and `ISK` are erased immediately after step 4. The code is erased after a
-   successful run or when the attempts are exhausted.
+5. The pairing keys and `ISK` are erased immediately after step 4. The code is erased after its
+   run.
 6. The joiner's rights (read, publish, permits) are set by the owner on the Root's screen. How this
    choice is presented is decided by the application.
 7. A device has one code at a time, because `PairInit` does not say which code it answers. A joiner
    with a code sends `PairInit` on every link it has and on every link that comes up. A member that
    receives `PairInit` while it has no code keeps it, the latest one per link, until the link goes
-   down, and answers it when it gets a code. This serves the joiner that shows the code: it starts the
-   exchange before the owner has entered the code on the acceptor.
-8. The party where a code was entered counts its runs per code: entering the same code again
-   continues the count, and another code starts a new one.
+   down, and answers it when it gets a code: the joiner starts the exchange before the acceptor has
+   read its code.
+8. A failed run ends the pairing on the acceptor, which reads the code again to start another. The
+   joiner keeps its code and starts the next run itself.
 9. An acceptor keeps a join request it prepared until it has sent it to the Root or to a relay. The
    Root keeps the requests that wait for the owner. Both buffers have the bound of the relay's join
    buffer (Section 13.2 of the requirements specification) and evict the oldest request on overflow.
@@ -1083,7 +1081,7 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
 
 ### Decisions in This Section
 
-1. Both parties count attempts, and each counts every run it started.
+1. Runs are not counted: the secret is too long to guess.
 2. The joiner confirms the key first, in `PairConfirm`; the acceptor answers in `PairDone`, not in
    `PairReply`. The exchange takes four messages, and the adversary still tests at most one code per
    run.
@@ -1091,13 +1089,18 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
    else's key as its own.
 4. There is no separate "join declined" object.
 5. The joiner fetches its passport with an ordinary hello; there is no dedicated message for it.
-6. An early `PairInit` waits for the acceptor's code instead of being refused, so the order in which
-   the two devices get the code does not matter.
+6. An early `PairInit` waits for the acceptor's code instead of being refused, because the joiner has
+   its code first.
 7. The root device compares the fingerprint, and the owner only carries it there. The fingerprint is
    the joiner's device key fingerprint, the same one whoever accepted the joiner. A mismatch refuses
    the admission and changes nothing else: it may be the wrong request picked, and
    a request the owner does not want is declined as before.
 8. The fingerprint has one form, 32 bytes. A short form for typing would be the weaker of two
    paths, and typing is the rare case of a root device with no camera and no reader.
-9. A QR code names the device that shows it, and the name is checked by the device that scanned, not
-   inside the exchange. The exchange and its proofs are those of a code without a name.
+9. The joiner presents the code and the acceptor reads it; there is no other direction and no short
+   code. The fingerprint the root device needs must come from the joiner over a channel nobody else
+   can write to, and that channel carries 16 more bytes as easily. A code shown by the acceptor
+   would give the root device nothing about the joiner, and a short code would add a guessable secret
+   and a limit on its runs for the same reading or typing the fingerprint already needs.
+10. The fingerprint in the code is checked by the acceptor that read it, not inside the exchange. The
+   exchange and its proofs are those of a secret alone.

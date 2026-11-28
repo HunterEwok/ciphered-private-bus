@@ -1,0 +1,26 @@
+model channels
+const devices=a,b no_read= block=2
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourceRotate 1
+= source gen=1 kid=1 keyok=1 granted= next=1 reserved=0 rotate=0 togrant=a,b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourceGrant b
+= source gen=1 kid=1 keyok=1 granted=b next=1 reserved=0 rotate=0 togrant=a
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+envRemove b
+= source gen=1 kid=1 keyok=1 granted=b next=1 reserved=0 rotate=1 togrant=a
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a
+sourceReboot 1
+= source gen=1 kid=1 keyok=1 granted= next=1 reserved=0 rotate=1 togrant=a
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a

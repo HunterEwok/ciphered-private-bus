@@ -1,0 +1,56 @@
+model channels
+const devices=a,b no_read= block=2
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourceRotate 1
+= source gen=1 kid=1 keyok=1 granted= next=1 reserved=0 rotate=0 togrant=a,b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourceGrant a
+= source gen=1 kid=1 keyok=1 granted=a next=1 reserved=0 rotate=0 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourceGrant b
+= source gen=1 kid=1 keyok=1 granted=a,b next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+readerGrant a 1 1 a
+= source gen=1 kid=1 keyok=1 granted=a,b next=1 reserved=0 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourcePublish 2 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=2 reserved=2 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourcePublish 2 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=3 reserved=2 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+sourcePublish 1 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=4 reserved=4 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+readerPub a 1 1 1 2 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=4 reserved=4 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=1 floor=1 depth=2 retained=1
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+readerPub a 1 1 2 2 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=4 reserved=4 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=2 floor=1 depth=2 retained=1,2
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b
+readerPub a 1 1 3 1 0
+= source gen=1 kid=1 keyok=1 granted=a,b next=4 reserved=4 rotate=0 togrant=
+= reader a gen=1 kid=1 higen=1 hino=3 floor=3 depth=1 retained=3
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,b

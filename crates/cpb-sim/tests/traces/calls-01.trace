@@ -1,0 +1,367 @@
+model calls
+const commanders=a,b root=r presence=b max_nonce=6 epochs=2
+= target tepoch=1 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=1 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=0 epoch=1 pending=-
+targetRotate
+= target tepoch=2 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=1 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=0 epoch=1 pending=-
+cmdEpoch a 2
+= target tepoch=2 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=0 epoch=1 pending=-
+targetAnswer b
+= target tepoch=2 slots=b:1 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=0 epoch=1 pending=-
+cmdLearn x 1
+= target tepoch=2 slots=b:1 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetReset reboot
+= target tepoch=2 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetRotate
+= target tepoch=3 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetReset reset
+= target tepoch=3 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdEpoch r 2
+= target tepoch=3 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdLearn r 0
+= target tepoch=3 slots= named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetAnswer r
+= target tepoch=3 slots=r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetAnswer b
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetAnswer b
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdLearn b 1
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd b nonce=1 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdEpoch a 3
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=3 pending=-
+= cmd b nonce=1 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdLearn a 0
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=3 pending=-
+= cmd b nonce=1 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+targetAnswer r
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=3 pending=-
+= cmd b nonce=1 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdLearn b 0
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=0 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdLearn a 2
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=1 pending=-
+cmdEpoch x 2
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=2 pending=-
+= cmd x nonce=1 epoch=2 pending=-
+cmdEpoch r 3
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=1 epoch=2 pending=-
+cmdLearn r 3
+= target tepoch=3 slots=b:3,r:2 named=a:1,b:12
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=3 epoch=3 pending=-
+= cmd x nonce=1 epoch=2 pending=-
+envChange b -
+= target tepoch=3 slots=r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=3 epoch=3 pending=-
+= cmd x nonce=1 epoch=2 pending=-
+cmdEpoch x 3
+= target tepoch=3 slots=r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=3 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+targetAnswer a
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=3 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+cmdStart r 1 1 1 root
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=1 epoch=3 pending=-
+targetAnswer r
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=1 epoch=3 pending=-
+targetAnswer a
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=1 epoch=3 pending=-
+cmdLearn x 2
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=2 epoch=3 pending=-
+cmdEpoch b 3
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=2 epoch=3 pending=-
+targetCall r 1 1 1 root 3 3
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=2 epoch=3 pending=-
+targetCall r 1 1 1 root 3 3
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:3,epoch:3,te:0,tm:0
+= cmd x nonce=2 epoch=3 pending=-
+cmdMismatch r 2
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=id:1,act:1,idem:1,key:root,nonce:2,epoch:3,te:0,tm:1
+= cmd x nonce=2 epoch=3 pending=-
+cmdMismatch r 1
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-
+cmdLearn r 1
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-
+targetAnswer a
+= target tepoch=3 slots=a:4,r:2 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-
+targetCall r 1 1 1 root 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-
+cmdLearn x 1
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+targetCall r 1 1 1 root 3 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=2 epoch=3 pending=-
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+cmdStart a 1 2 0 presence
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=1 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+cmdLearn r 0
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+targetCall r 1 1 1 root 3 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=1 epoch=3 pending=-
+cmdStart x 1 1 0 root
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall x 1 0 1 root 1 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+cmdLearn b 5
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=5 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall r 1 1 1 root 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=5 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall r 1 1 1 root 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=5 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+cmdLearn b 4
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetAnswer r
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall x 1 0 1 root 1 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall r 1 1 1 root 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+cmdStart b 1 2 1 device
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=id:1,act:2,idem:1,key:device,nonce:4,epoch:3,te:0,tm:0
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+targetCall r 1 1 1 root 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=id:1,act:2,idem:1,key:device,nonce:4,epoch:3,te:0,tm:0
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=id:1,act:1,idem:0,key:root,nonce:1,epoch:3,te:0,tm:0
+cmdMismatch x 0
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=id:1,act:2,idem:1,key:device,nonce:4,epoch:3,te:0,tm:0
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=-
+targetCall b 1 1 2 device 4 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=0 epoch=3 pending=id:1,act:2,idem:1,key:device,nonce:4,epoch:3,te:0,tm:0
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=-
+cmdMismatch b 4
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=0 epoch=3 pending=-
+cmdLearn x 4
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=4 epoch=3 pending=-
+targetCall a 1 0 2 presence 2 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=0 epoch=3 pending=-
+= cmd x nonce=4 epoch=3 pending=-
+cmdLearn r 4
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=4 epoch=3 pending=-
+= cmd x nonce=4 epoch=3 pending=-
+cmdLearn x 2
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=4 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-
+targetCall r 1 1 1 root 3 3
+= target tepoch=3 slots=a:4,r:5 named=a:1
+= cmd a nonce=0 epoch=3 pending=id:1,act:2,idem:0,key:presence,nonce:2,epoch:3,te:0,tm:0
+= cmd b nonce=4 epoch=3 pending=-
+= cmd r nonce=4 epoch=3 pending=-
+= cmd x nonce=2 epoch=3 pending=-

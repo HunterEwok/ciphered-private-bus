@@ -10,9 +10,9 @@ name: models
 on:
   push:
     branches: ["main"]
-    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
+    paths: ["models/**", "tools/versions/versions.toml", "tools/sim/**", "crates/cpb-sim/tests/traces/**", ".github/workflows/models.yml"]
   pull_request:
-    paths: ["models/**", "tools/versions/versions.toml", ".github/workflows/models.yml"]
+    paths: ["models/**", "tools/versions/versions.toml", "tools/sim/**", "crates/cpb-sim/tests/traces/**", ".github/workflows/models.yml"]
 
 permissions:
   contents: read
@@ -34,6 +34,24 @@ jobs:
         run: python3 models/check_steps.py
       - name: Check that every inductive invariant bounds what its proof draws
         run: python3 models/check_draws.py
+
+  sim-traces:
+    name: simulator replay traces match the models
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Quint from the lockfile
+        working-directory: models
+        run: npm ci --ignore-scripts
+      - name: Regenerate the traces from the current models
+        run: python3 tools/sim/gen_traces.py
+      - name: The committed traces are the regenerated ones
+        run: |
+          git status --porcelain crates/cpb-sim/tests/traces
+          test -z "$(git status --porcelain crates/cpb-sim/tests/traces)"
 
   membership:
     name: membership (simulator)

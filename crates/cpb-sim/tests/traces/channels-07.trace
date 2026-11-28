@@ -1,0 +1,367 @@
+model channels
+const devices=a,b,c no_read=c late=b block=2
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a,c
+envRemove c
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members a
+envRemove a
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=0 kid=0 keyok=0 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceRotate 1
+= source gen=1 kid=1 keyok=1 granted= next=1 reserved=0 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourcePublish 2 0
+= source gen=1 kid=1 keyok=1 granted= next=2 reserved=2 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub a 1 1 1 2 0
+= source gen=1 kid=1 keyok=1 granted= next=2 reserved=2 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=1 kid=1 keyok=1 granted= next=3 reserved=2 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourcePublish 2 1
+= source gen=1 kid=1 keyok=1 granted= next=4 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=1 kid=1 keyok=1 granted= next=5 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+envJoin b
+= source gen=1 kid=1 keyok=1 granted= next=5 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceEpoch
+= source gen=1 kid=1 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceRotate 2
+= source gen=2 kid=2 keyok=1 granted= next=5 reserved=4 rotate=0 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceEpoch
+= source gen=2 kid=2 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+readerPub c 1 1 3 2 1
+= source gen=2 kid=2 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+readerReboot b
+= source gen=2 kid=2 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceReboot 1
+= source gen=2 kid=2 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceRotate 3
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=0 togrant=b
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceGrant b
+= source gen=3 kid=3 keyok=1 granted=b next=5 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceGrant b
+= source gen=3 kid=3 keyok=1 granted=b next=5 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+readerReboot c
+= source gen=3 kid=3 keyok=1 granted=b next=5 reserved=4 rotate=0 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted=b next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceReboot 1
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members b
+envRemove b
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub b 1 1 3 2 1
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant b 3 3 b
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant b 3 3 b
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub b 1 1 3 2 1
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant a 3 3 b
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=3 kid=3 keyok=1 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub b 1 1 1 2 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 1
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerReboot b
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub c 1 1 1 2 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant b 3 3 b
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub b 1 1 1 2 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant a 3 3 b
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerGrant a 3 3 b
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerPub c 1 1 1 2 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceReboot 0
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+readerReboot a
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 
+sourceEpoch
+= source gen=3 kid=3 keyok=0 granted= next=5 reserved=4 rotate=1 togrant=
+= reader a gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= reader b gen=3 kid=3 higen=3 hino=0 floor=1 depth=0 retained=
+= reader c gen=0 kid=0 higen=0 hino=0 floor=1 depth=0 retained=
+= members 

@@ -58,8 +58,23 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - CI for Rust (formatting, Clippy, tests on Linux, macOS, and Windows, MSRV check) and
   dependency policy checks with `cargo-deny`.
 - OpenSSF Scorecard and GitHub Actions workflow auditing.
+- Local application interface crate `cpb-api` (R-API-2): the `LocalApi` trait, non-blocking and
+  without callbacks, events through `poll_event`; the single list of rule codes `area/rule`
+  (R-ERR-1); error reports with the debug and release modes (R-ERR-2, R-ERR-3).
+- In-memory bus simulator `cpb-sim` for application authors: several nodes in one process behind
+  `LocalApi`, an engine written from the channels and calls models and Section 6, a deterministic
+  harness with loss, duplication, reordering, sleeping and rebooting nodes and a member relay, owner
+  operations, host requests for user confirmation, and the `CPB_ERRORS` override. Interface tests and
+  a replay of 35 model traces (every scenario run of the two models and 20 random traces) with equal
+  state after every step; `tools/sim/gen_traces.py` regenerates the traces, and a CI job checks that
+  they match the current models.
 
 ### Changed
+- Gate S in Section 14.3: the application simulator after G1, so profiles can start before the
+  core; R-API-2 names the default readers of a channel, the delivery of retained publications on
+  subscription, and the owner's operations on the root device; R-CALL-8 makes a commander forget its
+  held nonces on its own "reset nonces"; Appendix B, Section B.9 keeps the rule code list in
+  `cpb-api`.
 - Specification: an external relay sees a bus only under aliases that differ per relay and per relay
   epoch (new property S18, R-REL-13..R-REL-20, R-KEY-11, Section 15.9, decision D15, Appendix B,
   Section B.10, Appendix C). The Root starts a new relay epoch with every revocation and issues each

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 HunterEwok
+
+[package]
+name = "cpb-sim"
+description = "Deterministic in-memory simulator of the Ciphered Private Bus for application authors. Not a security boundary."
+readme = "README.md"
+keywords = ["protocol", "bus", "simulator", "testing"]
+categories = ["development-tools::testing", "simulation"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cpb-api = { path = "../cpb-api" }

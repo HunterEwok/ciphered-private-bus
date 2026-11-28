@@ -5,3 +5,14 @@ version = 4
 [[package]]
 name = "cpb"
 version = "0.0.0"
+
+[[package]]
+name = "cpb-api"
+version = "0.0.0"
+
+[[package]]
+name = "cpb-sim"
+version = "0.0.0"
+dependencies = [
+ "cpb-api",
+]

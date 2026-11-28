@@ -1,0 +1,25 @@
+model calls
+const commanders=a root=r presence=a max_nonce=4 epochs=2
+= target tepoch=1 slots= named=a:12
+= cmd a nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+targetAnswer a
+= target tepoch=1 slots=a:1 named=a:12
+= cmd a nonce=0 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+cmdLearn a 1
+= target tepoch=1 slots=a:1 named=a:12
+= cmd a nonce=1 epoch=1 pending=-
+= cmd r nonce=0 epoch=1 pending=-
+cmdStart a 1 2 0 presence
+= target tepoch=1 slots=a:1 named=a:12
+= cmd a nonce=0 epoch=1 pending=id:1,act:2,idem:0,key:presence,nonce:1,epoch:1,te:0,tm:0
+= cmd r nonce=0 epoch=1 pending=-
+targetRotate
+= target tepoch=2 slots=a:1 named=a:12
+= cmd a nonce=0 epoch=1 pending=id:1,act:2,idem:0,key:presence,nonce:1,epoch:1,te:0,tm:0
+= cmd r nonce=0 epoch=1 pending=-
+cmdEpoch a 2
+= target tepoch=2 slots=a:1 named=a:12
+= cmd a nonce=0 epoch=2 pending=-
+= cmd r nonce=0 epoch=1 pending=-

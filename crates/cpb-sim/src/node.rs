@@ -487,7 +487,8 @@ impl Node {
     fn grant(&mut self, ch: Channel, d: DeviceId) {
         let Some(oc) = self.own.get_mut(&ch) else { return };
         if let Some(g) = oc.src.grant_to(d) {
-            let retained: Vec<Pub> = oc.src.retained.values().cloned().collect();
+            // The retained publications under this key follow the grant (R-CH-11).
+            let retained: Vec<Pub> = oc.src.retained.values().filter(|p| p.kid == g.kid).cloned().collect();
             self.send(d, Body::Grant { channel: ch, grant: g });
             for p in retained {
                 self.send(d, Body::Publication { channel: ch, publication: p });
@@ -1216,6 +1217,17 @@ impl Node {
         let oc = self.own.entry(ch).or_insert_with(|| OwnChannel { src: Source::new(), readers: Readers::AllMembers });
         oc.readers = readers;
         self.refresh_channels();
+        Ok(())
+    }
+
+    /// The application asks for a new key: the same mark as "rotate key epoch", for one
+    /// channel (R-CH-5).
+    pub(crate) fn rotate_channel_key(&mut self, ch: Channel) -> Result<(), Report> {
+        app_channel(ch)?;
+        self.halted_err()?;
+        if let Some(oc) = self.own.get_mut(&ch) {
+            oc.src.epoch();
+        }
         Ok(())
     }
 

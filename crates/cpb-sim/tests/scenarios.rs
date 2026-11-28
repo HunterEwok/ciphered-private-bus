@@ -405,6 +405,34 @@ fn membership_changes_are_announced() {
     assert!(after.members.iter().any(|m| m.device == RELAY));
 }
 
+/// What B reads on A's channel after A adds it to the readers, with or without a new key first.
+fn added_reader_sees(rotate_first: bool) -> Vec<Vec<u8>> {
+    let mut sim = triangle(ErrorMode::Release);
+    let mut a = sim.node(A).unwrap();
+    a.set_readers(CH, Readers::Only(vec![ROOT])).unwrap();
+    a.publish(CH, b"old", 4).unwrap();
+    sim.settle().unwrap();
+    let mut a = sim.node(A).unwrap();
+    if rotate_first {
+        a.rotate_channel_key(CH).unwrap();
+    }
+    a.set_readers(CH, Readers::Only(vec![ROOT, B])).unwrap();
+    sim.node(B).unwrap().subscribe(A, CH).unwrap();
+    sim.settle().unwrap();
+    sim.node(A).unwrap().publish(CH, b"new", 4).unwrap();
+    sim.settle().unwrap();
+    sim.node(B).unwrap().read(A, CH).into_iter().map(|p| p.data).collect()
+}
+
+#[test]
+fn a_new_key_hides_the_past_from_an_added_reader() {
+    assert_eq!(added_reader_sees(false), vec![b"old".to_vec(), b"new".to_vec()]);
+    assert_eq!(added_reader_sees(true), vec![b"new".to_vec()]);
+    let mut sim = triangle(ErrorMode::Release);
+    let e = sim.node(A).unwrap().rotate_channel_key(Channel(0)).unwrap_err();
+    assert_eq!(e.code(), RuleCode::API_RESERVED_CHANNEL);
+}
+
 /// A commands B: action 1 automatic, action 2 confirmation-class.
 fn command_setup() -> Sim {
     let mut sim = Sim::new(config(ErrorMode::Release), ROOT);

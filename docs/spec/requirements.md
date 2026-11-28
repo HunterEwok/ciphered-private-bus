@@ -659,7 +659,8 @@ distinguishes channels by it but does not know which channel it is.
 
 > **R-CH-5.** The source MUST generate a new channel key and grant it before the next publication if: a
 > reader of the channel is no longer valid under the source's checkpoint; the application removed a
-> reader; the host signalled "rotate key epoch"; or the key did not survive a reboot of the source. A
+> reader; the application asked for a new key (R-CH-6); the host signalled "rotate key epoch"; or the
+> key did not survive a reboot of the source. A
 > removed reader does not receive the new key. When a device leaves the readers, the source marks every
 > own channel that has a key for rotation in the same event and persists the mark (R-CORE-5, R-CORE-7):
 > after a reboot it no longer knows whom it granted the key, so the condition cannot be recomputed.
@@ -669,8 +670,10 @@ distinguishes channels by it but does not know which channel it is.
 > *Serves:* S5. *Verified by:* model, Tamarin.
 
 > **R-CH-6.** The source grants the current channel key to a new reader. With it the reader gains access
-> to the retained publications under this key. If the application does not want that, the source rotates
-> the key first.
+> to the retained publications under this key. If the application does not want that, it asks for a new
+> key before it adds the reader (R-API-2): the source marks the channel as in R-CH-5, and the new reader
+> is granted only the new key. Publications retained under the old key are not published again under
+> the new one.
 > *Serves:* S1. *Verified by:* model.
 
 > **R-CH-7.** A reader erases the previous channel key once it has accepted the next one and has no
@@ -1188,7 +1191,8 @@ Appendix B, Section B.10.
 > blob written in pieces of any size (R-CH-15); fetch any range of segments of a blob and cancel the
 > fetch; read a channel;
 > subscribe to a channel; set the readers of its own channel (a list of devices, or all valid members
-> with the read right; a key request from a device outside the list is not answered); invoke an action
+> with the read right; a key request from a device outside the list is not answered); ask for a new
+> key of its own channel (R-CH-5, R-CH-6); invoke an action
 > (with a flag stating whether it is idempotent, R-CALL-13); reply to a call; register an action handler;
 > write and read a stream; set the node name and the application node info (the core publishes both to
 > channel 0, R-CH-16); read the bus state. The bus state is a snapshot without side effects: bus

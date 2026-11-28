@@ -241,6 +241,7 @@ Public signed objects. Every member and member relay verifies and stores them; a
 | Read a channel | `read` | | R-API-2 |
 | Subscribe to a channel | `subscribe` | | R-API-2 |
 | Set the readers of a channel | `set_readers` | A list of devices, or all valid members with the read right | R-API-2 |
+| Ask for a new channel key | `rotate_channel_key` | Marks an own channel for key rotation | R-API-2, R-CH-5, R-CH-6 |
 | Call an action | `call` | | R-API-2 |
 | Reply to a call | `reply` | | R-API-2 |
 | Register an action handler | `on_action` | | R-API-2 |

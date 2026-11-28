@@ -74,8 +74,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 ### Changed
 - Gate S in Section 14.3: the application simulator after G1, so profiles can start before the
   core; R-API-2 names the default readers of a channel, the delivery of retained publications on
-  subscription, the owner's operations on the root device, blobs written in pieces and fetched by
-  segment, the application node info, the root device in the bus state, and the membership change
+  subscription, the owner's operations on the root device, a new channel key on the application's
+  request (also in R-CH-5 and R-CH-6), blobs written in pieces and fetched by segment, the application node info, the root device in the bus state, and the membership change
   report (also in R-CORE-2); R-CALL-8 makes a commander forget its
   held nonces on its own "reset nonces"; Appendix B, Section B.9 keeps the rule code list in
   `cpb-api`.

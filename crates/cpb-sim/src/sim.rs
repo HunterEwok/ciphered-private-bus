@@ -464,6 +464,11 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.set_readers(channel, readers)).unwrap_or(Err(e))
     }
 
+    fn rotate_channel_key(&mut self, channel: Channel) -> Result<(), Report> {
+        let e = self.gone();
+        self.with(|n| n.rotate_channel_key(channel)).unwrap_or(Err(e))
+    }
+
     fn invoke(
         &mut self,
         target: DeviceId,

@@ -74,6 +74,9 @@ core follows the same choices.
   A fetch asks again for its outstanding segment when the link to the source comes back. The
   segment size is `Profile::blob_segment`, by default the 4096-byte segment frame of Section
   13.2 less the frame header and the authentication tag.
+- **A new key on request** (R-CH-5, R-CH-6). `rotate_channel_key` marks an own channel exactly
+  as "rotate key epoch" does for all of them, so it is the same transition of the channels
+  model. Called before `set_readers` adds a reader, it keeps that reader from the past.
 - **Node info** (R-CH-16). `set_name` and `set_app_info` publish the name and the application
   part on channel 0; every member receives `Event::NodeInfo`. Until `set_name`, a node's name is
   its device identifier, standing in for the name from pairing.

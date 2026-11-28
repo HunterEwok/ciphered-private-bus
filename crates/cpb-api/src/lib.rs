@@ -543,6 +543,16 @@ pub trait LocalApi {
     /// `api/reserved-channel`, `mem/halted`.
     fn set_readers(&mut self, channel: Channel, readers: Readers) -> Result<(), Report>;
 
+    /// Marks an own channel for a new key: the current key is granted to no one from now on,
+    /// and the source makes and grants a new one before its next publication or grant
+    /// (R-CH-5). Called before [`LocalApi::set_readers`] adds a reader, it keeps that reader
+    /// from the publications made under the old key (R-CH-6). Publications retained under the
+    /// old key are not sent again under the new one.
+    ///
+    /// # Errors
+    /// `api/reserved-channel`, `mem/halted`.
+    fn rotate_channel_key(&mut self, channel: Channel) -> Result<(), Report>;
+
     /// Invokes an action on a target. The outcome arrives as [`Event::CallFinished`].
     ///
     /// # Errors

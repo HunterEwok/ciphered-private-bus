@@ -405,6 +405,25 @@ fn membership_changes_are_announced() {
     assert!(after.members.iter().any(|m| m.device == RELAY));
 }
 
+#[test]
+fn the_root_application_changes_one_right_and_keeps_the_permits() {
+    let mut sim = command_setup();
+    sim.settle().unwrap();
+    // Read B as the bus shows it, change one right, write the rest back.
+    let b = sim.node(ROOT).unwrap().state().members.into_iter().find(|m| m.device == B).unwrap();
+    assert_eq!(b.permits.len(), 1);
+    assert_eq!(b.permits[0].commander, A);
+    let a = sim.node(ROOT).unwrap().state().members.into_iter().find(|m| m.device == A).unwrap();
+    assert!(a.presence && !b.presence);
+    let rights = Rights { relay: true, ..b.rights };
+    let id = sim.node(ROOT).unwrap().change_member(B, rights, b.presence, b.permits.clone()).unwrap();
+    sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Approve).unwrap();
+    sim.settle().unwrap();
+    let after = sim.node(A).unwrap().state().members.into_iter().find(|m| m.device == B).unwrap();
+    assert!(after.rights.relay);
+    assert_eq!(after.permits, b.permits);
+}
+
 /// What B reads on A's channel after A adds it to the readers, with or without a new key first.
 fn added_reader_sees(rotate_first: bool) -> Vec<Vec<u8>> {
     let mut sim = triangle(ErrorMode::Release);

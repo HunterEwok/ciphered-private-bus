@@ -423,13 +423,19 @@ pub enum Event {
     Rejected(Report),
 }
 
-/// A valid member as the node sees it.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// A valid member as the node sees it: the public content of its passport (Section 6.1).
+/// These are the values [`LocalApi::change_member`] takes, so a root application reads a
+/// member, changes what it means to change, and writes the rest back as it was.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Member {
     /// The device.
     pub device: DeviceId,
     /// Its rights.
     pub rights: Rights,
+    /// Whether the passport names a user-presence key.
+    pub presence: bool,
+    /// Who may command this device, and with which actions.
+    pub permits: Vec<Permit>,
 }
 
 /// A snapshot of the bus state without secrets and without side effects (R-API-2).

@@ -1297,7 +1297,11 @@ impl Node {
     }
 
     pub(crate) fn state(&self) -> BusState {
-        let members = self.view.members().map(|p| Member { device: p.device, rights: p.rights }).collect();
+        let members = self
+            .view
+            .members()
+            .map(|p| Member { device: p.device, rights: p.rights, presence: p.presence, permits: p.permits.clone() })
+            .collect();
         let retained: usize = self
             .reading
             .values()

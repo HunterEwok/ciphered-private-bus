@@ -1197,7 +1197,8 @@ Appendix B, Section B.10.
 > write and read a stream; set the node name and the application node info (the core publishes both to
 > channel 0, R-CH-16); read the bus state. The bus state is a snapshot without side effects: bus
 > identifier, root generation, checkpoint number, root device, halted flag, known valid members with
-> their rights, connected links, core memory usage. The snapshot contains no secrets. After accepting a
+> their rights, permits and whether they have a user-presence key (the values the owner's "change"
+> operation takes), connected links, core memory usage. The snapshot contains no secrets. After accepting a
 > checkpoint or a passport the core reports a membership change with the root generation and the
 > checkpoint number; a passport may arrive after its checkpoint, so both raise it. Until the application sets them, the readers of a channel are all valid
 > members with the read right. Subscribing delivers the channel's retained publications at once. On the

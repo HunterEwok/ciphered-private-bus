@@ -102,11 +102,12 @@ core follows the same choices.
   In lossy mode there is no credit: the recipient holds `Profile::stream_buffer` bytes for its
   application and drops a chunk that does not fit.
 - **Closing** (R-STR-5, R-STR-7). `stream_end` closes both sides. `Event::StreamClosed` gives
-  every other reason: the peer's "end", link down, a relay that does not serve streams, a quiet
+  every other reason: the peer's "end", link down, a quiet
   period between two "reset nonces", halt, revocation of either party, a chunk out of order, a
   chunk beyond the credit, and a stale side replaced by a new stream under the same number. A
   link down closes the streams that link carried, so behind a relay the far side learns of it
-  only by the quiet period.
+  only by the quiet period. A relay that does not serve streams raises `Event::StreamRefused`: an
+  unsigned hint that the network can forge, so the stream stays open and the application decides.
 - **Limit** (R-STR-6). `Profile::max_streams`, 8 by default, counts open streams and calls that
   asked for one. At its own limit a commander's `invoke` returns `str/too-many`; at the target's
   limit the core replies "too many streams" and existing streams stay.

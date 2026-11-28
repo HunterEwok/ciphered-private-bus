@@ -353,7 +353,7 @@ impl Sim {
             let (relay, peer, from_commander, sid) = (hop.to, hop.msg.to, *from_commander, *sid);
             self.log.push(format!("{relay} refused a stream chunk from {}: streams not served", hop.from));
             if let Some(n) = self.nodes.get_mut(&hop.from) {
-                n.stream_refused(relay, peer, from_commander, sid);
+                n.stream_refused(peer, from_commander, sid);
             }
         } else if self.links.contains(&edge(hop.to, hop.msg.to)) {
             // A member relay forwards without modification (R-CH-4).

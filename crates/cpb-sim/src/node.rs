@@ -1180,14 +1180,13 @@ impl Node {
     }
 
     /// The relay on the stream's path refused a chunk: it does not serve streams (R-STR-7,
-    /// `RelayRefusal` code 4). The refusal arrives on the link that carries the stream, so
-    /// the side closes as it does when that link goes down.
-    pub(crate) fn stream_refused(&mut self, relay: DeviceId, peer: DeviceId, from_commander: bool, sid: u32) {
+    /// `RelayRefusal` code 4). The refusal is an unsigned hint, so nothing changes: the
+    /// application is told and decides.
+    pub(crate) fn stream_refused(&mut self, peer: DeviceId, from_commander: bool, sid: u32) {
         let role = if from_commander { Role::Commander } else { Role::Target };
-        self.close_streams(
-            |o| o.peer == peer && o.role == role && o.sid == sid && o.via == relay,
-            Some(StreamEnd::RelayRefused),
-        );
+        if let Some(stream) = self.stream_of(peer, role, sid) {
+            self.events.push_back(Event::StreamRefused { stream });
+        }
     }
 
     fn stream_send(&mut self, id: StreamId, kind: Kind) -> Result<(), Report> {

@@ -83,8 +83,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   `cpb-api`.
 - Specification: R-API-2 names the stream operations, the message of a reply, the key that signed
   an incoming call, and the report of why a stream closed; a relay that does not serve streams
-  answers a chunk with `RelayRefusal` code 4, whose `ref` is the hash of the chunk header, and the
-  sender closes its side as on "link down" (R-STR-7, Appendix B, Section B.10); the channel number row
+  answers a chunk with `RelayRefusal` code 4, whose `ref` is the hash of the chunk header; the core
+  passes this unsigned hint to the application and does not close the stream (R-STR-7, Appendix B,
+  Section B.10); the channel number row
   of Section 13.1 says which numbers belong to the application. Reason: the interface was narrower
   than the rules it serves, and the refusal of a stream reached no one.
 - Specification: the blob key is 32 random bytes per blob carried in the publication content

@@ -64,7 +64,8 @@ core follows the same choices.
 ## Blobs, node info and membership events
 
 - **Blobs** (R-CH-15). `begin_blob`, `write_blob` in pieces of any size, and `finish_blob`
-  publish a blob; the publication carries `BlobInfo` (size, segment count, segment size), and
+  publish a blob; the publication carries `BlobInfo` (size, segment count, segment size, and the
+  header hash, for which the simulator computes a stand-in), and
   `fetch_blob` from any segment delivers `Event::BlobSegment` in order, the last one marked.
   The source serves a blob while it retains the publication, so a blob needs depth 1 or more;
   a fetch whose publication leaves retention ends with `Event::BlobFailed` (`blob/gone`). The

@@ -213,6 +213,15 @@ fn blobs_arrive_in_segments() {
     assert_eq!((info.size, info.segments, info.segment_size), (10_000, 3, DEFAULT_BLOB_SEGMENT));
     sim.drain_events(B);
 
+    // The same bytes published again are another blob with another hash.
+    let mut a = sim.node(A).unwrap();
+    let w = a.begin_blob(Channel(17), b"photo", 1).unwrap();
+    a.write_blob(w, &blob).unwrap();
+    a.finish_blob(w).unwrap();
+    let again = sim.node(A).unwrap().read(A, Channel(17))[0].blob.unwrap();
+    assert_ne!(again.hash, info.hash);
+    assert_eq!(sim.node(A).unwrap().read(A, CH)[0].blob.unwrap().hash, info.hash);
+
     sim.node(B).unwrap().fetch_blob(A, CH, no, 0).unwrap();
     sim.settle().unwrap();
     let (segs, failed) = segments(&mut sim, B);

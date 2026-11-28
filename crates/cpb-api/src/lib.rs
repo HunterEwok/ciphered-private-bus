@@ -197,6 +197,11 @@ pub struct BlobInfo {
     pub segments: u32,
     /// Bytes per segment; the last segment may be shorter.
     pub segment_size: u32,
+    /// The hash in the publication header: SHA-256 of the encrypted blob. The blob key is
+    /// drawn anew for every publication, so the hash identifies this publication's blob, for
+    /// example to skip a fetch already made, and says nothing about the content: the same
+    /// bytes published twice have different hashes.
+    pub hash: [u8; 32],
 }
 
 /// A publication delivered to or read by the application.

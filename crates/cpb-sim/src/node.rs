@@ -537,11 +537,17 @@ impl Node {
         self.blobs.retain(|(c, n), _| *c != ch || retained.contains(n));
     }
 
-    fn blob_info(&self, len: usize) -> Option<BlobInfo> {
+    fn blob_info(&mut self, blob: &[u8]) -> Option<BlobInfo> {
+        let info = self.blob_shape(blob.len())?;
+        let key = self.rng.next_u64();
+        Some(BlobInfo { hash: digest(key, blob), ..info })
+    }
+
+    fn blob_shape(&self, len: usize) -> Option<BlobInfo> {
         let size = u64::try_from(len).ok()?;
         let seg = u64::from(self.profile.blob_segment.max(1));
         let segments = u32::try_from(size.div_ceil(seg)).ok().filter(|n| *n <= MAX_BLOB_SEGMENTS)?;
-        Some(BlobInfo { size, segments, segment_size: self.profile.blob_segment.max(1) })
+        Some(BlobInfo { size, segments, segment_size: self.profile.blob_segment.max(1), hash: [0; 32] })
     }
 
     /// The bytes of segment `i` of a blob held in host storage.
@@ -1060,7 +1066,7 @@ impl Node {
         let Some(len) = len else {
             return Err(Report::new(RuleCode::API_UNKNOWN_ID, format!("blob write {}", id.0)));
         };
-        if self.blob_info(len).is_none() {
+        if self.blob_shape(len).is_none() {
             return Err(Report::new(RuleCode::API_DATA_TOO_LARGE, format!("{len} bytes exceed the largest blob")));
         }
         if let Some(d) = self.drafts.get_mut(&id) {
@@ -1077,7 +1083,7 @@ impl Node {
         if d.bytes.is_empty() {
             return Err(Report::new(RuleCode::API_BAD_BLOB, "the blob is empty"));
         }
-        let info = self.blob_info(d.bytes.len()).ok_or_else(|| Report::new(RuleCode::API_DATA_TOO_LARGE, "blob"))?;
+        let info = self.blob_info(&d.bytes).ok_or_else(|| Report::new(RuleCode::API_DATA_TOO_LARGE, "blob"))?;
         let no = self.publish_inner(d.channel, &d.data, Some(info), d.depth)?;
         self.blobs.insert((d.channel, no), d.bytes);
         self.prune_blobs(d.channel);
@@ -1328,6 +1334,22 @@ fn decode_node_info(data: &[u8]) -> Option<(String, Vec<u8>)> {
     let name = rest.get(..usize::from(len))?;
     let app = rest.get(usize::from(len)..)?;
     Some((String::from_utf8_lossy(name).into_owned(), app.to_vec()))
+}
+
+/// The simulator's stand-in for SHA-256 of the encrypted blob: it depends on the blob and on
+/// a value drawn for this publication, as the real hash depends on the blob key. It is not a
+/// cryptographic hash.
+fn digest(key: u64, blob: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (lane, chunk) in (0u64..).zip(out.chunks_mut(8)) {
+        // FNV-1a, 64 bits, one lane per eight bytes of output.
+        let mut h = 0xcbf2_9ce4_8422_2325u64 ^ key ^ lane;
+        for b in blob {
+            h = (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        chunk.copy_from_slice(&h.to_be_bytes());
+    }
+    out
 }
 
 fn app_channel(ch: Channel) -> Result<(), Report> {

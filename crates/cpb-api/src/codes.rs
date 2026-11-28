@@ -179,6 +179,9 @@ impl RuleCode {
     /// The message of a reply is longer than 256 bytes.
     pub const API_MESSAGE_TOO_LONG: Self =
         Self::new("api", "message-too-long", ErrorKind::InvalidArgument, "R-CALL-10", "The reply message is too long.");
+    /// The tag of signed application data is empty or longer than 64 bytes.
+    pub const API_BAD_TAG: Self =
+        Self::new("api", "bad-tag", ErrorKind::InvalidArgument, "R-KEY-12", "The tag of the signed data is not valid.");
     /// The application part of the node info exceeds 4024 bytes.
     pub const API_APP_INFO_TOO_LARGE: Self = Self::new(
         "api",
@@ -210,6 +213,15 @@ impl RuleCode {
     /// Two records of one author with one number and different bodies.
     pub const MEM_FORK: Self =
         Self::new("mem", "fork", ErrorKind::Refused, "R-MEM-8", "The bus has stopped: the owner's records conflict.");
+    /// Application data does not carry the signature of the current Root of this bus under
+    /// the given tag.
+    pub const MEM_APP_SIGNATURE: Self = Self::new(
+        "mem",
+        "app-signature",
+        ErrorKind::Refused,
+        "R-KEY-12",
+        "This data was not signed by the owner of this bus.",
+    );
     /// The node is halted and does not perform the operation.
     pub const MEM_HALTED: Self =
         Self::new("mem", "halted", ErrorKind::Refused, "R-MEM-9", "The bus has stopped and waits for the owner.");
@@ -304,12 +316,14 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::API_BAD_RANGE,
     RuleCode::API_BAD_STREAM,
     RuleCode::API_MESSAGE_TOO_LONG,
+    RuleCode::API_BAD_TAG,
     RuleCode::API_APP_INFO_TOO_LARGE,
     RuleCode::MEM_NOT_MEMBER,
     RuleCode::MEM_BEHIND,
     RuleCode::MEM_STALE_CHECKPOINT,
     RuleCode::MEM_EARLY_PASSPORT,
     RuleCode::MEM_FORK,
+    RuleCode::MEM_APP_SIGNATURE,
     RuleCode::MEM_HALTED,
     RuleCode::PUB_NO_RIGHT,
     RuleCode::PUB_NO_KEY,

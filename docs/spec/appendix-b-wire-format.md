@@ -510,6 +510,7 @@ labelled input.
 | `cpb key grant v1` | Key grant signature |
 | `cpb publication v1` | Publication signature |
 | `cpb call v1` | Call signature |
+| `cpb app v1` | Root signature over application data (R-KEY-12) |
 | `cpb hello v1` | Hello signature |
 | `cpb relay ticket v1` | Relay ticket signature, by the period key |
 | `cpb relay access v1` | Relay access signature |
@@ -549,6 +550,11 @@ Formulas:
 - `blob_key` is not derived: it is 32 random bytes carried in the publication content (field 5)
 - `reply_key` and the stream keys: `Context.Export(label || 0x00, 32)` per [RFC9180], Section 5.3
 - Aliases, link and period keys, the bus alias, the wrapping key, and the members tree: Section B.10
+- Root signature over application data: computed over
+  `"cpb app v1" || 0x00 || bus || generation as 4 bytes || SHA-256(tag) || SHA-256(data)`, 111 bytes
+  in all. Every part has a fixed length, so two different inputs never give the same bytes. The
+  signature is handed to the application as `encode(sig)`; it is not an object of the bus and is
+  never sent by the core
 - `KeyFingerprint`: the first 8 bytes of `SHA-256("cpb fingerprint v1" || 0x00 || encode(Key))` as a
   big-endian integer, shown as 20 decimal digits with leading zeros
 

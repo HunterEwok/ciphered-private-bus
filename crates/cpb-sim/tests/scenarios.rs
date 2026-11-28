@@ -14,8 +14,8 @@
 
 use cpb_api::{
     Action, ActionSet, CallKey, CallOutcome, Channel, DeviceId, ErrorMode, Event, FetchId, HostAnswer, HostRequestKind,
-    InvokeOptions, LocalApi, MAX_APP_INFO, MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Permit, Readers,
-    ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
+    InvokeOptions, LocalApi, MAX_APP_INFO, MAX_APP_TAG, MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Permit,
+    Readers, ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
 };
 use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, DEFAULT_STREAM_CHUNK, Faults, Profile, Sim};
 
@@ -1098,4 +1098,49 @@ fn a_reply_carries_a_message_for_the_log() {
             stream: None,
         }]
     );
+}
+
+#[test]
+fn the_root_signs_application_data_and_every_node_verifies_it() {
+    let mut sim = triangle(ErrorMode::Release);
+    let settings = b"version 3: A may read secrets";
+    // Only the root device can ask, and the tag is 1 to 64 bytes.
+    assert_eq!(sim.node(A).unwrap().sign_app_data("settings", settings).unwrap_err().code(), RuleCode::API_NOT_ROOT);
+    assert_eq!(sim.node(ROOT).unwrap().sign_app_data("", settings).unwrap_err().code(), RuleCode::API_BAD_TAG);
+    let long = "t".repeat(MAX_APP_TAG + 1);
+    assert_eq!(sim.node(ROOT).unwrap().sign_app_data(&long, settings).unwrap_err().code(), RuleCode::API_BAD_TAG);
+    // The owner declines: no signature.
+    let id = sim.node(ROOT).unwrap().sign_app_data("settings", settings).unwrap();
+    let asked = sim.drain_events(ROOT).into_iter().any(|e| {
+        matches!(e, Event::HostRequest { id: x, kind: HostRequestKind::SignAppData { tag, size } }
+            if x == id && tag == "settings" && size == 29)
+    });
+    assert!(asked);
+    sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Refuse).unwrap();
+    assert_eq!(sim.drain_events(ROOT), vec![Event::AppDataSigned { request: id, signature: None }]);
+    // The owner confirms: the signature arrives, and every node verifies it.
+    let id = sim.node(ROOT).unwrap().sign_app_data("settings", settings).unwrap();
+    sim.node(ROOT).unwrap().answer_host(id, HostAnswer::Approve).unwrap();
+    let signature = sim
+        .drain_events(ROOT)
+        .into_iter()
+        .find_map(|e| match e {
+            Event::AppDataSigned { request, signature } if request == id => signature,
+            _ => None,
+        })
+        .unwrap();
+    for d in [ROOT, A, B] {
+        let node = sim.node(d).unwrap();
+        node.verify_app_data("settings", settings, &signature).unwrap();
+        // Other data, another tag, or a changed signature do not verify.
+        let e = node.verify_app_data("settings", b"version 3: B may read secrets", &signature).unwrap_err();
+        assert_eq!(e.code(), RuleCode::MEM_APP_SIGNATURE);
+        assert_eq!(
+            node.verify_app_data("other", settings, &signature).unwrap_err().code(),
+            RuleCode::MEM_APP_SIGNATURE
+        );
+        let mut bad = signature.clone();
+        bad[0] ^= 1;
+        assert_eq!(node.verify_app_data("settings", settings, &bad).unwrap_err().code(), RuleCode::MEM_APP_SIGNATURE);
+    }
 }

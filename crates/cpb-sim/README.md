@@ -115,6 +115,13 @@ core follows the same choices.
   (R-CALL-10). `Event::IncomingCall` names the key that signed the call: the device key, the
   user-presence key, or the root key (R-CALL-4).
 
+## Root-signed application data
+
+`sign_app_data` on the root device raises a host request, and the signature arrives as
+`Event::AppDataSigned`; `verify_app_data` on any node gives the verdict (R-KEY-12). The
+simulator's signature is a value anyone can compute from the signed input, so it shows the
+interface and the binding to the bus, the root generation, the tag and the data, not secrecy.
+
 ## Scope of this version
 
 Membership without enrollment, channels, calls and streams. Enrollment (pairing and join

@@ -8,8 +8,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use cpb_api::{
     Action, BlobInfo, BlobWriteId, BusState, CallId, CallKey, CallOutcome, Channel, DEFAULT_INITIAL_CREDIT, DeviceId,
     ErrorMode, Event, FetchId, HostAnswer, HostRequestId, HostRequestKind, IncomingId, InvokeOptions, MAX_APP_INFO,
-    MAX_BLOB_SEGMENTS, MAX_DATA, MAX_INITIAL_CREDIT, MAX_MESSAGE, MAX_NAME, MAX_STREAM_DATA, Member, OwnerOperation,
-    Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode, StreamEnd, StreamId, StreamMode, StreamRequest,
+    MAX_APP_TAG, MAX_BLOB_SEGMENTS, MAX_DATA, MAX_INITIAL_CREDIT, MAX_MESSAGE, MAX_NAME, MAX_STREAM_DATA, Member,
+    OwnerOperation, Permit, Publication, Readers, Report, ResultCode, Rights, RuleCode, StreamEnd, StreamId,
+    StreamMode, StreamRequest,
 };
 
 use crate::engine::calls::{CallBody, CmdRights, Commander, Next, SigKey, Target, Verdict};
@@ -205,6 +206,7 @@ struct CmdState {
 enum HostWait {
     Call(DeviceId),
     Change { device: DeviceId, rights: Rights, presence: bool, permits: Vec<Permit> },
+    AppData { signature: Vec<u8> },
     Revoke(DeviceId),
 }
 
@@ -932,7 +934,7 @@ impl Node {
                 _ => (SigKey::Device, false, None),
             }
         };
-        let hid = ask.map(|_| HostRequestId(self.fresh_id()));
+        let hid = ask.as_ref().map(|_| HostRequestId(self.fresh_id()));
         if let Some(cmd) = self.cmds.get_mut(&t) {
             if let Some(c) = cmd.current.as_mut() {
                 c.key = key;
@@ -1742,6 +1744,10 @@ impl Node {
                     self.root_records(c, None);
                 }
             }
+            (HostWait::AppData { signature }, answer) => {
+                let signature = (answer == HostAnswer::Approve).then_some(signature);
+                self.events.push_back(Event::AppDataSigned { request: id, signature });
+            }
             (HostWait::Change { device, .. } | HostWait::Revoke(device), HostAnswer::Refuse) => {
                 self.note(&format!("owner declined the operation on {device}"));
             }
@@ -1777,6 +1783,51 @@ impl Node {
     ) -> Result<HostRequestId, Report> {
         let wait = HostWait::Change { device, rights, presence, permits };
         self.owner_request(device, OwnerOperation::Change, wait)
+    }
+
+    /// The simulator's stand-in for the root signature over application data: a value of the
+    /// signed input of R-KEY-12 (bus, root generation, tag, data). Anyone can compute it; the
+    /// simulator is not a security boundary.
+    fn app_signature(&self, tag: &str, data: &[u8]) -> Vec<u8> {
+        let mut input = self.bus.to_vec();
+        input.extend_from_slice(&self.view.checkpoint.generation.to_be_bytes());
+        input.extend_from_slice(&digest(0, tag.as_bytes()));
+        input.extend_from_slice(&digest(0, data));
+        digest(u64::from_be_bytes(*b"cpb app\0"), &input).to_vec()
+    }
+
+    fn check_tag(tag: &str) -> Result<(), Report> {
+        if tag.is_empty() || tag.len() > MAX_APP_TAG {
+            return Err(Report::new(RuleCode::API_BAD_TAG, format!("{} bytes, allowed 1..{MAX_APP_TAG}", tag.len())));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn sign_app_data(&mut self, tag: &str, data: &[u8]) -> Result<HostRequestId, Report> {
+        Self::check_tag(tag)?;
+        self.halted_err()?;
+        if self.root.is_none() {
+            return Err(Report::new(RuleCode::API_NOT_ROOT, format!("{} is not the root device", self.id)));
+        }
+        let id = HostRequestId(self.fresh_id());
+        self.host.insert(id, HostWait::AppData { signature: self.app_signature(tag, data) });
+        let size = u64::try_from(data.len()).unwrap_or(u64::MAX);
+        self.events
+            .push_back(Event::HostRequest { id, kind: HostRequestKind::SignAppData { tag: tag.to_owned(), size } });
+        Ok(id)
+    }
+
+    pub(crate) fn verify_app_data(&self, tag: &str, data: &[u8], signature: &[u8]) -> Result<(), Report> {
+        Self::check_tag(tag)?;
+        self.halted_err()?;
+        if self.app_signature(tag, data) == signature {
+            Ok(())
+        } else {
+            Err(Report::new(
+                RuleCode::MEM_APP_SIGNATURE,
+                format!("tag {tag}, root generation {}", self.view.checkpoint.generation),
+            ))
+        }
     }
 
     /// Removes the host request event a harness shortcut has already answered.

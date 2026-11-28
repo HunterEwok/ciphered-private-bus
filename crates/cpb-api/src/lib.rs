@@ -49,6 +49,8 @@ pub const MAX_STREAM_DATA: usize = 16384 - 46 - 16;
 pub const MAX_INITIAL_CREDIT: u32 = 1 << 20;
 /// The default initial credit of a stream, in bytes: four default chunks (Section 13.2).
 pub const DEFAULT_INITIAL_CREDIT: u32 = 16 << 10;
+/// Largest tag of root-signed application data, in bytes of UTF-8 (R-KEY-12).
+pub const MAX_APP_TAG: usize = 64;
 /// Largest message of a reply, in bytes of UTF-8 (Appendix B, Section B.6).
 pub const MAX_MESSAGE: usize = 256;
 /// Highest number of segments of a blob: the segment number is a 4-byte AEAD nonce
@@ -370,7 +372,7 @@ pub struct InvokeOptions {
 }
 
 /// What the core asks the host to do. The host answers after asking the user.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum HostRequestKind {
     /// Sign a confirmation-class call with the user-presence key (R-API-3).
     SignWithPresenceKey {
@@ -385,6 +387,13 @@ pub enum HostRequestKind {
         target: DeviceId,
         /// The action.
         action: Action,
+    },
+    /// Sign application data with the root key (R-KEY-12).
+    SignAppData {
+        /// The application tag the data is signed under.
+        tag: String,
+        /// The length of the data, in bytes.
+        size: u64,
     },
     /// Sign membership records with the root key: an owner's operation on a device.
     SignMembership {
@@ -520,6 +529,15 @@ pub enum Event {
         id: HostRequestId,
         /// What is asked.
         kind: HostRequestKind,
+    },
+    /// A request of [`LocalApi::sign_app_data`] ended.
+    AppDataSigned {
+        /// The request.
+        request: HostRequestId,
+        /// The signature of the current Root, or `None` if the owner declined or the key
+        /// failed. The application carries it next to the data; its length depends on the
+        /// root key's algorithm and may exceed [`MAX_DATA`] (R-KEY-10).
+        signature: Option<Vec<u8>>,
     },
     /// The node halted (R-MEM-8, R-MEM-10).
     Halted,
@@ -764,6 +782,24 @@ pub trait LocalApi {
         presence: bool,
         permits: Vec<Permit>,
     ) -> Result<HostRequestId, Report>;
+
+    /// On the root device: asks for the root key's signature over application data under
+    /// `tag`, 1 to [`MAX_APP_TAG`] bytes (R-KEY-12). The host confirms the request returned
+    /// here with the user, and the signature arrives as [`Event::AppDataSigned`]. The
+    /// signature names this bus and the current root generation, so it stops verifying after
+    /// a root change, and it carries no freshness: data that changes needs its own version
+    /// number, which readers check.
+    ///
+    /// # Errors
+    /// `api/not-root`, `api/bad-tag`, `mem/halted`.
+    fn sign_app_data(&mut self, tag: &str, data: &[u8]) -> Result<HostRequestId, Report>;
+
+    /// On any node: checks that `signature` is the signature of the current Root of this bus
+    /// over `data` under `tag` (R-KEY-12). The application never sees the root key.
+    ///
+    /// # Errors
+    /// `mem/app-signature`, `api/bad-tag`, `mem/halted`.
+    fn verify_app_data(&self, tag: &str, data: &[u8], signature: &[u8]) -> Result<(), Report>;
 
     /// On the root device: revokes a member (R-MEM-4). The checkpoint is signed after the host
     /// confirms the request returned here.

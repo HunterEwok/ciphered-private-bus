@@ -584,6 +584,18 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.change_member(device, rights, presence, permits)).unwrap_or(Err(e))
     }
 
+    fn sign_app_data(&mut self, tag: &str, data: &[u8]) -> Result<HostRequestId, Report> {
+        let e = self.gone();
+        self.with(|n| n.sign_app_data(tag, data)).unwrap_or(Err(e))
+    }
+
+    fn verify_app_data(&self, tag: &str, data: &[u8], signature: &[u8]) -> Result<(), Report> {
+        match self.sim.nodes.get(&self.id) {
+            Some(n) => n.verify_app_data(tag, data, signature),
+            None => Err(self.gone()),
+        }
+    }
+
     fn revoke(&mut self, device: DeviceId) -> Result<HostRequestId, Report> {
         let e = self.gone();
         self.with(|n| n.revoke(device)).unwrap_or(Err(e))

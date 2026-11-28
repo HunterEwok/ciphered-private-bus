@@ -61,7 +61,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
 - Local application interface crate `cpb-api` (R-API-2): the `LocalApi` trait, non-blocking and
   without callbacks, events through `poll_event`; blobs written in pieces and fetched by segment,
   streams opened by a call and its reply with data, credit, "end" and the reason a stream closed,
-  the message of a reply, the key that signed an incoming call,
+  the message of a reply, the key that signed an incoming call, root-signed application data,
   the application part of the node info, membership change events and the root device in the bus
   state; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
   release modes (R-ERR-2, R-ERR-3).
@@ -88,6 +88,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   Section B.10); the channel number row
   of Section 13.1 says which numbers belong to the application. Reason: the interface was narrower
   than the rules it serves, and the refusal of a stream reached no one.
+- Specification: the root key signs application data under its own label `cpb app v1`, bound to the
+  bus, the root generation and an application tag, and every node verifies it without the
+  application seeing the root key (new R-KEY-12, R-API-2, Appendix B, Section B.8, Section 13.1).
+  Reason: a profile's owner-level settings deserve the same key as membership, so a stolen device key
+  of the root device cannot change them.
 - Specification: the blob key is 32 random bytes per blob carried in the publication content
   (field 5), and a blob segment authenticates only its last-segment flag (R-CH-3, R-CH-15, R-FMT-10,
   Appendix B, Sections B.1, B.5, B.7, B.8). A reader delivers verified segments in order, and a blob

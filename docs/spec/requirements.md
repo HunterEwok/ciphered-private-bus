@@ -610,6 +610,21 @@ in.
 > secret of the Root are erased when the epoch they belong to has been closed at every external relay.
 > *Serves:* S14, S18. *Verified by:* Tamarin, code review.
 
+> **R-KEY-12.** The root key signs application data on request of the application on the root device,
+> through the host and after user confirmation (R-CORE-2). The signed input is the label
+> `cpb app v1`, the bus identifier, the root generation, the hash of an application tag, and the hash
+> of the data (Appendix B, Section B.8). The label is used for nothing else (R-KEY-8), so the signature
+> is never valid as a passport, a checkpoint, a call, or any other object of the bus, whatever the data.
+> The tag is text of 1 to 64 bytes chosen by the application; it separates the uses of signed data
+> within one bus. Every node verifies such a signature against the root key of its current generation
+> and gives the application only the verdict: the application handles neither the root key nor its
+> algorithm (R-KEY-10). After a root change the signatures of the previous Root no longer verify. The
+> bus gives signed application data no freshness: an older signed value of the same tag verifies as
+> well, so data that changes carries its own version number and its readers refuse a lower one. A
+> halted node refuses both operations (R-MEM-9).
+> *Serves:* S9, S16. *Verified by:* Tamarin (the Root signs adversary-chosen data under this label),
+> vectors, interface test.
+
 ## 9. Channels and Publications
 
 A node publishes data to a channel, and the channel itself determines how many publications are
@@ -1213,7 +1228,8 @@ Appendix B, Section B.10.
 > call the core delivers the key that signed it: the device key, the user-presence key, or the root key
 > (R-CALL-4). When a stream closes for any reason other than the application's own "end", the core
 > reports the reason (R-STR-2 to R-STR-6), and it passes on a relay's hint that it does not serve
-> streams (R-STR-7). On the
+> streams (R-STR-7). On every node the interface verifies the Root's signature over application data;
+> on the root device it asks for that signature (R-KEY-12). On the
 > root device the interface also gives the owner's operations, each confirmed through the root key
 > (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and
 > revoke a device (R-MEM-4).
@@ -1286,6 +1302,7 @@ rule. **Chosen**: the number is assigned; the rationale and the cost of getting 
 | Map keys | 0 .. 65535, critical 0 .. 255 | Keys up to 255 encode in one or two bytes and are given to mandatory fields. Above that keys take three bytes; optional fields go there. | Computed |
 | Publication data, call arguments, and call result | up to 4096 bytes | The smallest participant holds such a message in memory whole and decrypts it in place. State or a command fits with room to spare; anything larger goes as a segmented blob. Cost of error: smaller would push ordinary JSON data into blobs; larger would raise the smallest frame. | Chosen |
 | Actions per device | 64 | An action set is exactly 8 bytes, so a permit has a constant size. An application with more commands uses arguments. The set is not encoded as an integer: 64 bits do not fit the integer limit. | Chosen |
+| Tag of root-signed application data | 1 .. 64 bytes of UTF-8 | The owner sees the tag when confirming the signature, like a device name, so it has the same bound. Only its hash is signed, so the bound costs nothing in the format. | Chosen |
 | Device name | up to 64 bytes of UTF-8 | The owner sees the name when confirming; it must fit one line on screen. 64 bytes are 64 Latin letters, 32 Cyrillic letters, or 21 CJK characters. | Chosen |
 | Bus system channels | 0 .. 15 | One is in use: channel 0 for node info. The other 15 are reserved for future needs of the bus; the number occupies one byte in any case. | Chosen |
 | Channel number | 0 .. 65535; 16 and above belong to the application (R-CH-16) | The number is not visible outside, only its hash in the label, so its size costs nothing. Every retained channel occupies recipient memory; an application needs no more than 65 thousand. | Chosen |

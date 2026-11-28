@@ -165,7 +165,7 @@ plain_msgs = {
     "PairConfirm": {0: 42, 1: B(32), 2: B(32)},
     "PairDone": {0: 45, 1: B(32)},
     "PairSealed": {0: 43, 1: aead({1: B(32), 2: P256, 3: SLH, 4: P256, 5: SEQ})},
-    "PairAbort": {0: 44, 1: 4},
+    "PairAbort": {0: 44, 1: 5},
 }
 
 # Relayed (B.10): the open fields of every class at their largest. The

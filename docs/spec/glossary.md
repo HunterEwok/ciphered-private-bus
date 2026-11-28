@@ -28,13 +28,15 @@ implementations.
 
 ## 2. Environment
 
-These are not members of the bus: they hold no passport, and the bus either does not trust them or does
-not know about them.
+Except for a member relay, which is a node, these hold no passport: the bus either does not trust them
+or does not know about them.
 
 | Term | Identifier | Definition | Defined in |
 | --- | --- | --- | --- |
 | Owner | `Owner` (documentation only) | The person or organization with authority over the bus, exercised through the Root | Section 2 |
 | Relay | `Relay` | Untrusted storage and forwarding | Section 11 |
+| Member relay | `MemberRelay` | A node with the relay right acting as a relay | Section 11 |
+| External relay | `ExternalRelay` | A relay server that is not a member and sees the bus only under aliases | Section 11.1 |
 | Application | `App` | A program that uses the bus. One application is one bus | R-ARC-4 |
 | Host | `Host` | The program in which the core is embedded: transport, storage, randomness, time events, keys | R-ARC-8..10 |
 | Link | `Link` | One transport connection over which frames travel | R-ARC-6 |
@@ -46,6 +48,12 @@ not know about them.
 | Bus identifier | `BusId` | 32 bytes | R-FMT-9 |
 | Device identifier | `DeviceId` | 16 bytes | R-FMT-9, B.8 |
 | Relay identifier | `RelayId` | 16 bytes | B.10 |
+| Relay epoch | `RelayEpoch` | 1..2^31 - 1, within a root generation | R-REL-13 |
+| Bus alias | `BusAlias` | 16 bytes, hash of the period key | R-REL-14, B.10 |
+| Device alias | `DeviceAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |
+| Label alias | `LabelAlias` | 16 bytes, per external relay and relay epoch | R-REL-14, B.10 |
+| Upload counter | `seq` | 1..2^31 - 1, per uploader, relay, and relay epoch | R-REL-17, B.10 |
+| Members tree depth | `depth` | 2..15 | B.10 |
 | Signed object identifier | `ObjectId` | 32 bytes | R-FMT-7 |
 | Channel number | `ChannelNo` | 0..65535 | Section 13.1 |
 | Channel label | `ChannelLabel` | 16 bytes | Section 9.1, B.8 |
@@ -62,14 +70,14 @@ not know about them.
 | Stream identifier | `StreamId` | 1..2^31 - 1 | R-STR-2 |
 | Chunk number | `ChunkNo` | 1..2^31 - 1 | R-STR-2 |
 | Blob segment size | `seg` | 1024..16346 bytes | B.5 |
-| Key fingerprint | `KeyFingerprint` | 64 bits, shown as 20 digits | R-JOIN-5, R-JOIN-7, B.8 |
-| Bus fingerprint | `BusFingerprint` | 64 bits, shown as 20 digits | B.11 |
+| Key fingerprint | `KeyFingerprint` | 32 bytes; of a device key in a pairing code, of an invitation key in a checkpoint | R-JOIN-7, R-JOIN-11, B.8 |
+| Channel stream name | `source`, `label`, `open_no` | The source, the channel label, and the number of the opening publication | R-STR-8, B.7 |
 
 ## 4. Keys and Algorithms
 
 | Term | Identifier | Definition | Defined in |
 | --- | --- | --- | --- |
-| Root key | `RootKey` | Signs passports, checkpoints, and relay tickets. Held by the host | R-KEY-1 |
+| Root key | `RootKey` | Signs passports and checkpoints. Held by the host | R-KEY-1 |
 | Device key | `DeviceKey` | Signs everything a node creates. Held by the host | R-KEY-1 |
 | User-presence key | `PresenceKey` | Signs actions that require user confirmation | R-CALL-4 |
 | K1 | `RecoveryKeyClassic` | Classical half of the recovery key (P-256) | Section 2 |
@@ -78,9 +86,15 @@ not know about them.
 | Sealing key | `SealKey` | X-Wing key, rotated by epoch. Held by the core | R-KEY-2..4 |
 | Channel key | `ChannelKey` | 32 bytes per pair (source, channel) | R-CH-1 |
 | Content key | `content_key` | Derived from the channel key and the publication header | R-CH-3, B.8 |
-| Blob key | `blob_key` | Derived the same way, with a different label | R-CH-3, B.8 |
+| Blob key | `blob_key` | 32 random bytes per blob, carried in the publication content | R-CH-3, B.5 |
 | Reply key | `reply_key` | Exported from the HPKE context of the call | R-CALL-9, B.8 |
 | Stream keys | `stream_key_out`, `stream_key_in` | One per direction, exported from the HPKE context of the call | R-STR-1, B.8 |
+| Relay epoch secret | `relay_secret` | 32 bytes per relay epoch, known to members only | R-REL-13, B.10 |
+| Link seed | `link_seed` | 32 bytes per member and relay epoch, issued by the Root | R-REL-13, B.10 |
+| Link key | `LinkKey` | Authenticates a member to one external relay in one relay epoch. Held by the core | R-KEY-11, B.10 |
+| Period secret and period key | `period_secret`, `PeriodKey` | The Root's secret per relay epoch and the key derived from it per external relay; the period key signs tickets | R-REL-13, B.10 |
+| Wrapping key | `wrap_key` | Single-use key of one `Relayed` message | R-REL-16, B.10 |
+| Relay key | `RelayKey` | An external relay's signing key, one for all buses | B.10 |
 | Key encoding | `Key { alg, bytes }` | The pair (algorithm, bytes) | R-FMT-11 |
 | ECDSA P-256 algorithm identifier | `ALG_ES256 = 1` | | R-FMT-11 |
 | X-Wing algorithm identifier | `ALG_XWING = 2` | | R-FMT-11 |
@@ -89,7 +103,7 @@ not know about them.
 
 ## 5. Control-Plane Objects
 
-Public signed objects. Every member and relay verifies and stores them.
+Public signed objects. Every member and member relay verifies and stores them; an external relay stores them only wrapped.
 
 | Term | Identifier | Signed by | Defined in |
 | --- | --- | --- | --- |
@@ -101,16 +115,20 @@ Public signed objects. Every member and relay verifies and stores them.
 | Join request | `JoinRequest` | Acceptor | R-JOIN-4, B.3 |
 | Channel key request | `KeyRequest` | Reader | R-CH-18, B.3 |
 | Halt proof | `HaltProof` | Contains two root-signed records | R-MEM-10, B.3 |
-| Relay ticket | `RelayTicket` | Root | Section 11, B.10 |
+| Relay access | `RelayAccess` | Device key of the root device; sealed to one member | R-REL-13, B.10 |
+| Relay ticket | `RelayTicket` | Period key | R-REL-15, B.10 |
+| Closing ticket | field `closed` | The last ticket of a bus alias | R-REL-19, B.10 |
+| Bridge | `Bridge` (documentation only) | A relay access object of the next epoch kept under a closed alias | R-REL-19, B.10 |
+| Members tree | `members`, `depth` | Ticket fields: root and depth of the tree of (alias, link key) pairs | B.10 |
 | Relay storage limits | `bus_bytes`, `source_bytes` | Fields of the relay ticket | B.10 |
 | Control-plane object request | `Get` | Unsigned | B.3 |
 | Read right | `RIGHT_READ` | | Section 6.1 |
 | Publish right | `RIGHT_PUBLISH` | | Section 6.1 |
 | Relay right | `RIGHT_RELAY` | | Section 6.1 |
-| Accept join requests right | `RIGHT_ACCEPT` | | Section 6.1 |
 | Permit | `Permit { commander, auto, confirm }` | Part of a passport | Section 6.1 |
 | Action set | `ActionSet` | 8 bytes, one bit per action | R-FMT-5 |
 | Valid passport bitmap | `valid_bits` | Checkpoint field | R-MEM-2 |
+| Open invitations | `invites` | Checkpoint field: fingerprints of the invitation keys | R-JOIN-11, B.3 |
 | Window start | `window_start` | Checkpoint field | R-MEM-14 |
 | Next free passport number | `next_passport_no` | Checkpoint field | R-MEM-2 |
 | Relay list | `relays` | Checkpoint field | Section 6.1 |
@@ -122,14 +140,16 @@ Public signed objects. Every member and relay verifies and stores them.
 | --- | --- | --- | --- |
 | Pairing | `Pairing` | CPace exchange between the joiner and the acceptor | R-JOIN-1, B.11 |
 | Joiner | `joiner` | The device that is joining | Section 7 |
-| Acceptor | `acceptor` | A node with the accept right, or the root device | Section 7 |
-| Short code | `PairCode` | 6 digits | R-JOIN-1 |
-| QR secret | `PairSecret` | 16 bytes | R-JOIN-1 |
+| Acceptor | `acceptor` | A valid member that pairs with a joiner, or the root device | Section 7 |
+| Pairing secret | `PairSecret` | 16 bytes | R-JOIN-1 |
 | Pairing transcript hash | `pairing_hash` | Field of the join request | R-JOIN-4, B.11 |
 | Joiner signature | `joiner_sig` | The joiner's `PairDevice` signature, carried in the join request | B.3 |
 | Pairing messages | `PairInit`, `PairReply`, `PairConfirm`, `PairDone`, `PairSealed`, `PairAbort` | | B.11 |
 | Bus information for the joiner | `PairBus` | | B.11 |
 | Joiner information | `PairDevice` | | B.11 |
+| Invitation | `Invitation` | 64 bytes: a one-time private signing key and the bus identifier | R-JOIN-11, B.12 |
+| Invitation messages | `InviteHello`, `InviteRequest`, `BusKeys` | | B.12 |
+| Sealed part of an invitation request | `InviteSealed` | Device key, name, user-presence key, device signature | B.12 |
 
 ## 7. Channels and Publications
 
@@ -145,7 +165,7 @@ Public signed objects. Every member and relay verifies and stores them.
 | Blob segment | `BlobSegment` | One binary frame | R-CH-15, B.7 |
 | Blob segment request | `BlobGet` | | B.5 |
 | Content padding | `pad` | Up to a padding bucket | R-CH-14 |
-| Node info channel | `CHANNEL_NODE_INFO = 0` | Device name and description | R-CH-16 |
+| Node info channel | `CHANNEL_NODE_INFO = 0` | Device name | R-CH-16 |
 | Node info | `NodeInfo` | Content of channel 0 | R-CH-16, B.5 |
 
 ## 8. Calls and Streams
@@ -167,6 +187,10 @@ Public signed objects. Every member and relay verifies and stores them.
 | Lossy mode | `StreamMode::Lossy` | `stream_mode = 2` | R-STR-3, B.6 |
 | Credit | `credit` | How many bytes the peer may send | R-STR-4 |
 | Chunk direction | `dir` | From the commander or from the target | R-STR-2 |
+| Channel stream | `ChannelStream` | One-way, from a source to the readers of a channel, opened by a publication | Section 10.4 |
+| Opening publication | field `stream_key` | The publication that opens a channel stream and carries the stream key | R-STR-8, B.5 |
+| Stream key | `stream_key` | One-time P-256 signing key of a channel stream; signs every chunk | R-STR-8 |
+| Channel stream chunk | `ChannelStreamChunk` | One signed binary frame | R-STR-8, B.7 |
 
 ## 9. Wire Format
 
@@ -178,6 +202,10 @@ Public signed objects. Every member and relay verifies and stores them.
 | Message kind | field `t` | Kind number in the message map | R-FMT-12, B.2 |
 | Hello | `Hello` | The first message on a link | R-REL-1, B.4 |
 | Hello authentication | `Auth` | Signature over both hellos | B.4 |
+| Relay hello | `RelayHello` | The first message on an external relay link | R-REL-15, B.10 |
+| Wrapped object | `Relayed` | Everything a member sends through an external relay | R-REL-16, B.10 |
+| Wrapped object class | `class` | 1 control, 2 key grant, 3 publication, 4 key request, 5 join request, 6 forwarded, 7 blob segment, 8 channel stream chunk | B.10 |
+| Request on an external relay link | `RelayGet` | Unsigned | B.10 |
 | Critical field range | `0..=255` | An unknown field rejects the object | R-FMT-14 |
 | Extension field range | `256..=65535` | An unknown field is preserved | R-FMT-14 |
 | Protocol version | `version` | Announced in the hello and covered by the signature | R-FMT-15 |
@@ -197,7 +225,7 @@ Public signed objects. Every member and relay verifies and stores them.
 | Input: storage result | `In::StoreResult` | | R-CORE-7 |
 | Output: send a frame | `Out::Send` | | R-CORE-2 |
 | Output: store a record | `Out::Store` | | R-CORE-2 |
-| Output: deliver to the application | `Out::Deliver` | Publication, call, stream data | R-CORE-2 |
+| Output: deliver to the application | `Out::Deliver` | Publication, call, stream data, channel stream data | R-CORE-2 |
 | Output: request user presence | `Out::AskPresence` | | R-API-3 |
 | Output: rejection with a rule code | `Out::Reject` | | R-CORE-2 |
 | State: running | `State::Running` | | |
@@ -214,15 +242,25 @@ Public signed objects. Every member and relay verifies and stores them.
 | Take effects | `cpb_next_out` | In emission order | R-API-1 |
 | Host table | `HostKeys { random, generate, public_key, sign }` | Randomness and three key operations | R-ARC-9 |
 | Publish | `publish` | | R-API-2 |
+| Publish with a blob | `begin_blob`, `write_blob`, `finish_blob` | The blob is written in pieces and encrypted into host storage | R-API-2, R-CH-15 |
+| Fetch a blob | `fetch_blob`, `cancel_fetch` | Any range of segments; they arrive in order, with a window of requests in flight | R-API-2, R-CH-15 |
 | Read a channel | `read` | | R-API-2 |
-| Subscribe to a channel | `subscribe` | | R-API-2 |
+| Subscribe to a channel | `subscribe`, `unsubscribe` | The node holds a channel key only while subscribed | R-API-2, R-CH-19 |
 | Set the readers of a channel | `set_readers` | A list of devices, or all valid members with the read right | R-API-2 |
+| Ask for a new channel key | `rotate_channel_key` | Marks an own channel for key rotation | R-API-2, R-CH-5, R-CH-6 |
 | Call an action | `call` | | R-API-2 |
 | Reply to a call | `reply` | | R-API-2 |
 | Register an action handler | `on_action` | | R-API-2 |
 | Write and read a stream | `stream_write`, `stream_read` | | R-API-2 |
+| Open and write a channel stream | `chan_stream_open`, `chan_stream_write`, `chan_stream_end` | On the node's own channel | R-API-2, R-STR-8 |
+| Take and read a channel stream | `chan_stream_take`, `chan_stream_read`, `chan_stream_release` | A stream named in an accepted opening publication | R-API-2, R-STR-9 |
 | Set the node name | `set_node_name` | Publishes a new node info | R-API-2 |
+| Create a bus | `create_bus` | On a node without a bus; makes it the root device | R-API-2, R-JOIN-10 |
+| Join with an invitation | `join_with_invitation`, `withdraw_invitation` | On a node without a bus | R-API-2, R-JOIN-12 |
+| Make and cancel an invitation | `make_invitation`, `cancel_invitation` | On the root device, with the rights and permits | R-API-2, R-JOIN-11 |
+| Change the root | `root_change_begin`, `root_change_complete` | On the device that becomes the new root device | R-API-2, R-MEM-18 |
 | Read the bus state | `bus_state` | A snapshot without side effects and without secrets | R-API-2 |
+| Membership change | `MembershipChanged` | Reported after a checkpoint or a passport is accepted | R-API-2, R-CORE-2 |
 
 ## 12. Errors and Codes
 
@@ -263,22 +301,28 @@ A halted target does not answer with a refusal or a result code; it answers with
 | Actions per device | `ACTIONS_MAX` | 64 |
 | Device name | `NAME_MAX` | 64 bytes |
 | System channels | `SYSTEM_CHANNELS` | 16 |
-| Short code digits | `PAIR_CODE_DIGITS` | 6 |
-| QR secret length | `PAIR_SECRET_LEN` | 16 |
-| Key fingerprint bits | `FINGERPRINT_BITS` | 64 |
+| Pairing secret length | `PAIR_SECRET_LEN` | 16 |
+| Key fingerprint length | `FINGERPRINT_LEN` | 32 |
+| Invitation length | `INVITATION_LEN` | 64 |
+| Open invitations in a checkpoint | `INVITES_MAX` | 32 |
+| Checkpoint bitmap, bytes | `BITMAP_MAX` | 4096 |
+| Permits in a passport | `PERMITS_MAX` | 128 |
+| Retention depth in a publication | `DEPTH_MAX` | 1024 |
 
 ## 14. Profile Parameters
 
 | Term | Identifier | Range | Default |
 | --- | --- | --- | --- |
-| Checkpoint bitmap length | `bitmap_bits` | 64..32768 | 4096 |
-| Permits per passport | `permits_max` | 0..128 | 32 |
-| Channel retention depth | `depth_max` | 0..1024 | 16 |
+| Checkpoint bitmap length the Root creates | `bitmap_bits` | 64..32768 | 4096 |
+| Permits per passport the Root creates | `permits_max` | 0..128 | 32 |
+| Channel retention depth a source uses | `depth_max` | 0..1024 | 16 |
+| Publications of one channel a recipient retains | `retain_max` | 1..1024 | 16 |
+| Channel streams held per node | `chan_streams_max` | 0..256 | 8 |
+| Blob fetch window | `blob_window` | 1 and up, segments | 4 |
+| Join requests kept per signing member | `join_keep` | 1..16 | 4 |
 | Retained sealing key epochs | `seal_epochs` | 2..16 | 4 |
 | Open streams | `streams_max` | 0..256 | 8 |
 | Stream chunk and blob segment | `chunk_len` | up to 16384 | 4096 |
 | Initial stream credit | `initial_credit` | up to 1 MiB | 16 KiB |
 | Content padding buckets | `pad_steps` | chosen by the source | 64, 256, 1024, 4096 |
-| Pairing attempts per code | `pair_attempts` | 1..10 | 3 |
-| Join requests held by a relay | `join_requests_max` | 1..256 | 16 |
 | "Reset nonces" period | `nonce_reset_period` | set by the host | 30 s |

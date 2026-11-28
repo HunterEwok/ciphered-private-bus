@@ -12,7 +12,24 @@ Extension field 300 in Hello             accepted
 HaltProof kind 6 with one sig            rejected
 seg 1023                                 rejected
 gen 0                                    rejected
+RelayTicket depth 16                     rejected
+RelayRefusal with bus and alias          rejected
+RelayHello with both sides               rejected
+Relayed control of kind 17               rejected
+Relayed publication without depth        rejected
+Relayed body 16281                       rejected
 Call enc 5249                            rejected
+PubContent blob key 31 bytes             rejected
+NodeInfo with field 2                    rejected
+Checkpoint with 33 invitations           rejected
+Checkpoint with empty invitations        rejected
+JoinRequest with code and invitation     rejected
+JoinRequest with neither                 rejected
+RootChange with algorithm 16             rejected
+Passport with unknown key algorithm      rejected
+PairAbort code 9                         rejected
+InviteSealed without signature           rejected
+Relayed channel stream with counter      rejected
 float in extension field                 rejected
 negative int in extension                rejected
 bool in extension                        rejected

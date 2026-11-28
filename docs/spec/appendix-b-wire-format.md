@@ -945,8 +945,9 @@ carries kind 2 on its label; kind 1 holds a fresh secret and cannot be printed. 
 of an unknown kind.
 
 Kind 2, and kind 1 read by the root device, give the root device the fingerprint it needs for the
-admission (R-JOIN-7). The device that reads a code takes it only through its own camera, reader or
-keyboard.
+admission (R-JOIN-7). This presentation serves reading from the joiner itself. An application MAY
+carry the same values another way; the bus checks the values, not their path (requirements, Section
+15.7).
 
 The bus has no code that an acceptor shows and no short code. An application that wants the joiner to
 check the bus before it pairs gives the joiner the bus identifier by its own means; the identifier is
@@ -1034,6 +1035,9 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
 
 ### Steps and Screens
 
+The screen columns are an example of an application that reads the code from the joiner itself; the bus
+defines the steps and the messages, not the screens.
+
 | Step | What happens | Acceptor screen | Joiner screen | Root screen |
 | --- | --- | --- | --- | --- |
 | 1 | The joiner is ready to pair: it generates a code and sends `PairInit` on its links | | The code of kind 1 as a QR code | |
@@ -1091,15 +1095,15 @@ checking the fingerprint the joiner presented. The draft revision is pinned toge
 5. The joiner fetches its passport with an ordinary hello; there is no dedicated message for it.
 6. An early `PairInit` waits for the acceptor's code instead of being refused, because the joiner has
    its code first.
-7. The root device compares the fingerprint, and the owner only carries it there. The fingerprint is
+7. The core of the root device compares the fingerprint; nobody compares it by eye. The fingerprint is
    the joiner's device key fingerprint, the same one whoever accepted the joiner. A mismatch refuses
    the admission and changes nothing else: it may be the wrong request picked, and
    a request the owner does not want is declined as before.
 8. The fingerprint has one form, 32 bytes. A short form for typing would be the weaker of two
    paths, and typing is the rare case of a root device with no camera and no reader.
 9. The joiner presents the code and the acceptor reads it; there is no other direction and no short
-   code. The fingerprint the root device needs must come from the joiner over a channel nobody else
-   can write to, and that channel carries 16 more bytes as easily. A code shown by the acceptor
+   code. The fingerprint the root device needs has to come from the joiner over a channel nobody else
+   can write to for the admission to mean anything, and that channel carries 16 more bytes as easily. A code shown by the acceptor
    would give the root device nothing about the joiner, and a short code would add a guessable secret
    and a limit on its runs for the same reading or typing the fingerprint already needs.
 10. The fingerprint in the code is checked by the acceptor that read it, not inside the exchange. The

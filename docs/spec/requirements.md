@@ -216,9 +216,10 @@ The CPB standard consists of three contracts and a conformance suite, not of one
 > reliable delivery from the link it uses.
 > *Serves:* S17. *Verified by:* simulator with reordering and loss.
 
-> **R-ARC-7.** An encrypting transport SHOULD be used on every link that leaves the device. Only
-> limitation L5 for a network observer depends on it.
-> *Serves:* L5. *Verified by:* deployment document.
+> **R-ARC-7.** The bus does not hide open headers on a link and puts no requirement on the transport
+> for it. Limitation L5 for a network observer holds only on a link whose transport encrypts; no other
+> property depends on the transport.
+> *Serves:* L5. *Verified by:* the models, whose network adversary reads and writes every link.
 
 > **R-ARC-8.** The host MUST provide storage with atomic replacement of a single record: after a power
 > loss either the whole previous version or the whole new version remains, and a corrupted record is
@@ -492,9 +493,11 @@ signature after the owner confirms. There is no right to accept join requests: a
 on the check the root device makes (R-JOIN-7), so such a right would guard nothing.
 
 > **R-JOIN-1.** Pairing is a password-authenticated key exchange using CPace [CPACE] between the joiner
-> and the acceptor. The password is a fresh 16-byte secret that the joiner generates and presents
-> together with the fingerprint of its device key, as a QR code or a tag, and that the acceptor reads
-> through its own camera, reader or keyboard (R-JOIN-7). There is no other way to pair.
+> and the acceptor. The password is a fresh 16-byte secret that the joiner's core generates. Together
+> with the fingerprint of the joiner's device key it is the pairing code (Appendix B, Section B.11):
+> the joiner's application gets the code from its core, and the acceptor's application gives it to its
+> core. The bus has no other pairing exchange. How the code travels between the two applications is
+> outside the bus (Section 15.7).
 > *Serves:* S4. *Verified by:* Tamarin.
 
 > **R-JOIN-2.** During pairing the joiner receives the bus identifier, the first root key, and the keys K1
@@ -520,28 +523,29 @@ on the check the root device makes (R-JOIN-7), so such a right would guard nothi
 > key of the root device. A relay sees who submitted the request but not the joiner's name or key.
 > *Serves:* S4. *Verified by:* model.
 
-> **R-JOIN-5.** The Root shows the owner the joiner's name and who accepted the request. The passport is
-> issued only after the root device has checked the device key in the request against the fingerprint
-> it got from the joiner (R-JOIN-7) and the owner has confirmed on the root device.
-> *Serves:* S4. *Verified by:* model, scenario test, UI review.
+> **R-JOIN-5.** The root device reports a join request to its application with the joiner's name and
+> the acceptor. The passport is issued only after the core of the root device has checked the device
+> key in the request against the fingerprint the application passed to the admission (R-JOIN-7) and
+> the host has confirmed the signature with the root key.
+> *Serves:* S4. *Verified by:* model, scenario test.
 
 > **R-JOIN-6.** No sequence of messages without a Root signature makes a device a member. An acceptor
 > cannot issue a passport.
 > *Serves:* S4. *Verified by:* model, Tamarin.
 
-> **R-JOIN-7.** The root device, not the owner, compares fingerprints: a person asked to compare two
-> strings confirms a mismatch too often [KAINDA]. Before admission the joiner presents the fingerprint
-> of its device key, 32 bytes: as a QR code on its screen or its label, or as a tag for a reader. The
-> root device takes it through its own camera or reader, in an admission the owner started on it; a
-> root device with neither takes the same 32 bytes typed by the owner. There is no shorter form: a
-> machine carries 32 bytes as easily as 8, and a person should not carry either. Its user interface MUST NOT take the fingerprint from the join request, the
-> network, a link, a file or a message, and MUST NOT start an admission from any of these. The core of
-> the root device compares the presented fingerprint with the device key in the request and refuses a
-> mismatch; the local interface has no operation that admits a device without a presented fingerprint,
-> and it does not give out the fingerprint of the key in a request. Otherwise a compromised acceptor
-> substitutes its own key for the joiner's in the request. The acceptor that read a joiner's code
-> refuses a peer with another device key, so someone who only saw the code cannot stand in for the
-> joiner. After admission the joiner shows the fingerprint of the bus it has joined.
+> **R-JOIN-7.** The core of the root device admits only the device key whose fingerprint the
+> application passed to the admission. The fingerprint is 32 bytes and has no shorter form. The core
+> compares it with the device key in the request and refuses a mismatch. The local interface has no
+> operation that admits a device without a fingerprint, and it does not give out the fingerprint of
+> the key in a request, so the fingerprint cannot be taken from the request. Otherwise a compromised
+> acceptor substitutes its own key for the joiner's in the request. In the same way the core of an
+> acceptor refuses a peer whose device key has another fingerprint than the code it was given, so
+> someone who only knows the secret cannot stand in for the joiner. The interface gives every node the
+> fingerprint of its device key and, on a member, the fingerprint of its bus.
+> The bus puts no requirement on where an application takes a fingerprint from: it cannot check that.
+> What follows from the rule is a conditional property: the admitted device is the one the owner means
+> if the fingerprint reached the root device over a channel the adversary cannot write to (Section
+> 15.7).
 > *Serves:* S4. *Verified by:* model, Tamarin, scenario test.
 
 > **R-JOIN-8.** A relay holds join requests for the Root while it is offline. It recognizes them by
@@ -1573,18 +1577,34 @@ limit is needed. Pairing gives the joiner the bus identifier and the recovery ke
 the identifier (R-JOIN-2); it does not admit the joiner. Admission requires a Root signature after the
 owner confirms the join request.
 
-The pairing code is shown on a screen, so it is not a secret from someone who can see the screen. Such
-an adversary, active on the link, can run the exchange with each side under the real code. Two checks
-that do not depend on the secrecy of the code stop it. The root device admits only the device key whose
-fingerprint it got from the joiner itself, through its own camera or reader (R-JOIN-7); the
-owner compares nothing, because people confirm mismatching strings [KAINDA]. And the acceptor takes the joiner's
-device key fingerprint from the code it read and refuses any other peer. The joiner has no such check
-of the bus: someone who saw its code and answered first can take it into another bus. That admits
-nobody to the owner's bus, the owner's acceptor finds no joiner to pair with, and
-the joiner shows the fingerprint of the bus it joined. An application that needs more gives the joiner
-the bus identifier beforehand and compares. What no check in the bus can stop is an owner persuaded to scan the code of a device
-that is not theirs; the rule that an admission starts only on the root device, never from a link or a
-message, removes the remote form of that attack.
+The pairing secret proves that the peer knows it, not which device the peer is: a code shown on a
+screen is known to everyone who sees the screen, and such an adversary, active on the link, can run the
+exchange with each side under the real secret. Two checks of the bus do not depend on the secrecy of
+the code. The core of the root device admits only the device key whose fingerprint its application
+passed to the admission, and the core of an acceptor refuses a peer whose device key has another
+fingerprint than the code names (R-JOIN-7).
+
+The bus checks the fingerprint it is given; it cannot check where the application took it from, and it
+puts no requirement on that. The property is conditional: the admitted device is the one the owner
+means if the fingerprint reached the root device over a channel the adversary cannot write to. The
+choice of that channel belongs to the application, and so does its strength:
+
+- Read from the joiner itself by the camera or the reader of the root device, or typed by the owner
+  from the joiner's screen or label. The adversary has to be at the device. The presentation of
+  Appendix B, Section B.11 serves this. A machine compares the bytes; a person asked to compare two
+  strings confirms a mismatch too often [KAINDA].
+- Carried under a secret the root device itself issued, an invitation: the owner creates it on the
+  root device, it reaches the joiner by the application's means, and the joiner's fingerprint returns
+  authenticated by it. This is as strong as the secrecy of the path the invitation took: whoever holds
+  the invitation is admitted.
+- Taken from a link, a file or a message with no such secret. Whoever can write there chooses the
+  device that is admitted, and an owner can be led to start an admission they did not intend; linked
+  devices of messengers were taken over this way.
+
+The joiner has no check of the bus inside the bus: someone who saw its code and answered first can take
+it into another bus. That admits nobody to the owner's bus, and the owner's acceptor finds no joiner to
+pair with. An application that needs more gives the joiner the bus identifier beforehand, which is
+public, and compares it with the one the pairing reports.
 
 ### 15.8. Parsing Untrusted Input
 

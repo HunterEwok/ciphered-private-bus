@@ -95,6 +95,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   says that a device has one pairing code at a time, that a member keeps an early `PairInit` until
   it gets a code, and where join requests wait and within which bound. Reason: the rules of
   Section 7 had no operations at the interface.
+- Specification: the bus requires of an application only what its core checks. R-JOIN-7 no longer
+  forbids a user interface to take a fingerprint from the network: the core admits only the key whose
+  fingerprint it is given, and the admitted device is the intended one if the fingerprint came over a
+  channel the adversary cannot write to. Section 15.7 describes the channels an application may
+  choose, with an invitation issued by the root device among them, and what each is worth. R-JOIN-1
+  and R-JOIN-5 describe the core, not screens, and R-ARC-7 states what depends on an encrypting
+  transport instead of recommending one.
 - Specification: the right to accept join requests is removed. Any valid member pairs with a joiner
   and sends its join request; the passport rights are read, publish and relay (Sections 6.1 and 7,
   R-JOIN-4, R-API-2; Appendix B, Sections B.3 and B.11). Reason: admission depends only on the check

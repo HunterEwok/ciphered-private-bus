@@ -274,9 +274,11 @@ impl fmt::Display for Fingerprint {
     }
 }
 
-/// The fingerprint of a device key: the 32 bytes the root device gets from the joiner
-/// itself, through its own camera or reader, or typed by the owner (R-JOIN-7; Appendix B,
-/// Section B.8). The application never takes it from a link, a file or a message.
+/// The fingerprint of a device key, 32 bytes (R-JOIN-7; Appendix B, Section B.8). The root
+/// device admits only the key whose fingerprint the application gives it. The bus cannot check
+/// where the application took it from: the admitted device is the intended one if the
+/// fingerprint came over a channel an adversary cannot write to, such as a camera reading the
+/// joiner's screen (requirements, Section 15.7).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct KeyFingerprint(pub [u8; 32]);
 
@@ -613,10 +615,10 @@ pub enum Event {
         result: Result<Paired, Report>,
     },
     /// On the root device: a join request with a valid joiner's signature waits for the
-    /// owner (R-JOIN-5). The application shows the name and the acceptor, and asks the owner
-    /// to scan the code on the joiner's screen; [`LocalApi::admit`]
-    /// takes that fingerprint and compares it with the key in the request (R-JOIN-7). The
-    /// event does not carry the fingerprint, so it can only come from the joiner.
+    /// owner (R-JOIN-5). The application gets the joiner's fingerprint, for example by asking
+    /// the owner to scan the code on the joiner's screen; [`LocalApi::admit`] takes it and
+    /// compares it with the key in the request (R-JOIN-7). The event does not carry the
+    /// fingerprint, so it cannot be taken from the request.
     JoinRequested {
         /// The handle for [`LocalApi::admit`] and [`LocalApi::decline_join`].
         request: JoinRequestId,

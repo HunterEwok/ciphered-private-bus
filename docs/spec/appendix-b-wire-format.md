@@ -62,7 +62,7 @@ Encoding rules common to all sections:
   big-endian, and the remaining bytes are zero. In binary frames (Section B.7) the associated data is
   the header bytes as they are, without hashing; a blob segment is the one exception (Section B.7).
 - The signature length is determined by the key algorithm. `bstr(64)` in the tables refers to ES256.
-- Unused bits in `Passport.rights` (4..7), `StreamChunk.flags` (4..7), and `BlobSegment.flags` (1..7)
+- Unused bits in `Passport.rights` (3..7), `StreamChunk.flags` (4..7), and `BlobSegment.flags` (1..7)
   MUST be zero; otherwise the object is rejected.
 - A default value (R-FMT-2) exists only for a field marked `.default` in the schema. In version 1 there
   is one such field: `flags` in the publication content. All other fields, when present, are written

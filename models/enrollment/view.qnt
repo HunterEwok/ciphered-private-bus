@@ -24,27 +24,27 @@ module viewdefs {
   type ERequest = { key: str, presence: str, name: str, tid: int, signed: EPayload, acceptor: str }
   type EPassport = { key: str, presence: str, name: str }
   type View = {
-    tid: int, sessions: Set[ESession], current: str -> int, sent: Set[{ p: EPayload, to: str }],
-    inbox: Set[ERequest],
+    tid: int, sessions: Set[ESession], current: str -> int, joinerTries: str -> int,
+    acceptorTries: str -> (str -> int), sent: Set[{ p: EPayload, to: str }], inbox: Set[ERequest],
     passports: Set[EPassport], confirmed: Set[str], broken: Set[str],
   }
 
   // The requests the Root may still admit: those of an honest joiner's key.
   pure def liveInbox(ib: Set[ERequest]): Set[ERequest] = ib.filter(r => V_JOINERS.contains(r.key))
 
-  pure def viewOf(t: int, ss: Set[ESession], cu: str -> int,
+  pure def viewOf(t: int, ss: Set[ESession], cu: str -> int, jt: str -> int, at: str -> (str -> int),
                   se: Set[{ p: EPayload, to: str }], ib: Set[ERequest], pp: Set[EPassport], co: Set[str],
                   b: Set[str]): View =
-    { tid: t, sessions: ss, current: cu, sent: se, inbox: liveInbox(ib),
+    { tid: t, sessions: ss, current: cu, joinerTries: jt, acceptorTries: at, sent: se, inbox: liveInbox(ib),
       passports: pp, confirmed: co, broken: b }
 }
 
 // The TLC instance: the constants of `tiny` in instances.qnt.
 module tiny_view {
-  import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h"), MAX_TID = 4,
+  import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h"), LIMIT = 2, MAX_TID = 4,
                     MUTANT = "none").* from "./enrollment"
   import viewdefs(V_JOINERS = Set("j1")).*
-  val safetyView = viewOf(tid, sessions, current, sent, inbox, passports, confirmed,
+  val safetyView = viewOf(tid, sessions, current, joinerTries, acceptorTries, sent, inbox, passports, confirmed,
                           broken)
 }
 
@@ -78,10 +78,11 @@ module bisim {
   const P_JOINERS: Set[str]
   const P_PRESENCE: Set[str]
   const P_ACCEPTORS: Set[str]
+  const P_LIMIT: int
   const P_MAX_TID: int
-  import enrollment(JOINERS = P_JOINERS, PRESENCE = P_PRESENCE, ACCEPTORS = P_ACCEPTORS,
+  import enrollment(JOINERS = P_JOINERS, PRESENCE = P_PRESENCE, ACCEPTORS = P_ACCEPTORS, LIMIT = P_LIMIT,
                     MAX_TID = P_MAX_TID, MUTANT = "none") as A from "./enrollment"
-  import enrollment(JOINERS = P_JOINERS, PRESENCE = P_PRESENCE, ACCEPTORS = P_ACCEPTORS,
+  import enrollment(JOINERS = P_JOINERS, PRESENCE = P_PRESENCE, ACCEPTORS = P_ACCEPTORS, LIMIT = P_LIMIT,
                     MAX_TID = P_MAX_TID, MUTANT = "none") as B from "./enrollment"
   import viewdefs(V_JOINERS = P_JOINERS).*
 
@@ -94,6 +95,7 @@ module bisim {
   pure val NAMES = KEYS
   pure def presOf(j: str): str = if (P_PRESENCE.contains(j)) j else "none"
   pure val TIDS = 1.to(P_MAX_TID)
+  pure val TRIES = 0.to(P_LIMIT)
   pure val SESSIONS: Set[ESession] = tuples(TIDS, KEYS, SIDES.union(Set(ADV)))
     .map(t => { tid: t._1, joiner: t._2, acceptor: t._3 })
   pure val SENT: Set[{ p: EPayload, to: str }] = tuples(P_JOINERS, TIDS, SIDES.union(Set(ADV)))
@@ -103,51 +105,55 @@ module bisim {
                 signed: { key: t._1, presence: t._2, name: t._3, tid: t._4 }, acceptor: t._5 })
   pure val PASSPORTS: Set[EPassport] = tuples(KEYS, PRES, NAMES).map(t => { key: t._1, presence: t._2, name: t._3 })
   pure val TAGS = Set("advPaired", "tampered", "admitted", "direct")
-  pure val BROKEN = Set("intended", "asSigned", "bound")
+  pure val BROKEN = Set("intended", "asSigned", "bound", "guessLimit")
 
   // ------------------------------------------------------------------ Struct
-  // The values every reachable state takes: the sessions, sent payloads and kept requests the actions can build, and
+  // The values every reachable state takes: counters within their bounds,
+  // the sessions, sent payloads and kept requests the actions can build, and
   // sessions named uniquely by their transcript (which makes the other end of
   // a joiner's latest session, chosen in joinerSend, unique).
-  pure def structOf(t: int, ss: Set[ESession], cu: str -> int,
+  pure def structOf(t: int, ss: Set[ESession], cu: str -> int, jt: str -> int, at: str -> (str -> int),
                     se: Set[{ p: EPayload, to: str }], ib: Set[ERequest], pp: Set[EPassport], co: Set[str],
                     b: Set[str], sn: Set[str]): bool = and {
     0.to(P_MAX_TID).contains(t), ss.subseteq(SESSIONS), ss.forall(s => s.tid <= t),
     ss.forall(x => ss.forall(y => x.tid == y.tid implies x == y)),
     cu.keys() == P_JOINERS, P_JOINERS.forall(j => 0.to(P_MAX_TID).contains(cu.get(j))),
+    jt.keys() == P_JOINERS, P_JOINERS.forall(j => TRIES.contains(jt.get(j))),
+    at.keys() == P_ACCEPTORS,
+    P_ACCEPTORS.forall(a => at.get(a).keys() == P_JOINERS and P_JOINERS.forall(j => TRIES.contains(at.get(a).get(j)))),
     se.subseteq(SENT), ib.subseteq(REQUESTS), pp.subseteq(PASSPORTS), co.subseteq(KEYS),
     b.subseteq(BROKEN), sn.subseteq(TAGS),
   }
 
-  val structA = structOf(A::tid, A::sessions, A::current, A::sent, A::inbox,
+  val structA = structOf(A::tid, A::sessions, A::current, A::joinerTries, A::acceptorTries, A::sent, A::inbox,
                          A::passports, A::confirmed, A::broken, A::seen)
-  val structB = structOf(B::tid, B::sessions, B::current, B::sent, B::inbox,
+  val structB = structOf(B::tid, B::sessions, B::current, B::joinerTries, B::acceptorTries, B::sent, B::inbox,
                          B::passports, B::confirmed, B::broken, B::seen)
-  val viewA = viewOf(A::tid, A::sessions, A::current, A::sent, A::inbox,
+  val viewA = viewOf(A::tid, A::sessions, A::current, A::joinerTries, A::acceptorTries, A::sent, A::inbox,
                      A::passports, A::confirmed, A::broken)
-  val viewB = viewOf(B::tid, B::sessions, B::current, B::sent, B::inbox,
+  val viewB = viewOf(B::tid, B::sessions, B::current, B::joinerTries, B::acceptorTries, B::sent, B::inbox,
                      B::passports, B::confirmed, B::broken)
 
   // ------------------------------------------------------------- bookkeeping
   pure val NO_PAYLOAD: EPayload = { key: "", presence: "", name: "", tid: 0 }
   pure val NO_SESSION: ESession = { tid: 0, joiner: "", acceptor: "" }
   pure val NO_REQUEST: ERequest = { key: "", presence: "", name: "", tid: 0, signed: NO_PAYLOAD, acceptor: "" }
-  type Move = { kind: str, j: str, a: str, s: ESession, p: EPayload, r: ERequest, key: str,
+  type Move = { kind: str, j: str, a: str, success: bool, s: ESession, p: EPayload, r: ERequest, key: str,
                 presence: str, name: str, t: int }
-  pure val NO_MOVE: Move = { kind: "", j: "", a: "", s: NO_SESSION, p: NO_PAYLOAD, r: NO_REQUEST,
+  pure val NO_MOVE: Move = { kind: "", j: "", a: "", success: false, s: NO_SESSION, p: NO_PAYLOAD, r: NO_REQUEST,
                              key: "", presence: "", name: "", t: 0 }
   var stage: int      // 0: before A's step, 1: after it, 2: after B's answer
   var mv: Move        // A's step, as B needs it
   var matchOk: bool   // B's answer was enabled
 
   action aStay = all {
-    A::tid' = A::tid, A::sessions' = A::sessions, A::current' = A::current, A::sent' = A::sent,
-    A::inbox' = A::inbox, A::passports' = A::passports,
+    A::tid' = A::tid, A::sessions' = A::sessions, A::current' = A::current, A::joinerTries' = A::joinerTries,
+    A::acceptorTries' = A::acceptorTries, A::sent' = A::sent, A::inbox' = A::inbox, A::passports' = A::passports,
     A::confirmed' = A::confirmed, A::broken' = A::broken, A::seen' = A::seen,
   }
   action bStay = all {
-    B::tid' = B::tid, B::sessions' = B::sessions, B::current' = B::current, B::sent' = B::sent,
-    B::inbox' = B::inbox, B::passports' = B::passports,
+    B::tid' = B::tid, B::sessions' = B::sessions, B::current' = B::current, B::joinerTries' = B::joinerTries,
+    B::acceptorTries' = B::acceptorTries, B::sent' = B::sent, B::inbox' = B::inbox, B::passports' = B::passports,
     B::confirmed' = B::confirmed, B::broken' = B::broken, B::seen' = B::seen,
   }
 
@@ -159,6 +165,8 @@ module bisim {
     nondet t = 0.to(P_MAX_TID).oneOf()
     nondet ss = SESSIONS.powerset().oneOf()
     nondet cu = setOfMaps(P_JOINERS, 0.to(P_MAX_TID)).oneOf()
+    nondet jt = setOfMaps(P_JOINERS, TRIES).oneOf()
+    nondet at = setOfMaps(P_ACCEPTORS, setOfMaps(P_JOINERS, TRIES)).oneOf()
     nondet se = SENT.powerset().oneOf()
     nondet ib = REQUESTS.powerset().oneOf()
     nondet pp = PASSPORTS.powerset().oneOf()
@@ -166,8 +174,8 @@ module bisim {
     nondet b = BROKEN.powerset().oneOf()
     nondet sn = TAGS.powerset().oneOf()
     all {
-      structOf(t, ss, cu, se, ib, pp, co, b, sn),
-      A::tid' = t, A::sessions' = ss, A::current' = cu,
+      structOf(t, ss, cu, jt, at, se, ib, pp, co, b, sn),
+      A::tid' = t, A::sessions' = ss, A::current' = cu, A::joinerTries' = jt, A::acceptorTries' = at,
       A::sent' = se, A::inbox' = ib, A::passports' = pp, A::confirmed' = co, A::broken' = b, A::seen' = sn,
     }
   }
@@ -176,6 +184,8 @@ module bisim {
     nondet t = 0.to(P_MAX_TID).oneOf()
     nondet ss = SESSIONS.powerset().oneOf()
     nondet cu = setOfMaps(P_JOINERS, 0.to(P_MAX_TID)).oneOf()
+    nondet jt = setOfMaps(P_JOINERS, TRIES).oneOf()
+    nondet at = setOfMaps(P_ACCEPTORS, setOfMaps(P_JOINERS, TRIES)).oneOf()
     nondet se = SENT.powerset().oneOf()
     nondet ib = REQUESTS.powerset().oneOf()
     nondet pp = PASSPORTS.powerset().oneOf()
@@ -183,8 +193,8 @@ module bisim {
     nondet b = BROKEN.powerset().oneOf()
     nondet sn = TAGS.powerset().oneOf()
     all {
-      structOf(t, ss, cu, se, ib, pp, co, b, sn),
-      B::tid' = t, B::sessions' = ss, B::current' = cu,
+      structOf(t, ss, cu, jt, at, se, ib, pp, co, b, sn),
+      B::tid' = t, B::sessions' = ss, B::current' = cu, B::joinerTries' = jt, B::acceptorTries' = at,
       B::sent' = se, B::inbox' = ib, B::passports' = pp, B::confirmed' = co, B::broken' = b, B::seen' = sn,
     }
   }
@@ -214,11 +224,12 @@ module bisim {
     nondet j = P_JOINERS.oneOf() nondet a = SIDES.oneOf()
     all { A::pairHonest(j, a), mv' = { ...NO_MOVE, kind: "pairHonest", j: j, a: a } } }
   action stepAdvJoiner = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet j = P_JOINERS.oneOf()
-    all { A::advPairJoiner(j), mv' = { ...NO_MOVE, kind: "advJoiner", j: j } } }
+    nondet j = P_JOINERS.oneOf() nondet success = Set(false, true).oneOf()
+    all { A::advPairJoiner(j, success), mv' = { ...NO_MOVE, kind: "advJoiner", j: j, success: success } } }
   action stepAdvAcceptor = all { pre, bStay, stage' = 1, matchOk' = true,
-    nondet a = P_ACCEPTORS.oneOf()
-    all { A::advPairAcceptor(a), mv' = { ...NO_MOVE, kind: "advAcceptor", a: a } } }
+    nondet j = P_JOINERS.oneOf() nondet a = P_ACCEPTORS.oneOf() nondet success = Set(false, true).oneOf()
+    all { A::advPairAcceptor(a, j, success),
+          mv' = { ...NO_MOVE, kind: "advAcceptor", j: j, a: a, success: success } } }
   action stepSend = all { pre, bStay, stage' = 1, matchOk' = true,
     nondet j = P_JOINERS.oneOf()
     all { A::joinerSend(j), mv' = { ...NO_MOVE, kind: "send", j: j } } }
@@ -245,16 +256,17 @@ module bisim {
   action bNone = all { bStay, matchOk' = false }
   action answer = {
     if (mv.kind == "pairHonest")
-      if (B::tid < P_MAX_TID)
+      if (B::tid < P_MAX_TID and B::joinerTries.get(mv.j) < P_LIMIT
+          and (if (P_ACCEPTORS.contains(mv.a)) B::acceptorTries.get(mv.a).get(mv.j) < P_LIMIT else true))
         all { B::pairHonest(mv.j, mv.a), matchOk' = true }
       else bNone
     else if (mv.kind == "advJoiner")
-      if (B::tid < P_MAX_TID)
-        all { B::advPairJoiner(mv.j), matchOk' = true }
+      if (B::tid < P_MAX_TID and B::joinerTries.get(mv.j) < P_LIMIT)
+        all { B::advPairJoiner(mv.j, mv.success), matchOk' = true }
       else bNone
     else if (mv.kind == "advAcceptor")
-      if (B::tid < P_MAX_TID)
-        all { B::advPairAcceptor(mv.a), matchOk' = true }
+      if (B::tid < P_MAX_TID and B::acceptorTries.get(mv.a).get(mv.j) < P_LIMIT)
+        all { B::advPairAcceptor(mv.a, mv.j, mv.success), matchOk' = true }
       else bNone
     else if (mv.kind == "send")
       // joinerSend picks the other end of the session named by the joiner's
@@ -293,5 +305,6 @@ module bisim {
 
 // The proof instance: the constants of `tiny` in instances.qnt.
 module tiny_bisim {
-  import bisim(P_JOINERS = Set("j1"), P_PRESENCE = Set("j1"), P_ACCEPTORS = Set("h"), P_MAX_TID = 4).*
+  import bisim(P_JOINERS = Set("j1"), P_PRESENCE = Set("j1"), P_ACCEPTORS = Set("h"), P_LIMIT = 2,
+               P_MAX_TID = 4).*
 }

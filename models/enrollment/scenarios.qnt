@@ -5,7 +5,7 @@
 // with safety intact (R-VER-2).
 
 module scenarios {
-  import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h"), MAX_TID = 4,
+  import enrollment(JOINERS = Set("j1"), PRESENCE = Set("j1"), ACCEPTORS = Set("h"), LIMIT = 2, MAX_TID = 4,
                     MUTANT = "none").* from "./enrollment"
 
   val p1 = { key: "j1", presence: "j1", name: "j1", tid: 1 }
@@ -34,20 +34,17 @@ module scenarios {
   // acceptor's session, so no request is made (R-JOIN-4).
   run relayTest =
     init
-      .then(advPairJoiner("j1"))
+      .then(advPairJoiner("j1", true))
       .then(joinerSend("j1"))
-      .then(advPairAcceptor("h"))
+      .then(advPairAcceptor("h", "j1", true))
       .then(acceptorRequest("h", { tid: 2, joiner: "adv", acceptor: "h" }, p1))
       .fail()
 
-  // A compromised acceptor that read the joiner's code files a request with
-  // its own key; the Root reads the fingerprint from the joiner in front of
-  // it and admits no other key (R-JOIN-5, R-JOIN-7).
-  val pAdv = { key: "adv", presence: "none", name: "adv", tid: 1 }
-  run substituteTest =
+  // The joiner stops after LIMIT attempts with its code (R-JOIN-3).
+  run limitTest =
     init
-      .then(pairHonest("j1", "c"))
-      .then(badRequest("adv", "none", "adv", 1, pAdv))
-      .then(rootAdmit({ key: "adv", presence: "none", name: "adv", tid: 1, signed: pAdv, acceptor: "c" }, "j1"))
+      .then(advPairJoiner("j1", false))
+      .then(advPairJoiner("j1", false))
+      .then(advPairJoiner("j1", false))
       .fail()
 }

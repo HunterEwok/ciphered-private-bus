@@ -5,6 +5,8 @@
     "no_fingerprint_compare",
     "sig_key_only",
     "no_transcript_binding",
+    "joiner_no_count",
+    "acceptor_no_count",
     "acceptor_issues"
   ],
   "witnesses": [

@@ -3,7 +3,7 @@
 
 //! Trace equivalence with the Quint models (verification level V3 for the simulator).
 //!
-//! Each file in `tests/traces` is a trace of the `channels`, `calls`, `streams` or `enrollment` model, converted from
+//! Each file in `tests/traces` is a trace of the `channels`, `calls`, `streams`, `enrollment` or `membership` model, converted from
 //! the Informal Trace Format by `tools/sim/itf2trace.py`. The test feeds every action to the
 //! model engine and checks, after every step, that the engine's state projected onto the
 //! model's variables equals the state the model reached. A mismatch names the file, the step
@@ -23,10 +23,11 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use cpb_api::{Action, ActionSet, DeviceId, StreamMode};
+use cpb_api::{Action, ActionSet, DeviceId, Rights, StreamMode};
 use cpb_sim::engine::calls::{CallBody, CmdRights, Commander, SigKey, Target};
 use cpb_sim::engine::channels::{Grant, Pub, Reader, Source};
 use cpb_sim::engine::enrollment::{Attempts, Buffer, Payload, Request};
+use cpb_sim::engine::membership::{Checkpoint, HaltKind, HaltProof, Passport, Root, RootChange, RootKey, View};
 use cpb_sim::engine::streams::{Chunk, Kind, Side, Table};
 
 /// Model device names become device identifiers; the order of the names is kept.
@@ -342,6 +343,7 @@ enum Engine {
     Calls(Calls),
     Streams(Streams),
     Enrollment(Enrollment),
+    Membership(Membership),
 }
 
 impl Engine {
@@ -351,6 +353,7 @@ impl Engine {
             Self::Calls(e) => e.project(),
             Self::Streams(e) => e.project(),
             Self::Enrollment(e) => e.project(),
+            Self::Membership(e) => e.project(),
         }
     }
 
@@ -360,6 +363,7 @@ impl Engine {
             Self::Calls(e) => e.step(a),
             Self::Streams(e) => e.step(a),
             Self::Enrollment(e) => e.step(a),
+            Self::Membership(e) => e.step(a),
         }
     }
 }
@@ -692,10 +696,187 @@ impl Enrollment {
                 let r = request_of(a[1]);
                 assert!(self.inbox.iter().any(|x| *x == r), "the request is in the inbox");
                 assert!(r.signature_ok());
-                assert_eq!(r.key, dev(a[2]), "the owner compared the fingerprints");
+                assert_eq!(r.key, dev(a[2]), "the root device checked the fingerprint");
                 self.passports.insert(format!("{}:{}:{}", name(r.key), pres_name(r.presence), r.name));
             }
             other => panic!("unknown enrollment action {other}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------- membership
+
+/// The nodes and the Root of the membership model. The model names a root key by the
+/// generation and the number of the root change record (0 the record the Root of the
+/// generation signs with, 1 the other one); the engine takes any distinct numbers.
+struct Membership {
+    nodes: BTreeMap<String, View>,
+    root: Root,
+    window: u32,
+}
+
+/// The first root key.
+const FIRST_KEY: RootKey = 1;
+/// The device that holds the root key; the model does not name it.
+const ROOT_DEVICE: &str = "root";
+
+/// The root key that the root change record `record` of a generation names.
+fn change_key(generation: u32, record: u32) -> RootKey {
+    RootKey::from(generation) * 4 + 1 + RootKey::from(record)
+}
+
+/// The key that signs the passports and checkpoints of a generation.
+fn signer(generation: u32) -> RootKey {
+    if generation == 1 { FIRST_KEY } else { change_key(generation, 0) }
+}
+
+fn member_rights(bits: &str) -> Rights {
+    let r: u8 = bits.parse().unwrap();
+    Rights { read: r % 2 == 1, publish: (r / 2) % 2 == 1, relay: false, accept: false }
+}
+
+fn rights_bits(r: Rights) -> u8 {
+    bit(r.read) + 2 * bit(r.publish)
+}
+
+fn numbers(text: &str) -> BTreeSet<u32> {
+    text.split('.').filter(|s| !s.is_empty() && *s != "-").map(|s| s.parse().unwrap()).collect()
+}
+
+fn numbers_text(s: &BTreeSet<u32>) -> String {
+    s.iter().map(u32::to_string).collect::<Vec<_>>().join(".")
+}
+
+/// `generation:number:start:valid:next`.
+fn checkpoint_of(text: &str) -> Checkpoint {
+    let f: Vec<&str> = text.split(':').collect();
+    let generation = f[0].parse().unwrap();
+    Checkpoint {
+        generation,
+        number: f[1].parse().unwrap(),
+        start: f[2].parse().unwrap(),
+        valid: numbers(f[3]),
+        next_free: f[4].parse().unwrap(),
+        root_device: Some(dev(ROOT_DEVICE)),
+        key: signer(generation),
+    }
+}
+
+fn checkpoint_text(c: &Checkpoint) -> String {
+    format!("{}:{}:{}:{}:{}", c.generation, c.number, c.start, numbers_text(&c.valid), c.next_free)
+}
+
+/// `generation:number:device:rights`.
+fn passport_of(text: &str) -> Passport {
+    let f: Vec<&str> = text.split(':').collect();
+    let generation = f[0].parse().unwrap();
+    Passport {
+        generation,
+        number: f[1].parse().unwrap(),
+        device: dev(f[2]),
+        rights: member_rights(f[3]),
+        presence: false,
+        permits: Vec::new(),
+        key: signer(generation),
+    }
+}
+
+fn passport_text(p: &Passport) -> String {
+    format!("{}:{}:{}:{}", p.generation, p.number, name(p.device), rights_bits(p.rights))
+}
+
+impl Membership {
+    fn new(c: &BTreeMap<String, String>) -> Self {
+        let window = c["window"].parse().unwrap();
+        Self {
+            nodes: list(&c["devices"]).into_iter().map(|d| (d, View::first(FIRST_KEY))).collect(),
+            root: Root::new(1, FIRST_KEY, dev(ROOT_DEVICE), window),
+            window,
+        }
+    }
+
+    fn project(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (d, v) in &self.nodes {
+            let record = if v.changed { i64::try_from(v.root_key - change_key(v.generation, 0)).unwrap() } else { -1 };
+            let mut pps: Vec<String> = v.passports.values().map(passport_text).collect();
+            pps.sort();
+            out.push(format!(
+                "= node {d} gen={} rc={record} halted={} forever={} cp={} pps={}",
+                v.generation,
+                bit(v.halted),
+                bit(v.forever),
+                checkpoint_text(&v.checkpoint),
+                pps.join(",")
+            ));
+        }
+        let valid: BTreeSet<u32> = self.root.valid.keys().copied().collect();
+        out.push(format!(
+            "= root gen={} cp={} next={} valid={}",
+            self.root.generation,
+            self.root.checkpoint,
+            self.root.next_passport,
+            numbers_text(&valid)
+        ));
+        out
+    }
+
+    fn step(&mut self, a: &[&str]) {
+        match a[0] {
+            "rootIssue" => {
+                self.root
+                    .issue_replacing(dev(a[1]), member_rights(a[2]), false, Vec::new(), &numbers(a[3]))
+                    .expect("the model issued within the window");
+            }
+            "rootRevoke" => {
+                self.root.revoke_number(a[1].parse().unwrap()).expect("the model revoked a valid passport");
+            }
+            "recoveryChange" => {
+                let generation = self.root.generation + 1;
+                self.root = Root::new(generation, change_key(generation, 0), dev(ROOT_DEVICE), self.window);
+            }
+            // The second records and the proofs reach the engine when a node receives them;
+            // a send changes nothing a node or the Root holds.
+            "rootEquivocateCp" | "rootEquivocatePp" | "recoveryEquivocate" | "adversaryProof" | "nodeSend" => {}
+            "nodeRecvCp" => {
+                let _refused = self.nodes.get_mut(a[1]).unwrap().on_checkpoint(&checkpoint_of(a[2]));
+            }
+            "nodeRecvPp" => {
+                let _refused = self.nodes.get_mut(a[1]).unwrap().on_passport(&passport_of(a[2]));
+            }
+            "nodeRecvRc" => {
+                let (generation, record) = a[2].split_once(':').unwrap();
+                let generation = generation.parse().unwrap();
+                let change = RootChange { generation, key: change_key(generation, record.parse().unwrap()) };
+                let _refused = self.nodes.get_mut(a[1]).unwrap().on_root_change(change);
+            }
+            "nodeRecvHp" => {
+                let f: Vec<&str> = a[2].split(':').collect();
+                let generation = f[1].parse().unwrap();
+                let kind = match f[0] {
+                    "cp" => HaltKind::Checkpoint,
+                    "pp" => HaltKind::Passport,
+                    "rc" => HaltKind::RootChange,
+                    other => panic!("unknown proof kind {other}"),
+                };
+                let key = if kind == HaltKind::RootChange { 0 } else { signer(generation) };
+                let proof = HaltProof { kind, generation, number: f[2].parse().unwrap(), key };
+                let _refused = self.nodes.get_mut(a[1]).unwrap().on_halt_proof(proof);
+            }
+            "nodeReboot" => self.nodes.get_mut(a[1]).unwrap().reboot(),
+            // The model took the step, so the engine must allow it.
+            "nodeAcceptData" => {
+                let f: Vec<&str> = a[2].split(':').collect();
+                let pair = (f[2].parse().unwrap(), f[3].parse().unwrap());
+                let taken = self.nodes[a[1]].accept_data(dev(f[0]), f[1].parse().unwrap(), pair, f[4] == "1");
+                assert!(taken.is_ok(), "{} refuses data {} that the model accepts: {taken:?}", a[1], a[2]);
+            }
+            "nodeGrant" => {
+                let p = passport_of(a[2]);
+                let reader = self.nodes[a[1]].may_grant(p.device).map(|q| q.number);
+                assert_eq!(reader, Some(p.number), "{} grants to {}", a[1], a[2]);
+            }
+            other => panic!("unknown membership action {other}"),
         }
     }
 }
@@ -721,6 +902,7 @@ fn replay(path: &Path) -> usize {
         "calls" => Engine::Calls(Calls::new(&c, &initial)),
         "streams" => Engine::Streams(Streams::new(&c)),
         "enrollment" => Engine::Enrollment(Enrollment::new(&c)),
+        "membership" => Engine::Membership(Membership::new(&c)),
         other => panic!("unknown model {other}"),
     };
     assert_eq!(engine.project(), initial, "{}: initial state", path.display());
@@ -748,6 +930,6 @@ fn engines_follow_the_model_traces() {
         total += replay(f);
         models.insert(fs::read_to_string(f).unwrap().lines().next().unwrap().to_string());
     }
-    assert!(models.len() == 4, "traces of the four models are present: {models:?}");
+    assert!(models.len() == 5, "traces of the five models are present: {models:?}");
     assert!(total > 500, "only {total} steps replayed");
 }

@@ -13,10 +13,10 @@
 )]
 
 use cpb_api::{
-    Action, ActionSet, CallKey, CallOutcome, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, Fingerprint,
-    HostAnswer, HostRequestKind, InvokeOptions, JoinRequestId, LocalApi, MAX_APP_INFO, MAX_APP_TAG, MAX_INITIAL_CREDIT,
-    MAX_MESSAGE, OwnerOperation, Paired, PairingCode, Permit, Readers, ResultCode, Rights, RuleCode, StreamEnd,
-    StreamId, StreamMode, StreamRequest,
+    Action, ActionSet, CallKey, CallOutcome, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, HostAnswer,
+    HostRequestKind, InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, MAX_APP_INFO, MAX_APP_TAG,
+    MAX_INITIAL_CREDIT, MAX_MESSAGE, OwnerOperation, Paired, PairingCode, Permit, Readers, ResultCode, Rights,
+    RuleCode, Shower, StreamEnd, StreamId, StreamMode, StreamRequest,
 };
 use cpb_sim::{Config, DEFAULT_BLOB_SEGMENT, DEFAULT_STREAM_CHUNK, Faults, Profile, Sim};
 
@@ -390,7 +390,7 @@ fn membership_changes_are_announced() {
     let mut sim = triangle(ErrorMode::Release);
     sim.drain_events(A);
     let before = sim.node(A).unwrap().state().unwrap();
-    assert_eq!(before.root_device, ROOT);
+    assert_eq!(before.root_device, Some(ROOT));
     sim.admit(RELAY, Rights::READER, false, Vec::new());
     sim.settle().unwrap();
     let after = sim.node(A).unwrap().state().unwrap();
@@ -1173,12 +1173,12 @@ fn pairing_results(events: &[Event]) -> Vec<Result<Paired, RuleCode>> {
         .collect()
 }
 
-fn join_requests(events: &[Event]) -> Vec<(JoinRequestId, DeviceId, String, DeviceId, Fingerprint, bool)> {
+fn join_requests(events: &[Event]) -> Vec<(JoinRequestId, DeviceId, String, DeviceId, bool)> {
     events
         .iter()
         .filter_map(|e| match e {
-            Event::JoinRequested { request, device, name, acceptor, fingerprint, presence } => {
-                Some((*request, *device, name.clone(), *acceptor, *fingerprint, *presence))
+            Event::JoinRequested { request, device, name, acceptor, presence } => {
+                Some((*request, *device, name.clone(), *acceptor, *presence))
             }
             _ => None,
         })
@@ -1189,9 +1189,15 @@ fn is_member(sim: &mut Sim, at: DeviceId, d: DeviceId) -> bool {
     sim.node(at).unwrap().state().is_some_and(|s| s.members.iter().any(|m| m.device == d))
 }
 
-/// The owner confirms the admission on the root device.
+/// What the camera of the root device reads from the screen of a device.
+fn scanned(sim: &mut Sim, d: DeviceId) -> KeyFingerprint {
+    sim.node(d).unwrap().device_fingerprint()
+}
+
+/// The owner scans the new device with the root device and confirms the admission there.
 fn admit(sim: &mut Sim, request: JoinRequestId, rights: Rights) {
-    let host = sim.node(ROOT).unwrap().admit(request, rights, Vec::new()).unwrap();
+    let presented = scanned(sim, NEW);
+    let host = sim.node(ROOT).unwrap().admit(request, presented, rights, Vec::new()).unwrap();
     let asked = sim.drain_events(ROOT);
     assert!(asked.iter().any(|e| matches!(
         e,
@@ -1216,23 +1222,20 @@ fn a_device_joins_through_an_acceptor() {
     sim.node(NEW).unwrap().enter_pairing_code(code).unwrap();
     sim.settle().unwrap();
 
-    let shown = sim.node(NEW).unwrap().device_fingerprint();
     let bus = sim.node(ROOT).unwrap().state().unwrap().bus;
     assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Ok(Paired::Joiner { bus })]);
     let at_acceptor = pairing_results(&sim.drain_events(A));
-    assert_eq!(at_acceptor, vec![Ok(Paired::Acceptor { name: "kitchen display".into(), fingerprint: shown })]);
+    assert_eq!(at_acceptor, vec![Ok(Paired::Acceptor { name: "kitchen display".into() })]);
     // Paired is not admitted: the device knows the bus and is not a member (R-JOIN-6).
     assert!(sim.node(NEW).unwrap().state().is_some());
     assert!(!is_member(&mut sim, NEW, NEW));
     assert!(!is_member(&mut sim, ROOT, NEW));
 
-    // The Root shows the name, the acceptor and the fingerprint the joiner shows (R-JOIN-5).
+    // The Root shows the name and the acceptor (R-JOIN-5).
     let requests = join_requests(&sim.drain_events(ROOT));
     assert_eq!(requests.len(), 1);
-    let (request, device, name, acceptor, fingerprint, presence) = requests[0].clone();
+    let (request, device, name, acceptor, presence) = requests[0].clone();
     assert_eq!((device, name.as_str(), acceptor, presence), (NEW, "kitchen display", A, true));
-    assert_eq!(fingerprint, shown);
-    assert_eq!(shown.to_string().len(), 23);
 
     admit(&mut sim, request, Rights::MEMBER);
     for at in [ROOT, A, NEW] {
@@ -1249,8 +1252,93 @@ fn a_device_joins_through_an_acceptor() {
         e, Event::NodeInfo { device, name, .. } if *device == NEW && name == "kitchen display"
     )));
     // The request is answered: it cannot be used again.
-    let again = sim.node(ROOT).unwrap().admit(request, Rights::MEMBER, Vec::new());
+    let presented = scanned(&mut sim, NEW);
+    let again = sim.node(ROOT).unwrap().admit(request, presented, Rights::MEMBER, Vec::new());
     assert_eq!(again.unwrap_err().code(), RuleCode::API_UNKNOWN_ID);
+}
+
+/// Two devices paired through the acceptor; their requests wait at the Root.
+fn two_requests() -> (Sim, JoinRequestId, JoinRequestId) {
+    let mut sim = before_pairing(A, Profile::default());
+    sim.add_device(B, false);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    for d in [NEW, B] {
+        let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Short).unwrap();
+        sim.node(d).unwrap().enter_pairing_code(code).unwrap();
+        sim.settle().unwrap();
+    }
+    let requests = join_requests(&sim.drain_events(ROOT));
+    assert_eq!(requests.iter().map(|r| r.1).collect::<Vec<_>>(), vec![NEW, B]);
+    (sim, requests[0].0, requests[1].0)
+}
+
+#[test]
+fn the_root_device_admits_only_the_device_whose_fingerprint_it_was_given() {
+    let (mut sim, of_new, of_other) = two_requests();
+    // The owner scanned the new device, and the request names another device key: this is
+    // what a request with a substituted key looks like to the Root (R-JOIN-7).
+    let presented = scanned(&mut sim, NEW);
+    let refused = sim.node(ROOT).unwrap().admit(of_other, presented, Rights::MEMBER, Vec::new());
+    assert_eq!(refused.unwrap_err().code(), RuleCode::JOIN_FINGERPRINT);
+    // Nothing was asked of the root key, and nobody was admitted.
+    assert!(!sim.drain_events(ROOT).iter().any(|e| matches!(e, Event::HostRequest { .. })));
+    sim.settle().unwrap();
+    assert!(!is_member(&mut sim, ROOT, B) && !is_member(&mut sim, ROOT, NEW));
+    // The refusal changed nothing: both requests still wait, and the right one is admitted.
+    admit(&mut sim, of_new, Rights::MEMBER);
+    assert!(is_member(&mut sim, ROOT, NEW) && !is_member(&mut sim, ROOT, B));
+    sim.node(ROOT).unwrap().decline_join(of_other).unwrap();
+}
+
+#[test]
+fn a_mistyped_fingerprint_admits_nobody() {
+    let (mut sim, of_new, _) = two_requests();
+    // Without a camera the owner types the text form; one wrong digit refuses (R-JOIN-7).
+    let mut typed = sim.node(NEW).unwrap().device_fingerprint();
+    assert_eq!(typed.to_string().len(), 79);
+    typed.0[31] ^= 1;
+    let refused = sim.node(ROOT).unwrap().admit(of_new, typed, Rights::MEMBER, Vec::new());
+    assert_eq!(refused.unwrap_err().code(), RuleCode::JOIN_FINGERPRINT);
+    assert!(!is_member(&mut sim, ROOT, NEW));
+}
+
+#[test]
+fn a_scanned_code_names_the_device_that_shows_it() {
+    let mut sim = before_pairing(A, Profile::default());
+    sim.add_device(B, false);
+    sim.link(A, B);
+    sim.settle().unwrap();
+    let bus = sim.node(ROOT).unwrap().state().unwrap().bus;
+
+    // An acceptor's code names its bus. A new device that scanned the code of another bus
+    // refuses this one, even though the secret is right (R-JOIN-7).
+    let (_, code) = sim.node(A).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    let PairingCode::Qr { secret, shown_by } = code else { panic!("a QR code") };
+    assert_eq!(shown_by, Shower::Bus(bus));
+    let elsewhere = PairingCode::Qr { secret, shown_by: Shower::Bus([7; 32]) };
+    sim.node(NEW).unwrap().enter_pairing_code(elsewhere).unwrap();
+    sim.settle().unwrap();
+    assert_eq!(pairing_results(&sim.drain_events(NEW)), vec![Err(RuleCode::JOIN_OTHER_BUS)]);
+    assert!(sim.node(NEW).unwrap().state().is_none());
+    assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
+    sim.drain_events(A);
+
+    // A joiner's code names its device key. An acceptor that scanned the code of another
+    // device refuses this one.
+    let (_, code) = sim.node(NEW).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
+    let PairingCode::Qr { secret, shown_by } = code else { panic!("a QR code") };
+    assert_eq!(shown_by, Shower::Device(sim.node(NEW).unwrap().device_fingerprint()));
+    let of_other = PairingCode::Qr { secret, shown_by: Shower::Device(sim.node(B).unwrap().device_fingerprint()) };
+    sim.node(A).unwrap().enter_pairing_code(of_other).unwrap();
+    sim.settle().unwrap();
+    assert_eq!(pairing_results(&sim.drain_events(A)), vec![Err(RuleCode::JOIN_FINGERPRINT)]);
+    assert!(join_requests(&sim.drain_events(ROOT)).is_empty());
+
+    // A code is scanned by a device of the other role.
+    assert_eq!(sim.node(B).unwrap().enter_pairing_code(code).unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
+    let of_bus = PairingCode::Qr { secret, shown_by: Shower::Bus(bus) };
+    assert_eq!(sim.node(A).unwrap().enter_pairing_code(of_bus).unwrap_err().code(), RuleCode::JOIN_BAD_CODE);
 }
 
 #[test]
@@ -1258,14 +1346,17 @@ fn the_root_pairs_a_device_itself_and_the_joiner_may_show_the_code() {
     let mut sim = before_pairing(ROOT, Profile::default());
     // Only the joiner has a screen: it shows a QR code and the Root takes it (R-JOIN-9).
     let (_, code) = sim.node(NEW).unwrap().show_pairing_code(CodeForm::Qr).unwrap();
-    assert!(matches!(code, PairingCode::Qr(_)));
+    let PairingCode::Qr { shown_by: Shower::Device(key), .. } = code else { panic!("a joiner's QR code") };
     sim.settle().unwrap();
     sim.node(ROOT).unwrap().enter_pairing_code(code).unwrap();
     sim.settle().unwrap();
     let requests = join_requests(&sim.drain_events(ROOT));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].3, ROOT);
-    admit(&mut sim, requests[0].0, Rights::READER);
+    // One scan gave the root device both the secret and the fingerprint.
+    let host = sim.node(ROOT).unwrap().admit(requests[0].0, key, Rights::READER, Vec::new()).unwrap();
+    sim.node(ROOT).unwrap().answer_host(host, HostAnswer::Approve).unwrap();
+    sim.settle().unwrap();
     assert!(is_member(&mut sim, NEW, NEW));
 }
 
@@ -1278,12 +1369,13 @@ fn a_declined_request_admits_nobody() {
     let request = join_requests(&sim.drain_events(ROOT))[0].0;
     // Only the root device answers a request.
     assert_eq!(sim.node(A).unwrap().decline_join(request).unwrap_err().code(), RuleCode::API_NOT_ROOT);
+    let presented = scanned(&mut sim, NEW);
     assert_eq!(
-        sim.node(A).unwrap().admit(request, Rights::MEMBER, Vec::new()).unwrap_err().code(),
+        sim.node(A).unwrap().admit(request, presented, Rights::MEMBER, Vec::new()).unwrap_err().code(),
         RuleCode::API_NOT_ROOT
     );
     // The owner starts to admit and declines at the root key: nothing is signed.
-    let host = sim.node(ROOT).unwrap().admit(request, Rights::MEMBER, Vec::new()).unwrap();
+    let host = sim.node(ROOT).unwrap().admit(request, presented, Rights::MEMBER, Vec::new()).unwrap();
     sim.node(ROOT).unwrap().answer_host(host, HostAnswer::Refuse).unwrap();
     sim.settle().unwrap();
     assert!(!is_member(&mut sim, ROOT, NEW));
@@ -1297,9 +1389,9 @@ fn a_declined_request_admits_nobody() {
 fn wrong(code: PairingCode, k: u8) -> PairingCode {
     match code {
         PairingCode::Short(n) => PairingCode::Short(n.wrapping_add(u32::from(k)).checked_rem(1_000_000).unwrap()),
-        PairingCode::Qr(mut b) => {
-            b[0] ^= k;
-            PairingCode::Qr(b)
+        PairingCode::Qr { mut secret, shown_by } => {
+            secret[0] ^= k;
+            PairingCode::Qr { secret, shown_by }
         }
     }
 }

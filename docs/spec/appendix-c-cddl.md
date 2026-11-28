@@ -172,7 +172,8 @@ The joiner's user-presence key is covered by `PairDevice.sig`: the signature is 
 `SHA-256(encode(map of fields 1..3))`, that is, the device key, the user-presence key, and the name.
 The Root rebuilds this map from the join request, and the strict CBOR profile makes the rebuild
 unambiguous, including when the user-presence key is absent. A compromised acceptor can only replace
-all of them with its own device key, which the fingerprint comparison detects (R-JOIN-7).
+all of them with its own device key, which the root device detects when it checks the presented
+fingerprint (R-JOIN-7).
 
 ## C.4. Negative Examples
 

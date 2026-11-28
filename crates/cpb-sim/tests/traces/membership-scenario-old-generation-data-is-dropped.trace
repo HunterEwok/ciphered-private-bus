@@ -1,0 +1,33 @@
+model membership
+const devices=a,b window=2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=0 next=1 valid=
+rootIssue b 3 -
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=1 next=2 valid=1
+nodeSend b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=1 next=2 valid=1
+recoveryChange
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+rootIssue b 3 -
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=1 next=2 valid=1
+nodeRecvRc a 2:0
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=1 next=2 valid=1
+nodeRecvCp a 2:1:1:1:2
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:1:1:1:2 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=1 next=2 valid=1
+nodeRecvPp a 2:1:b:3
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:1:1:1:2 pps=2:1:b:3
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=1 next=2 valid=1

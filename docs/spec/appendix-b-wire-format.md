@@ -531,7 +531,7 @@ labelled input.
 | `cpb chan label v1` | Channel label |
 | `cpb chan commit v1` | Channel key commitment |
 | `cpb content v1` | Content key |
-| `cpb fingerprint v1` | Key fingerprint for comparison |
+| `cpb fingerprint v1` | Device key fingerprint |
 | `cpb pair v1` | CPace channel identifier |
 | `cpb pair hash v1` | Pairing transcript hash |
 | `cpb pair device v1` | The joiner's signature in `PairDevice` |
@@ -555,8 +555,8 @@ Formulas:
   in all. Every part has a fixed length, so two different inputs never give the same bytes. The
   signature is handed to the application as `encode(sig)`; it is not an object of the bus and is
   never sent by the core
-- `KeyFingerprint`: the first 8 bytes of `SHA-256("cpb fingerprint v1" || 0x00 || encode(Key))` as a
-  big-endian integer, shown as 20 decimal digits with leading zeros
+- `KeyFingerprint = SHA-256("cpb fingerprint v1" || 0x00 || encode(Key))`, 32 bytes. Its text
+  form, for a root device with no camera and no reader, is 64 hexadecimal digits in groups of four
 
 ## B.9. Size Analysis and Decisions
 
@@ -917,7 +917,8 @@ requests, or the root device itself); the Root; and the owner.
 The acceptor generates the code and shows it on its screen. There are two forms, and both yield the
 CPace password:
 
-- QR: 16 random bytes. The code is single-use; one attempt.
+- QR: 16 random bytes, carried in a QR code with the name of the device that shows it (see "QR
+  Codes" below). The code is single-use; one attempt.
 - Short code: 6 decimal digits. Three attempts per code (a profile parameter); then the code expires
   and the acceptor shows a new one.
 
@@ -931,6 +932,26 @@ messages do not change. When the attempts are exhausted, the party that showed t
 generates a new one, and the party where the code was entered asks for it again. Counting on both sides
 is needed because an adversary can impersonate the acceptor to the joiner as well as the joiner to the
 acceptor.
+
+### QR Codes
+
+A QR code holds bytes: one byte for the kind, then the fields at fixed lengths.
+
+| Kind | Fields | Shown by | Read by |
+| --- | --- | --- | --- |
+| 1 | `secret` (16), `bus` (32) | An acceptor, with the code | The joiner |
+| 2 | `secret` (16), `key_fingerprint` (32) | A joiner, with the code | The acceptor |
+| 3 | `key_fingerprint` (32) | A joiner that waits for the owner | The root device |
+
+The `secret` is the pairing code. The other field names the device that shows the code, and the device
+that reads the code holds its peer to it. A joiner that read kind 1 aborts if `PairBus` carries another
+`bus`. An acceptor that read kind 2 aborts if the fingerprint of `device_key` in `PairDevice` differs.
+Both send `PairAbort` with code 5 and count the run. The name does not enter the exchange: it is public,
+and the check is local to the device that scanned.
+
+Kind 3, and kind 2 read by the root device, give the root device the fingerprint it needs for the
+admission (R-JOIN-7). A device with a label instead of a screen carries kind 3 on the label. A tag for
+a reader holds the same bytes. A reader ignores a code of an unknown kind.
 
 ### Messages
 
@@ -946,7 +967,7 @@ Sections 4.1 and 10.9).
 | 42 | `PairConfirm` | Joiner to acceptor | 1 `yn` bstr(32); 2 `confirm` bstr(32) |
 | 45 | `PairDone` | Acceptor to joiner | 1 `confirm` bstr(32) |
 | 43 | `PairSealed` | Both directions | 1 `ct` bstr(157..291): the encrypted body of `PairBus` (215..219 bytes) or `PairDevice` (141..275) and a 16-byte tag |
-| 44 | `PairAbort` | Both directions | 1 `code` uint: 1 wrong code, 2 attempts exhausted, 3 no common version, 4 declined by the owner on the acceptor |
+| 44 | `PairAbort` | Both directions | 1 `code` uint: 1 wrong code, 2 attempts exhausted, 3 no common version, 4 declined by the owner on the acceptor, 5 not the device the scanned code named |
 
 The `PairBus` body, from the acceptor to the joiner:
 
@@ -1008,8 +1029,8 @@ Section 10.3 recommends); and key confirmation. The draft does not require key c
 recommends it for explicit authentication: a MAC keyed from `ISK` (Section 10.4). Here it is
 HMAC-SHA256 over the hash of the whole run, so the confirmation also covers the messages that precede
 CPace, as Section 10.5 advises. Party identities are not part of the exchange: the joiner has no name
-in the bus yet; its identity is established by the signature in `PairDevice` and by the owner comparing
-the fingerprint. The draft revision is pinned together with its test vectors at gate G2.
+in the bus yet; its identity is established by the signature in `PairDevice` and by the root device
+checking the fingerprint the joiner presented. The draft revision is pinned together with its test vectors at gate G2.
 
 ### Steps and Screens
 
@@ -1020,9 +1041,10 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
 | 3 | `PairInit`, `PairReply`, `PairConfirm`; the fourth message, `PairDone`, completes the exchange | "Connecting to the new device" | "Checking the code" | |
 | 3a | Confirmation failed: `PairAbort` with code 1 or 2 | "Wrong code, attempts left: N", or a new code | "Wrong code, try again" | |
 | 4 | `PairBus` and `PairDevice` in `PairSealed`. The joiner checks the bus identifier | | | |
-| 5 | The acceptor prepares a `JoinRequest` and sends it to the Root directly or through a relay | "Request for 'name' sent to the owner" | "Waiting for the owner's approval" and the device key fingerprint, 20 digits in groups of five | |
-| 6 | The Root opens the join request | | Fingerprint | The joiner's name, who accepted the request, the key fingerprint from the request, the prompt "Compare these digits with the new device's screen", buttons "Accept" and "Decline" |
-| 7 | The owner has compared the digits and pressed "Accept". The Root issues a passport and a new checkpoint and delivers them to the relays and the acceptor | "'Name' accepted" | | "Device added" |
+| 5 | The acceptor prepares a `JoinRequest` and sends it to the Root directly or through a relay | "Request for 'name' sent to the owner" | "Waiting for the owner's approval", and the device key fingerprint as a QR code of kind 3 | |
+| 6 | The owner opens the join request on the root device | | Fingerprint | The joiner's name, who accepted the request, the prompt "Scan the code on the new device", button "Decline" |
+| 6a | The root device reads the code and compares the fingerprint with the device key in the request. They differ | | Fingerprint | "This request is not from the device you scanned". No passport is issued; the request stays until the owner declines it |
+| 7 | The fingerprint matches. The owner sets the rights and confirms with the root key. The Root issues a passport and a new checkpoint and delivers them to the relays and the acceptor | "'Name' accepted" | | The name, the rights, button "Accept"; then "Device added" |
 | 8 | The joiner receives the passport and the checkpoint, and verifies the root signature, its own key in the passport, and its own bit in the bitmap | | "Device is on the bus" and the bus fingerprint | |
 | 9 | The joiner publishes its sealing key claim and its node info | | | |
 
@@ -1035,11 +1057,14 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
 2. The owner's refusal is not an object. The Root simply does not issue a passport and deletes the join
    request. How long to wait is decided by the joiner's application: the core has no clock.
 3. If the root device itself is the acceptor (R-JOIN-9), steps 5 and 6 merge: there is no join request,
-   and the Root shows the confirmation screen at once. The fingerprint is shown and compared here too,
-   as in every pairing: one procedure, and the pairing code is never the only barrier.
-4. The bus fingerprint is 20 digits by the same rule as `KeyFingerprint`, but with its own label and the
-   raw 32 bytes of `bus` as input: the first 8 bytes of
-   `SHA-256("cpb bus fingerprint v1" || 0x00 || bus)`.
+   and the Root shows the admission screen at once. The root device checks the presented fingerprint
+   here too, as in every pairing: one procedure, and the pairing code is never the only barrier. The
+   order depends on who shows the code. If the joiner shows it (kind 2), the root device scans it in
+   step 2, has the fingerprint from that scan, and step 6 asks for nothing more. If the root device
+   shows it (kind 1) or a short code is typed, the joiner presents its fingerprint in step 5 and the
+   root device takes it in step 6, as with any acceptor.
+4. The bus fingerprint is the first 8 bytes of `SHA-256("cpb bus fingerprint v1" || 0x00 || bus)` as a
+   big-endian integer, shown as 20 decimal digits with leading zeros.
 5. The pairing keys and `ISK` are erased immediately after step 4. The code is erased after a
    successful run or when the attempts are exhausted.
 6. The joiner's rights (read, publish, permits) are set by the owner on the Root's screen. How this
@@ -1068,3 +1093,11 @@ the fingerprint. The draft revision is pinned together with its test vectors at 
 5. The joiner fetches its passport with an ordinary hello; there is no dedicated message for it.
 6. An early `PairInit` waits for the acceptor's code instead of being refused, so the order in which
    the two devices get the code does not matter.
+7. The root device compares the fingerprint, and the owner only carries it there. The fingerprint is
+   the joiner's device key fingerprint, the same one whoever accepted the joiner. A mismatch refuses
+   the admission and changes nothing else: it may be the wrong request picked, and
+   a request the owner does not want is declined as before.
+8. The fingerprint has one form, 32 bytes. A short form for typing would be the weaker of two
+   paths, and typing is the rare case of a root device with no camera and no reader.
+9. A QR code names the device that shows it, and the name is checked by the device that scanned, not
+   inside the exchange. The exchange and its proofs are those of a code without a name.

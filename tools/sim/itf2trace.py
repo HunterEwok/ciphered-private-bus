@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts Quint ITF traces of the channels, calls, streams and enrollment models into replay traces.
+"""Converts Quint ITF traces of the channels, calls, streams, enrollment and membership models into replay traces.
 
 A replay trace is plain text: a header with the instance constants, then for every step of
 the model one line with the action and its arguments, followed by lines with the projected
@@ -235,7 +235,81 @@ def en_step(st: dict, pre: str) -> str:
     raise SystemExit(f"unknown enrollment action {a}")
 
 
-STATE = {"channels": ch_state, "calls": cl_state, "streams": st_state, "enrollment": en_state}
+# ----------------------------------------------------------------------- membership
+
+def nums(xs) -> str:
+    return ".".join(str(x) for x in sorted(xs))
+
+
+def me_cp(c: dict) -> str:
+    return f"{c['gen']}:{c['no']}:{c['start']}:{nums(c['valid'])}:{c['nextNo']}"
+
+
+def me_pp(p: dict) -> str:
+    return f"{p['gen']}:{p['no']}:{p['dev']}:{p['rights']}"
+
+
+def me_hp(h: dict) -> str:
+    return f"{h['kind']}:{h['gen']}:{h['no']}"
+
+
+def me_data(m: dict) -> str:
+    return f"{m['src']}:{m['ppNo']}:{m['gen']}:{m['cpNo']}:{b(m['ch0'])}"
+
+
+def me_state(st: dict, pre: str) -> list[str]:
+    out = []
+    for d, n in sorted(val(st[pre + "nodes"]).items()):
+        out.append("= node {} gen={} rc={} halted={} forever={} cp={} pps={}".format(
+            d, n["gen"], n["rc"], b(n["halted"]), b(n["forever"]), me_cp(n["cp"]),
+            ",".join(sorted(me_pp(p) for p in n["pps"]))))
+    r = val(st[pre + "root"])
+    out.append(f"= root gen={r['gen']} cp={r['cpNo']} next={r['nextNo']} valid={nums(r['valid'])}")
+    return out
+
+
+def me_root_step(a: str, prev: dict, cur: dict, pre: str) -> str | None:
+    """The Root's and the recovery key's steps, read from what they added to the pool."""
+    if a in ("rootAdmit", "rootChangeRights", "rootIssue"):
+        before, after = val(prev[pre + "root"]), val(cur[pre + "root"])
+        new = [p for p in val(cur[pre + "pool"])["pp"] if p not in val(prev[pre + "pool"])["pp"]]
+        replaces = sorted(set(before["valid"]) - set(after["valid"]))
+        return f"rootIssue {new[0]['dev']} {new[0]['rights']} {nums(replaces) or '-'}"
+    if a == "rootRevoke":
+        before, after = val(prev[pre + "root"]), val(cur[pre + "root"])
+        return f"rootRevoke {nums(set(before['valid']) - set(after['valid']))}"
+    if a in ("adversaryProof", "setNodeless"):
+        return "adversaryProof"
+    if a in ("rootEquivocateCp", "rootEquivocatePp", "recoveryEquivocate", "recoveryChange"):
+        return a
+    return None
+
+
+def me_step(st: dict, pre: str, prev: dict) -> str:
+    a = st["mbt::actionTaken"]
+    line = me_root_step(a, prev, st, pre)
+    if line:
+        return line
+    p = {k: val(v["value"]) for k, v in st["mbt::nondetPicks"].items() if v["tag"] == "Some"}
+    if a == "nodeRecvCp":
+        return f"{a} {p['d']} {me_cp(p['c'])}"
+    if a == "nodeRecvPp":
+        return f"{a} {p['d']} {me_pp(p['p'])}"
+    if a == "nodeRecvRc":
+        return f"{a} {p['d']} {p['r']['gen']}:{p['r']['key']}"
+    if a in ("nodeRecvHp", "nodeHearsHalted"):
+        return f"nodeRecvHp {p['d']} {me_hp(p['h'])}"
+    if a == "nodeAcceptData":
+        return f"{a} {p['d']} {me_data(p['m'])}"
+    if a == "nodeGrant":
+        return f"{a} {p['d']} {me_pp(p['p'])}"
+    if a in ("nodeReboot", "nodeSend"):
+        return f"{a} {p['d']}"
+    raise SystemExit(f"unknown membership action {a}")
+
+
+STATE = {"channels": ch_state, "calls": cl_state, "streams": st_state, "enrollment": en_state,
+         "membership": me_state}
 STEP = {"channels": ch_step, "calls": cl_step, "streams": st_step, "enrollment": en_step}
 
 
@@ -243,12 +317,12 @@ def main() -> None:
     model, consts, out_file, itf_file = sys.argv[1:5]
     states = json.load(open(itf_file))["states"]
     pre = next(k for k in states[0] if not k.startswith(("#", "mbt::"))).rsplit("::", 1)[0] + "::"
-    state, step = STATE[model], STEP[model]
+    state, step = STATE[model], STEP.get(model)
     lines = [f"model {model}", f"const {consts}"]
     lines += state(states[0], pre)
     # The action that led to state i is recorded in state i.
-    for cur in states[1:]:
-        lines.append(step(cur, pre))
+    for prev, cur in zip(states, states[1:]):
+        lines.append(me_step(cur, pre, prev) if model == "membership" else step(cur, pre))
         lines += state(cur, pre)
     with open(out_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

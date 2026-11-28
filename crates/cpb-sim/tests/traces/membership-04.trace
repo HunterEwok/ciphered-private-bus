@@ -1,0 +1,506 @@
+model membership
+const devices=a,b,c window=2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=0 next=1 valid=
+rootIssue b 0 -
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=1 next=2 valid=1
+rootIssue b 0 1
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=2 next=3 valid=2
+rootRevoke 2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=3 next=3 valid=
+nodeRecvCp a 1:1:1:1:2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=3 next=3 valid=
+nodeReboot b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=3 next=3 valid=
+nodeReboot c
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=1 cp=3 next=3 valid=
+recoveryChange
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeRecvPp a 1:1:b:0
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeRecvRc b 2:1
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeReboot c
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeReboot b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeReboot b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:1:1:1:2 pps=1:1:b:0
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+nodeRecvCp a 1:3:3::3
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=0 next=1 valid=
+rootIssue a 3 -
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=1 next=2 valid=1
+rootIssue a 2 -
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=2 next=3 valid=1.2
+rootRevoke 2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=0 forever=0 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvRc b 2:0
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeReboot b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvCp b 1:2:2:2:3
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=0 forever=0 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvHp c rc:2:0
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeReboot b
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvCp a 2:1:1::2
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvHp a pp:2:1
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvHp b rc:2:0
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvCp c 1:2:2:2:3
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=1 rc=-1 halted=0 forever=0 cp=1:3:3::3 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvRc a 2:0
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvCp a 1:1:1:1:2
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+adversaryProof
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvRc c 2:0
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvCp b 2:2:1:1.2:3
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+nodeRecvPp b 1:2:b:0
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+recoveryEquivocate
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocatePp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1
+rootEquivocateCp
+= node a gen=2 rc=0 halted=0 forever=0 cp=2:0:1::1 pps=
+= node b gen=2 rc=1 halted=1 forever=1 cp=2:0:1::1 pps=
+= node c gen=1 rc=-1 halted=1 forever=1 cp=1:0:1::1 pps=
+= root gen=2 cp=3 next=3 valid=1

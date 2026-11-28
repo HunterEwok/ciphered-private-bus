@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cpb_api::{
-    Action, BlobWriteId, BusState, CallId, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, Fingerprint,
-    HostAnswer, HostRequestId, IncomingId, InvokeOptions, JoinRequestId, LocalApi, PairingCode, PairingId, Permit,
+    Action, BlobWriteId, BusState, CallId, Channel, CodeForm, DeviceId, ErrorMode, Event, FetchId, HostAnswer,
+    HostRequestId, IncomingId, InvokeOptions, JoinRequestId, KeyFingerprint, LocalApi, PairingCode, PairingId, Permit,
     Publication, Readers, Report, ResultCode, Rights, StreamId,
 };
 
@@ -98,11 +98,16 @@ impl Sim {
         for chunk in bus.chunks_mut(8) {
             chunk.copy_from_slice(&rng.next_u64().to_be_bytes());
         }
-        let (root, passport, checkpoint) = Root::create(root_device);
-        let view = View::new(checkpoint, [passport]);
+        // Bus creation (R-JOIN-10): the first root key, and the root device's own passport
+        // with every right in the first checkpoint.
+        let key = rng.nonzero();
         let seed = rng.next_u64();
-        let mut node = Node::new(root_device, bus, view, config.profile, mode, seed);
-        node.root = Some(root);
+        let mut node = Node::new(root_device, bus, View::first(key), config.profile, mode, seed);
+        node.root = Some(Root::new(1, key, root_device, config.profile.window));
+        let rights = Rights { read: true, publish: true, relay: false, accept: true };
+        node.root_issue(root_device, rights, true, Vec::new());
+        let _first = node.poll_event();
+        node.outbox.clear();
         let mut nodes = BTreeMap::new();
         nodes.insert(root_device, node);
         Self {
@@ -146,15 +151,6 @@ impl Sim {
 
     // ---------------------------------------------------------------- owner
 
-    fn owner_records(&mut self, f: impl FnOnce(&mut Root) -> Option<RootOut>) -> bool {
-        let Some(node) = self.nodes.get_mut(&self.root_device) else { return false };
-        let Some(root) = node.root.as_mut() else { return false };
-        let Some(out) = f(root) else { return false };
-        node.root_records(out.0, out.1);
-        self.flush();
-        true
-    }
-
     /// A device that is not on the bus: it has its keys, with a user-presence key if
     /// `presence`, and joins by pairing (Section 7). Returns false if the device exists.
     pub fn add_device(&mut self, device: DeviceId, presence: bool) -> bool {
@@ -170,13 +166,13 @@ impl Sim {
     /// checkpoint. A device not yet simulated gets a node that starts with the records it
     /// would receive at the end of enrollment.
     pub fn admit(&mut self, device: DeviceId, rights: Rights, presence: bool, permits: Vec<Permit>) {
-        self.owner_records(|r| {
-            let (p, c) = r.issue(device, rights, presence, permits);
-            Some((c, Some(p)))
-        });
+        if let Some(node) = self.nodes.get_mut(&self.root_device) {
+            node.root_issue(device, rights, presence, permits);
+        }
+        self.flush();
         if !self.nodes.contains_key(&device) {
             let Some(root) = self.nodes.get(&self.root_device) else { return };
-            let view = View::new(root.view.checkpoint.clone(), root.view.members().cloned());
+            let view = root.view.clone();
             let seed = self.rng.next_u64();
             let node = Node::new(device, self.bus, view, self.config.profile, self.mode, seed);
             self.nodes.insert(device, node);
@@ -420,8 +416,6 @@ impl Sim {
     }
 }
 
-type RootOut = (crate::engine::membership::Checkpoint, Option<crate::engine::membership::Passport>);
-
 /// The local interface of one simulated node.
 #[derive(Debug)]
 pub struct NodeApi<'a> {
@@ -558,8 +552,8 @@ impl LocalApi for NodeApi<'_> {
         self.id
     }
 
-    fn device_fingerprint(&self) -> Fingerprint {
-        self.sim.nodes.get(&self.id).map_or(Fingerprint(0), Node::fingerprint)
+    fn device_fingerprint(&self) -> KeyFingerprint {
+        crate::node::key_fingerprint(self.id)
     }
 
     fn show_pairing_code(&mut self, form: CodeForm) -> Result<(PairingId, PairingCode), Report> {
@@ -577,8 +571,14 @@ impl LocalApi for NodeApi<'_> {
         self.with(|n| n.cancel_pairing(pairing)).unwrap_or(Err(e))
     }
 
-    fn admit(&mut self, request: JoinRequestId, rights: Rights, permits: Vec<Permit>) -> Result<HostRequestId, Report> {
-        self.on_bus(|n| n.admit(request, rights, permits))
+    fn admit(
+        &mut self,
+        request: JoinRequestId,
+        presented: KeyFingerprint,
+        rights: Rights,
+        permits: Vec<Permit>,
+    ) -> Result<HostRequestId, Report> {
+        self.on_bus(|n| n.admit(request, presented, rights, permits))
     }
 
     fn decline_join(&mut self, request: JoinRequestId) -> Result<(), Report> {

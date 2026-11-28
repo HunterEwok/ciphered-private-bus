@@ -210,6 +210,19 @@ impl RuleCode {
     /// A checkpoint whose number is not greater than the current one.
     pub const MEM_STALE_CHECKPOINT: Self =
         Self::new("mem", "stale-checkpoint", ErrorKind::Refused, "R-MEM-5", "An old membership record was ignored.");
+    /// A passport, a checkpoint or a halt proof that the root key of the node's generation
+    /// did not sign.
+    pub const MEM_NOT_ROOT: Self = Self::new(
+        "mem",
+        "not-root",
+        ErrorKind::Refused,
+        "R-MEM-2",
+        "A membership record was not signed by the owner of this bus.",
+    );
+    /// The Root cannot issue a passport: as many devices are valid as the checkpoint window
+    /// has bits.
+    pub const MEM_WINDOW_FULL: Self =
+        Self::new("mem", "window-full", ErrorKind::Refused, "R-MEM-14", "The bus has no room for another device.");
     /// A passport beyond the next free number of the checkpoint.
     pub const MEM_EARLY_PASSPORT: Self =
         Self::new("mem", "early-passport", ErrorKind::Refused, "R-MEM-3", "A passport arrived before its checkpoint.");
@@ -276,6 +289,23 @@ impl RuleCode {
         ErrorKind::Refused,
         "R-JOIN-4",
         "A join request came from a device that may not add new devices.",
+    );
+    /// The fingerprint presented from the joiner is not that of the device key in the
+    /// exchange or in the join request.
+    pub const JOIN_FINGERPRINT: Self = Self::new(
+        "join",
+        "fingerprint",
+        ErrorKind::Refused,
+        "R-JOIN-7",
+        "This is not the device whose code was scanned or typed.",
+    );
+    /// The acceptor is on another bus than the one its QR code named.
+    pub const JOIN_OTHER_BUS: Self = Self::new(
+        "join",
+        "other-bus",
+        ErrorKind::Refused,
+        "R-JOIN-7",
+        "The other device is not on the bus whose code was scanned.",
     );
 
     // ------------------------------------------------------------------- channels
@@ -374,6 +404,8 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::MEM_NOT_MEMBER,
     RuleCode::MEM_BEHIND,
     RuleCode::MEM_STALE_CHECKPOINT,
+    RuleCode::MEM_NOT_ROOT,
+    RuleCode::MEM_WINDOW_FULL,
     RuleCode::MEM_EARLY_PASSPORT,
     RuleCode::MEM_FORK,
     RuleCode::MEM_ROOT_KEY_REUSED,
@@ -388,6 +420,8 @@ pub const ALL: &[RuleCode] = &[
     RuleCode::JOIN_TRANSCRIPT,
     RuleCode::JOIN_SIGNATURE,
     RuleCode::JOIN_NOT_ACCEPTOR,
+    RuleCode::JOIN_FINGERPRINT,
+    RuleCode::JOIN_OTHER_BUS,
     RuleCode::PUB_NO_RIGHT,
     RuleCode::PUB_NO_KEY,
     RuleCode::PUB_OUTSIDE_WINDOW,

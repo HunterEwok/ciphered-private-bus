@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (C) 2026 HunterEwok
 
-"""Converts the scenario runs of the channels, calls, streams and enrollment models into replay traces.
+"""Converts the scenario runs of the channels, calls, streams, enrollment and membership models into replay traces.
 
 `quint test --out-itf` writes the states of a run but not the actions that led to them, so
 the actions are read from the run's `.then(...)` steps in scenarios.qnt. The module named by
@@ -181,6 +181,30 @@ def line(model: str, text: str, vals: dict, prev: dict, cur: dict, pre: str) -> 
         return stream_line(text, vals, cur, pre)
     n, a = Parser(text, vals).call()
     v = itf2trace.val
+    if model == "membership":
+        root = itf2trace.me_root_step(n, prev, cur, pre)
+        if root:
+            return root
+        if n == "nodeRecvCp":
+            return f"{n} {a[0]} {itf2trace.me_cp(a[1])}"
+        if n == "nodeRecvPp":
+            return f"{n} {a[0]} {itf2trace.me_pp(a[1])}"
+        if n == "nodeRecvRc":
+            return f"{n} {a[0]} {a[1]['gen']}:{a[1]['key']}"
+        if n == "nodeRecvHp":
+            return f"{n} {a[0]} {itf2trace.me_hp(a[1])}"
+        if n == "nodeHearsHalted":
+            # The halted peer answers with a proof of the kind of its halt: of two root
+            # change records if the node ends halted for good, else of its own generation.
+            before, after = v(prev[pre + "nodes"])[a[0]], v(cur[pre + "nodes"])[a[0]]
+            if after["forever"] and not before["forever"]:
+                return f"nodeRecvHp {a[0]} rc:{after['gen']}:0"
+            return f"nodeRecvHp {a[0]} pp:{after['gen']}:0"
+        if n == "nodeAcceptData":
+            return f"{n} {a[0]} {itf2trace.me_data(a[1])}"
+        if n in ("nodeReboot", "nodeSend"):
+            return f"{n} {a[0]}"
+        raise SystemExit(f"unsupported step {n}{a}")
     if model == "enrollment":
         if n == "pairHonest":
             return f"{n} {a[0]} {a[1]}"

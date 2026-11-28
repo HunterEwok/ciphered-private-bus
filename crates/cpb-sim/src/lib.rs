@@ -52,6 +52,6 @@ mod sim;
 
 pub use node::{
     DEFAULT_BLOB_SEGMENT, DEFAULT_JOIN_BUFFER, DEFAULT_MAX_STREAMS, DEFAULT_PAIRING_ATTEMPTS, DEFAULT_STREAM_CHUNK,
-    Profile,
+    DEFAULT_WINDOW, Profile,
 };
 pub use sim::{Config, ERROR_MODE_VAR, Faults, NodeApi, Sim, StepLimit};

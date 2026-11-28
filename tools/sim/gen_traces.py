@@ -15,7 +15,9 @@ For each model it takes two kinds of traces and writes them to crates/cpb-sim/te
 Run it from the repository root after `npm ci` in models/; the TypeScript backend of the
 pinned Quint needs no other download.
 
-Usage: tools/sim/gen_traces.py
+Usage: tools/sim/gen_traces.py [MODEL...]
+
+Without arguments every model is regenerated; with model names, only those.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import itf2trace  # noqa: E402
+
 OUT = ROOT / "crates/cpb-sim/tests/traces"
 SEED = 11
 SAMPLES = 300
@@ -52,6 +57,18 @@ MODELS = {
         "scenario_modules": ["scenarios", "scenarios_reset"],
         "rare": {"commanderReply": 4, "sendChunk": 3, "overrun": 2, "resetNonces": 2},
     },
+    "membership": {
+        "consts": "devices=a,b,c window=2",
+        "scenario_consts": "devices=a,b window=2",
+        "scenario_modules": ["scenarios", "scenarios_convergence", "scenarios_window"],
+        "rare": {"nodeRecvRc": 4, "nodeRecvHp": 4, "nodeHearsHalted": 4, "nodeAcceptData": 3, "nodeGrant": 2,
+                 "rootRevoke": 2, "recoveryChange": 2},
+        # Uniform choice among the model's actions rarely delivers the records a node needs
+        # in order, so more and longer runs are sampled.
+        "samples": 1000,
+        "steps": 100,
+        "transitions": "membership",
+    },
     "enrollment": {
         "consts": "joiners=j1,j2 presence=j1 acceptors=h,root limit=2 max_tid=6",
         "scenario_consts": "joiners=j1 presence=j1 acceptors=h limit=2 max_tid=4",
@@ -60,11 +77,41 @@ MODELS = {
 }
 
 
-def sample(model: str, tmp: Path) -> list[Path]:
+def membership_transitions(prev: dict, cur: dict) -> set[str]:
+    """What happened to a node in one step, as behaviours the replay should reach."""
+    out = set()
+    for d, a in prev.items():
+        b = cur[d]
+        if b["halted"] and not a["halted"]:
+            out.add("halt at generation 1" if b["gen"] == 1 else "halt at a later generation")
+        if a["halted"] and not b["halted"]:
+            out.add("root change ends a halt")
+        if b["forever"] and not a["forever"]:
+            out.add("permanent halt")
+        if b["gen"] > a["gen"]:
+            out.add("root change accepted" if b["rc"] == 0 else "second root change record accepted")
+        if b["gen"] == a["gen"] and b["cp"]["no"] > a["cp"]["no"]:
+            out.add("checkpoint accepted")
+            if len(b["pps"]) < len(a["pps"]):
+                out.add("checkpoint prunes the cache")
+            if b["cp"]["start"] > a["cp"]["start"]:
+                out.add("window moves")
+        if len(b["pps"]) > len(a["pps"]):
+            out.add("passport accepted")
+        if a["pps"] and not b["pps"] and b["gen"] == a["gen"] and b["cp"] == a["cp"]:
+            out.add("reboot clears the cache")
+    return out
+
+
+TRANSITIONS = {"membership": membership_transitions}
+
+
+def sample(model: str, spec: dict, tmp: Path) -> list[Path]:
+    samples, steps = spec.get("samples", SAMPLES), spec.get("steps", STEPS)
     pattern = tmp / f"{model}_{{seq}}.itf.json"
     subprocess.run(
         ["npx", "quint", "run", f"{model}/instances.qnt", "--main=small", "--backend=typescript",
-         "--mbt", f"--max-samples={SAMPLES}", f"--n-traces={SAMPLES}", f"--max-steps={STEPS}",
+         "--mbt", f"--max-samples={samples}", f"--n-traces={samples}", f"--max-steps={steps}",
          f"--seed={SEED}", "--invariant=safety", f"--out-itf={pattern}"],
         cwd=ROOT / "models", check=True, stdout=subprocess.DEVNULL,
     )
@@ -91,7 +138,8 @@ def scenarios(model: str, consts: str, modules: list[str], tmp: Path) -> None:
     print(f"{model}: {count} scenario runs")
 
 
-def profile(path: Path, rare: dict[str, int]) -> tuple[set[str], int]:
+def profile(path: Path, spec: dict) -> tuple[set[str], int]:
+    rare = spec["rare"]
     states = json.loads(path.read_text())["states"]
     last = states[-1]
     seen_key = next(k for k in last if k.endswith("::seen"))
@@ -99,11 +147,15 @@ def profile(path: Path, rare: dict[str, int]) -> tuple[set[str], int]:
     counts = Counter(s["mbt::actionTaken"] for s in states)
     # The actions taken count as behaviours too, so every action of the model is replayed.
     seen |= {f"action {a}" for a in counts}
+    if "transitions" in spec:
+        nodes_key = next(k for k in last if k.endswith("::nodes"))
+        for prev, cur in zip(states, states[1:]):
+            seen |= TRANSITIONS[spec["transitions"]](itf2trace.val(prev[nodes_key]), itf2trace.val(cur[nodes_key]))
     return seen, sum(w * counts[a] for a, w in rare.items())
 
 
-def select(paths: list[Path], rare: dict[str, int]) -> list[Path]:
-    info = {p: profile(p, rare) for p in paths}
+def select(paths: list[Path], spec: dict) -> list[Path]:
+    info = {p: profile(p, spec) for p in paths}
     chosen: list[Path] = []
     covered: set[str] = set()
     while len(chosen) < KEEP:
@@ -117,15 +169,18 @@ def select(paths: list[Path], rare: dict[str, int]) -> list[Path]:
 
 
 def main() -> None:
-    for old in OUT.glob("*.trace"):
-        old.unlink()
+    chosen = sys.argv[1:] or list(MODELS)
     OUT.mkdir(parents=True, exist_ok=True)
+    for model in chosen:
+        for old in OUT.glob(f"{model}-*.trace"):
+            old.unlink()
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
-        for model, spec in MODELS.items():
+        for model in chosen:
+            spec = MODELS[model]
             scenarios(model, spec["scenario_consts"], spec.get("scenario_modules", ["scenarios"]), tmp)
-            paths = sample(model, tmp)
-            for i, p in enumerate(select(paths, spec["rare"])):
+            paths = sample(model, spec, tmp)
+            for i, p in enumerate(select(paths, spec)):
                 subprocess.run(
                     [sys.executable, str(ROOT / "tools/sim/itf2trace.py"), model, spec["consts"],
                      str(OUT / f"{model}-{i:02d}.trace"), str(p)],

@@ -13,8 +13,8 @@
 use std::collections::BTreeSet;
 
 use cpb_api::{
-    CodeForm, DeviceId, Event, Fingerprint, HostRequestId, HostRequestKind, JoinRequestId, MAX_SHORT_CODE,
-    OwnerOperation, Paired, PairingCode, PairingId, Permit, Report, Rights, RuleCode,
+    CodeForm, DeviceId, Event, Fingerprint, HostRequestId, HostRequestKind, JoinRequestId, KeyFingerprint,
+    MAX_SHORT_CODE, OwnerOperation, Paired, PairingCode, PairingId, Permit, Report, Rights, RuleCode, Shower,
 };
 
 use super::{Body, HostWait, Node, digest};
@@ -25,6 +25,7 @@ use crate::engine::membership::{Checkpoint, View};
 const ABORT_WRONG_CODE: u8 = 1;
 const ABORT_ATTEMPTS: u8 = 2;
 const ABORT_DECLINED: u8 = 4;
+const ABORT_OTHER_PEER: u8 = 5;
 
 /// A pairing run on the acceptor: one joiner on one link.
 #[derive(Clone, Copy, Debug)]
@@ -64,8 +65,18 @@ pub(super) struct Bootstrap {
 
 /// The stand-in for `KeyFingerprint` (Appendix B, Section B.8): a device key is named by its
 /// device.
-pub(super) fn key_fingerprint(d: DeviceId) -> Fingerprint {
-    fingerprint(u64::from_be_bytes(*b"cpb fpr\0"), &d.0)
+pub(crate) fn key_fingerprint(d: DeviceId) -> KeyFingerprint {
+    KeyFingerprint(digest(u64::from_be_bytes(*b"cpb fpr\0"), &d.0))
+}
+
+/// The stand-in for the exchange: two sides finish a run if they hold one password. A QR
+/// code's password is its secret; what the code says about its shower is checked apart.
+fn same_password(a: PairingCode, b: PairingCode) -> bool {
+    match (a, b) {
+        (PairingCode::Qr { secret: x, .. }, PairingCode::Qr { secret: y, .. }) => x == y,
+        (PairingCode::Short(x), PairingCode::Short(y)) => x == y,
+        _ => false,
+    }
 }
 
 /// The stand-in for the bus fingerprint (Appendix B, Section B.11).
@@ -94,7 +105,7 @@ impl Node {
     fn limit_of(&self, code: PairingCode) -> u8 {
         match code {
             // A QR code is single-use (Appendix B, Section B.11).
-            PairingCode::Qr(_) => 1,
+            PairingCode::Qr { .. } => 1,
             PairingCode::Short(_) => self.profile.pairing_attempts,
         }
     }
@@ -147,7 +158,10 @@ impl Node {
                 for chunk in bytes.chunks_mut(8) {
                     chunk.copy_from_slice(&self.rng.next_u64().to_be_bytes());
                 }
-                PairingCode::Qr(bytes)
+                // The code names its shower: a member its bus, a joiner its device key.
+                let shown_by =
+                    if self.on_bus { Shower::Bus(self.bus) } else { Shower::Device(key_fingerprint(self.id)) };
+                PairingCode::Qr { secret: bytes, shown_by }
             }
             CodeForm::Short => {
                 let span = u64::from(MAX_SHORT_CODE).saturating_add(1);
@@ -164,6 +178,16 @@ impl Node {
             return Err(Report::new(RuleCode::JOIN_BAD_CODE, "a short code is 0..999999".to_owned()));
         }
         self.may_pair()?;
+        // A joiner scans an acceptor's code and an acceptor a joiner's.
+        let other_role = match code {
+            PairingCode::Qr { shown_by: Shower::Bus(_), .. } => !self.on_bus,
+            PairingCode::Qr { shown_by: Shower::Device(_), .. } => self.on_bus,
+            PairingCode::Short(_) => true,
+        };
+        if !other_role {
+            let who = if self.on_bus { "a member" } else { "a device without a bus" };
+            return Err(Report::new(RuleCode::JOIN_BAD_CODE, format!("the code is shown by {who}, as this device is")));
+        }
         // The runs with one entered code are counted across entries of the same code.
         let attempts = match self.enroll.entered {
             Some((c, a)) if c == code => a,
@@ -290,7 +314,7 @@ impl Node {
     pub(super) fn on_pair_confirm(&mut self, from: DeviceId, code: PairingCode) {
         let Some(p) = self.enroll.pairing.as_mut() else { return };
         let Some(run) = p.acceptor.get_mut(&from) else { return };
-        if p.code == code {
+        if same_password(p.code, code) {
             run.confirmed = true;
             let bus = self.bus;
             self.send(from, Body::PairDone { code, bus });
@@ -304,10 +328,19 @@ impl Node {
     pub(super) fn on_pair_done(&mut self, from: DeviceId, code: PairingCode, bus: [u8; 32]) {
         let Some(p) = self.enroll.pairing.as_ref() else { return };
         let Some(run) = p.joiner.filter(|r| r.peer == from) else { return };
-        if p.code != code {
+        if !same_password(p.code, code) {
             // The other side did not know the code: its confirmation fails.
             self.run_failed(RuleCode::JOIN_WRONG_CODE);
             return;
+        }
+        // A scanned code names the acceptor's bus: whoever else learned the secret cannot
+        // take this device into another bus (R-JOIN-7).
+        if let (false, PairingCode::Qr { shown_by: Shower::Bus(named), .. }) = (p.shown, p.code) {
+            if named != bus {
+                self.send(from, Body::PairAbort { code: ABORT_OTHER_PEER });
+                self.end_pairing(Err(Report::new(RuleCode::JOIN_OTHER_BUS, format!("the acceptor {from}"))));
+                return;
+            }
         }
         let id = p.id;
         if let Some(p) = self.enroll.pairing.take() {
@@ -330,12 +363,19 @@ impl Node {
     }
 
     pub(super) fn on_pair_device(&mut self, from: DeviceId, payload: &Payload) {
-        let Some(run) = self.enroll.pairing.as_ref().and_then(|p| p.acceptor.get(&from)).filter(|r| r.confirmed) else {
-            return;
-        };
+        let Some(p) = self.enroll.pairing.as_ref() else { return };
+        let Some(run) = p.acceptor.get(&from).filter(|r| r.confirmed) else { return };
+        // A scanned code names the joiner's device key (R-JOIN-7).
+        if let (false, PairingCode::Qr { shown_by: Shower::Device(named), .. }) = (p.shown, p.code) {
+            if named != key_fingerprint(payload.key) {
+                self.send(from, Body::PairAbort { code: ABORT_OTHER_PEER });
+                self.end_pairing(Err(Report::new(RuleCode::JOIN_FINGERPRINT, format!("the device key of {from}"))));
+                return;
+            }
+        }
         match Request::from_session(run.tid, self.id, payload) {
             Ok(r) => {
-                let paired = Paired::Acceptor { name: r.name.clone(), fingerprint: key_fingerprint(r.key) };
+                let paired = Paired::Acceptor { name: r.name.clone() };
                 self.end_pairing(Ok(paired));
                 self.submit_join(r);
             }
@@ -350,9 +390,17 @@ impl Node {
     /// member once its passport arrives.
     pub(super) fn on_first_checkpoint(&mut self, from: DeviceId, c: &Checkpoint) {
         let Some(b) = self.enroll.bootstrap.filter(|b| b.acceptor == from) else { return };
-        self.enroll.bootstrap = None;
-        self.view = View::new(c.clone(), []);
+        // The joiner takes the root key of the generation from the records the pairing gave
+        // it (R-JOIN-2); here the checkpoint names it.
+        self.view = View::first(c.key);
+        self.view.generation = c.generation;
+        self.view.changed = c.generation > 1;
+        self.view.checkpoint = Checkpoint::genesis(c.generation, c.key);
+        if self.view.on_checkpoint(c).is_err() {
+            return;
+        }
         self.on_bus = true;
+        self.enroll.bootstrap = None;
         self.enroll.announce = true;
         self.refresh_target();
         let bus = self.bus;
@@ -384,7 +432,7 @@ impl Node {
         if self.enroll.own_joins.is_empty() && self.enroll.relay_joins.is_empty() {
             return;
         }
-        let root = self.view.checkpoint.root_device;
+        let Some(root) = self.view.checkpoint.root_device else { return };
         if self.links.contains(&root) {
             let all: Vec<Request> =
                 self.enroll.relay_joins.drain().into_iter().chain(self.enroll.own_joins.drain()).collect();
@@ -433,7 +481,6 @@ impl Node {
                     device: r.key,
                     name: r.name.clone(),
                     acceptor: r.acceptor,
-                    fingerprint: key_fingerprint(r.key),
                     presence: r.presence.is_some(),
                 });
                 self.enroll.join_ids.insert(request, r);
@@ -462,12 +509,21 @@ impl Node {
     pub(crate) fn admit(
         &mut self,
         id: JoinRequestId,
+        presented: KeyFingerprint,
         rights: Rights,
         permits: Vec<Permit>,
     ) -> Result<HostRequestId, Report> {
         self.halted_err()?;
         self.not_root()?;
         let r = self.join_request(id)?;
+        // R-JOIN-7: the root device compares the key in the request with the fingerprint it
+        // got from the joiner; the owner compares nothing.
+        if presented != key_fingerprint(r.key) {
+            return Err(Report::new(
+                RuleCode::JOIN_FINGERPRINT,
+                format!("join request {} names another device key than the presented fingerprint", id.0),
+            ));
+        }
         let host = HostRequestId(self.fresh_id());
         let device = r.key;
         self.host.insert(host, HostWait::Admit { join: id, rights, permits });
@@ -493,10 +549,7 @@ impl Node {
             return;
         };
         self.enroll.inbox.remove(&r);
-        let records = self.root.as_mut().map(|root| root.issue(r.key, rights, r.presence.is_some(), permits));
-        if let Some((p, c)) = records {
-            self.root_records(c, Some(p));
-        }
+        self.root_issue(r.key, rights, r.presence.is_some(), permits);
     }
 
     /// Pairing state is in RAM (R-CORE-5 does not list it).

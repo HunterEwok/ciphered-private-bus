@@ -63,15 +63,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   streams opened by a call and its reply with data, credit, "end" and the reason a stream closed,
   the message of a reply, the key that signed an incoming call, root-signed application data,
   the application part of the node info, membership change events and the root device in the bus
-  state, pairing by a shown or entered code, the device and bus fingerprints, and the owner's
-  answer to a join request; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
+  state, pairing by a shown or entered code, where a scanned code names the device that shows it,
+  the device key and bus fingerprints, and the owner's answer to a join request with the fingerprint
+  the root device got from the joiner; the single list of rule codes `area/rule` (R-ERR-1); error reports with the debug and
   release modes (R-ERR-2, R-ERR-3).
 - In-memory bus simulator `cpb-sim` for application authors: several nodes in one process behind
-  `LocalApi`, an engine written from the enrollment, channels, calls and streams models and Section 6, a
+  `LocalApi`, an engine written from the enrollment, membership, channels, calls and streams models, a
   deterministic harness with loss, duplication, reordering, sleeping and rebooting nodes and a member
   relay that may refuse streams and holds join requests for the Root, owner operations, host requests for user confirmation, and the
-  `CPB_ERRORS` override. Interface tests and a replay of 61 model traces (every scenario run of the
-  four models and 40 random traces) with equal state after every step; `tools/sim/gen_traces.py` regenerates the traces, and a CI job checks that
+  `CPB_ERRORS` override. Interface tests and a replay of 77 model traces (every scenario run of the
+  five models and 50 random traces) with equal state after every step; `tools/sim/gen_traces.py` regenerates the traces, and a CI job checks that
   they match the current models.
 
 ### Changed
@@ -95,6 +96,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions f
   it gets a code, how an entered code's runs are counted, and where join requests wait and within
   which bound. Reason: the rules of Section 7 had no operations at the interface, and the order in
   which the two devices get the code was left open.
+- Specification: the root device, not the owner, compares the joiner's device key fingerprint. The
+  joiner presents the 32-byte fingerprint as a QR code or a tag, the root device takes it through its
+  own camera or reader in an admission the owner started there, and its core refuses a key that does
+  not match; the 20-digit form of the key fingerprint is removed. A QR code with a pairing secret
+  names the device that shows it, the bus of an acceptor or the device key of a joiner, and the
+  device that scans it refuses another peer with the new `PairAbort` code 5 (R-JOIN-5, R-JOIN-7,
+  R-JOIN-9, R-API-2, Section 15.7; Appendix B, Sections B.8 and B.11). Reason: people confirm
+  mismatching strings, and a code shown on a screen is known to everyone who sees the screen.
 - Specification: a root change names a root key never used on the bus before, and a node rejects a
   record that names the root key it holds now (R-MEM-11, Appendix B, Section B.3). Reason: the proofs
   assume a fresh root key per generation, and the text did not require it.

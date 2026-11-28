@@ -264,8 +264,8 @@ pub struct PairingId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct JoinRequestId(pub u64);
 
-/// A fingerprint a person compares on two screens: 64 bits of a hash, shown as 20 decimal
-/// digits in groups of five (R-JOIN-5, Appendix B, Sections B.8 and B.11).
+/// The fingerprint of a bus: 64 bits of a hash, shown as 20 decimal digits in groups of five
+/// (Appendix B, Section B.11). A joiner shows it after admission (R-JOIN-7).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Fingerprint(pub u64);
 
@@ -277,6 +277,38 @@ impl fmt::Display for Fingerprint {
         let groups = [n / (GROUP * GROUP * GROUP), n / (GROUP * GROUP) % GROUP, n / GROUP % GROUP, n % GROUP];
         write!(f, "{:05} {:05} {:05} {:05}", groups[0], groups[1], groups[2], groups[3])
     }
+}
+
+/// The fingerprint of a device key: the 32 bytes the root device gets from the joiner
+/// itself, through its own camera or reader, or typed by the owner (R-JOIN-7; Appendix B,
+/// Section B.8). The application never takes it from a link, a file or a message.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct KeyFingerprint(pub [u8; 32]);
+
+/// The text form, for a root device with no camera and no reader: 64 hexadecimal digits in
+/// groups of four.
+impl fmt::Display for KeyFingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, pair) in self.0.chunks(2).enumerate() {
+            if i > 0 {
+                f.write_str(" ")?;
+            }
+            for b in pair {
+                write!(f, "{b:02x}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What the QR code of a pairing says about the device that shows it (Appendix B,
+/// Section B.11). The device that scans the code refuses any other peer.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Shower {
+    /// An acceptor shows the code: the bus it is on.
+    Bus([u8; 32]),
+    /// A joiner shows the code: its device key.
+    Device(KeyFingerprint),
 }
 
 /// The form of a pairing code (R-JOIN-1).
@@ -292,8 +324,13 @@ pub enum CodeForm {
 /// front of the device, or takes it from them, and keeps it nowhere.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PairingCode {
-    /// The 16 bytes of a QR code.
-    Qr([u8; 16]),
+    /// The contents of a QR code.
+    Qr {
+        /// The 16 secret bytes.
+        secret: [u8; 16],
+        /// Who shows the code.
+        shown_by: Shower,
+    },
     /// A short code, 0 to [`MAX_SHORT_CODE`], shown with leading zeros.
     Short(u32),
 }
@@ -313,8 +350,6 @@ pub enum Paired {
     Acceptor {
         /// The name the joiner proposed.
         name: String,
-        /// The fingerprint of the joiner's device key.
-        fingerprint: Fingerprint,
     },
 }
 
@@ -613,9 +648,10 @@ pub enum Event {
         result: Result<Paired, Report>,
     },
     /// On the root device: a join request with a valid joiner's signature waits for the
-    /// owner (R-JOIN-5). The application shows the name, the acceptor and the fingerprint,
-    /// and asks the owner to compare the fingerprint with the one on the joiner's screen
-    /// before [`LocalApi::admit`] (R-JOIN-7).
+    /// owner (R-JOIN-5). The application shows the name and the acceptor, and asks the owner
+    /// to scan the code on the joiner's screen; [`LocalApi::admit`]
+    /// takes that fingerprint and compares it with the key in the request (R-JOIN-7). The
+    /// event does not carry the fingerprint, so it can only come from the joiner.
     JoinRequested {
         /// The handle for [`LocalApi::admit`] and [`LocalApi::decline_join`].
         request: JoinRequestId,
@@ -626,8 +662,6 @@ pub enum Event {
         /// The member that accepted the request; the root device itself if it paired the
         /// joiner directly (R-JOIN-9).
         acceptor: DeviceId,
-        /// The fingerprint of the joiner's device key.
-        fingerprint: Fingerprint,
         /// Whether the joiner has a user-presence key; the passport will name it.
         presence: bool,
     },
@@ -674,9 +708,10 @@ pub struct BusState {
     pub generation: u32,
     /// The checkpoint number.
     pub checkpoint: u32,
-    /// The root device named by the checkpoint. It changes with a root change and with a
+    /// The root device named by the checkpoint, or `None` after a root change until the
+    /// first checkpoint of the new Root arrives. It changes with a root change and with a
     /// checkpoint that moves the root to another device (R-MEM-17).
-    pub root_device: DeviceId,
+    pub root_device: Option<DeviceId>,
     /// Whether the node is halted.
     pub halted: bool,
     /// Known valid members with their rights.
@@ -870,15 +905,16 @@ pub trait LocalApi {
     /// This device.
     fn device(&self) -> DeviceId;
 
-    /// The fingerprint of this device's key. A joiner shows it while it waits for the owner,
-    /// who compares it with the one on the root device (R-JOIN-7).
-    fn device_fingerprint(&self) -> Fingerprint;
+    /// The fingerprint of this device's key. A joiner shows it while it waits for the owner:
+    /// as a QR code for the camera of the root device (R-JOIN-7).
+    fn device_fingerprint(&self) -> KeyFingerprint;
 
     /// Starts a pairing with a code the core generates, for the application to show on this
     /// device's screen (R-JOIN-1). A node that is not on a bus pairs as the joiner; a member
     /// pairs as the acceptor and needs the accept right. The joiner starts the exchange on
     /// every connected link; the acceptor answers on any link. A node has one pairing at a
-    /// time. The code allows a profile number of runs (R-JOIN-3), a QR code one.
+    /// time. The code allows a profile number of runs (R-JOIN-3), a QR code one. A QR code
+    /// names the device that shows it: its bus on a member, its device key on a joiner.
     ///
     /// # Errors
     /// `join/busy`, `join/no-right`, `mem/halted`.
@@ -886,10 +922,14 @@ pub trait LocalApi {
 
     /// Starts a pairing with the code shown on the other device and entered here. The roles
     /// and the rules are those of [`LocalApi::show_pairing_code`]. The node counts the runs
-    /// with one code and refuses the code once they are spent (R-JOIN-3).
+    /// with one code and refuses the code once they are spent (R-JOIN-3). With a QR code the
+    /// node also checks who showed it: a joiner ends the pairing with `join/other-bus` if the
+    /// acceptor is on another bus, and an acceptor ends it with `join/fingerprint` if the
+    /// joiner holds another device key.
     ///
     /// # Errors
-    /// `join/busy`, `join/no-right`, `join/bad-code`, `join/attempts`, `mem/halted`.
+    /// `join/busy`, `join/no-right`, `join/bad-code` (also for a QR code shown by a device
+    /// of this node's own role), `join/attempts`, `mem/halted`.
     fn enter_pairing_code(&mut self, code: PairingCode) -> Result<PairingId, Report>;
 
     /// Cancels a pairing. A code this node showed is spent.
@@ -908,12 +948,21 @@ pub trait LocalApi {
     fn answer_host(&mut self, id: HostRequestId, answer: HostAnswer) -> Result<(), Report>;
 
     /// On the root device: admits the joiner of a join request with the given rights and
-    /// permits (R-JOIN-5). The user-presence key is the one the joiner signed. The passport
-    /// and the checkpoint are signed after the host confirms the request returned here.
+    /// permits (R-JOIN-5). `presented` is the fingerprint the root device got from the
+    /// joiner; the core compares it with the device key in the request and admits nobody
+    /// without it (R-JOIN-7). A mismatch changes nothing: the request stays. The
+    /// user-presence key is the one the joiner signed. The passport and the checkpoint are
+    /// signed after the host confirms the request returned here.
     ///
     /// # Errors
-    /// `api/not-root`, `api/unknown-id`, `mem/halted`.
-    fn admit(&mut self, request: JoinRequestId, rights: Rights, permits: Vec<Permit>) -> Result<HostRequestId, Report>;
+    /// `api/not-root`, `api/unknown-id`, `join/fingerprint`, `mem/halted`.
+    fn admit(
+        &mut self,
+        request: JoinRequestId,
+        presented: KeyFingerprint,
+        rights: Rights,
+        permits: Vec<Permit>,
+    ) -> Result<HostRequestId, Report>;
 
     /// On the root device: declines a join request. Nothing is signed.
     ///

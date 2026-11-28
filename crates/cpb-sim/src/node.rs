@@ -23,6 +23,7 @@ mod enroll;
 
 use crate::engine::enrollment::{Attempts, Buffer, Payload, Request};
 use cpb_api::{JoinRequestId, PairingCode};
+pub(crate) use enroll::key_fingerprint;
 use enroll::{Bootstrap, Pairing};
 
 /// Profile parameters the simulator uses (Section 13.2).
@@ -43,6 +44,8 @@ pub struct Profile {
     /// Lossy mode: bytes of stream data the core holds for the application; a chunk that
     /// does not fit is dropped (R-STR-3).
     pub stream_buffer: u32,
+    /// The checkpoint bitmap length, 64 to 32768 bits (R-MEM-14).
+    pub window: u32,
     /// Pairing runs one short code allows, 1 to 10 (R-JOIN-3).
     pub pairing_attempts: u8,
     /// Join requests a relay holds for the Root, and the Root for the owner, 1 to 256
@@ -61,6 +64,9 @@ pub const DEFAULT_STREAM_CHUNK: u32 = 4096 - 46 - 16;
 /// The default limit of open streams per node (Section 13.2).
 pub const DEFAULT_MAX_STREAMS: u16 = 8;
 
+/// The default checkpoint bitmap length, in bits (Section 13.2).
+pub const DEFAULT_WINDOW: u32 = 4096;
+
 /// The default number of pairing runs per short code (Section 13.2).
 pub const DEFAULT_PAIRING_ATTEMPTS: u8 = 3;
 
@@ -78,6 +84,7 @@ impl Default for Profile {
             stream_chunk: DEFAULT_STREAM_CHUNK,
             // What an ordered stream holds under the default initial credit.
             stream_buffer: DEFAULT_INITIAL_CREDIT,
+            window: DEFAULT_WINDOW,
             pairing_attempts: DEFAULT_PAIRING_ATTEMPTS,
             join_buffer: DEFAULT_JOIN_BUFFER,
         }
@@ -396,6 +403,9 @@ pub(crate) struct Node {
     enroll: Enrollment,
 }
 
+/// Stands for the root device while the checkpoint names none: no device has this identifier.
+const NO_ROOT: DeviceId = DeviceId([0xff; 16]);
+
 fn too_large(n: usize) -> Result<(), Report> {
     if n > MAX_DATA {
         Err(Report::new(RuleCode::API_DATA_TOO_LARGE, format!("{n} bytes, limit {MAX_DATA}")))
@@ -406,8 +416,7 @@ fn too_large(n: usize) -> Result<(), Report> {
 
 impl Node {
     pub(crate) fn new(id: DeviceId, bus: [u8; 32], view: View, profile: Profile, mode: ErrorMode, seed: u64) -> Self {
-        let root_device = view.checkpoint.root_device;
-        let mut target = Target::new(root_device, BTreeMap::new());
+        let mut target = Target::new(view.checkpoint.root_device.unwrap_or(NO_ROOT), BTreeMap::new());
         target.retained_epochs = profile.retained_epochs;
         let mut n = Self {
             id,
@@ -449,8 +458,7 @@ impl Node {
     /// A device that is not on a bus: it has its keys and nothing else. Its view is a
     /// placeholder until pairing gives it the checkpoint of its bus.
     pub(crate) fn unpaired(id: DeviceId, presence: bool, profile: Profile, mode: ErrorMode, seed: u64) -> Self {
-        let none = Checkpoint { generation: 0, number: 0, valid: BTreeSet::new(), next_free: 0, root_device: id };
-        let mut n = Self::new(id, [0u8; 32], View::new(none, []), profile, mode, seed);
+        let mut n = Self::new(id, [0u8; 32], View::first(0), profile, mode, seed);
         n.on_bus = false;
         n.enroll.has_presence = presence;
         n
@@ -555,7 +563,7 @@ impl Node {
                 }
             }
         }
-        let root = self.view.checkpoint.root_device;
+        let root = self.view.checkpoint.root_device.unwrap_or(NO_ROOT);
         self.target.set_commanders(named, root);
     }
 
@@ -594,7 +602,7 @@ impl Node {
     }
 
     fn membership_changed(&mut self) {
-        let (generation, checkpoint) = (self.view.checkpoint.generation, self.view.checkpoint.number);
+        let (generation, checkpoint) = self.view.pair();
         self.events.push_back(Event::MembershipChanged { generation, checkpoint });
         self.refresh_target();
         self.refresh_channels();
@@ -615,6 +623,20 @@ impl Node {
             }
         }
         self.flush_joins();
+    }
+
+    /// The Root on this node issues a passport, moving the window first if it must
+    /// (R-MEM-14), and the node applies and sends the records.
+    pub(crate) fn root_issue(&mut self, device: DeviceId, rights: Rights, presence: bool, permits: Vec<Permit>) {
+        let Some(root) = self.root.as_mut() else { return };
+        match root.issue(device, rights, presence, permits) {
+            Ok(records) => {
+                for (p, c) in records {
+                    self.root_records(c, Some(p));
+                }
+            }
+            Err(_) => self.reject(RuleCode::MEM_WINDOW_FULL, format!("no room for a passport of {device}")),
+        }
     }
 
     /// Applies a checkpoint and a passport made by this node's Root (R-MEM-3).
@@ -647,7 +669,7 @@ impl Node {
                 self.membership_changed();
             }
             Ok(Change::Known) | Err(RuleCode::MEM_STALE_CHECKPOINT) => {}
-            Ok(Change::Halted) => {
+            Ok(Change::Halted(_)) => {
                 self.reject(RuleCode::MEM_FORK, format!("two checkpoints numbered {}", c.number));
                 self.check_halt();
             }
@@ -663,7 +685,7 @@ impl Node {
                 self.after_peer_known(p.device);
             }
             Ok(Change::Known) | Err(RuleCode::MEM_STALE_CHECKPOINT) => {}
-            Ok(Change::Halted) => {
+            Ok(Change::Halted(_)) => {
                 self.reject(RuleCode::MEM_FORK, format!("two passports numbered {}", p.number));
                 self.check_halt();
             }
@@ -1545,6 +1567,12 @@ impl Node {
         for r in self.reading.values_mut() {
             r.reboot();
         }
+        // The passport cache is volatile; the node's own passport is persisted (R-CORE-5).
+        let own = self.own_passport().cloned();
+        self.view.reboot();
+        if let Some(p) = own {
+            let _known = self.view.on_passport(&p);
+        }
         for oc in self.own.values_mut() {
             oc.src.reboot(true);
         }
@@ -1709,7 +1737,7 @@ impl Node {
     ) -> Result<CallId, Report> {
         self.halted_err()?;
         too_large(args.len())?;
-        if options.as_root && self.view.checkpoint.root_device != self.id {
+        if options.as_root && self.view.checkpoint.root_device != Some(self.id) {
             return Err(Report::new(RuleCode::API_NOT_ROOT, format!("{} is not the root device", self.id)));
         }
         if let Some(req) = options.stream {
@@ -1843,10 +1871,6 @@ impl Node {
         self.publish_inner(Channel::NODE_INFO, &data, None, 1).map(|_| ())
     }
 
-    pub(crate) fn fingerprint(&self) -> cpb_api::Fingerprint {
-        enroll::key_fingerprint(self.id)
-    }
-
     pub(crate) fn state(&self) -> Option<BusState> {
         self.on_bus.then(|| self.snapshot())
     }
@@ -1868,7 +1892,7 @@ impl Node {
             bus: self.bus,
             fingerprint: enroll::bus_fingerprint(&self.bus),
             device: self.id,
-            generation: self.view.checkpoint.generation,
+            generation: self.view.generation,
             checkpoint: self.view.checkpoint.number,
             root_device: self.view.checkpoint.root_device,
             halted: self.view.halted,
@@ -1906,17 +1930,14 @@ impl Node {
                 self.finish(t, CallOutcome::NotSent(Report::new(RuleCode::CALL_NOT_CONFIRMED, format!("call to {t}"))));
             }
             (HostWait::Change { device, rights, presence, permits }, HostAnswer::Approve) => {
-                let records = self.root.as_mut().map(|r| r.issue(device, rights, presence, permits));
-                if let Some((p, c)) = records {
-                    self.root_records(c, Some(p));
-                }
+                self.root_issue(device, rights, presence, permits);
             }
             (HostWait::Admit { join, rights, permits }, HostAnswer::Approve) => {
                 self.admit_confirmed(join, rights, permits);
             }
             (HostWait::Admit { .. }, HostAnswer::Refuse) => self.note("owner declined the admission"),
             (HostWait::Revoke(device), HostAnswer::Approve) => {
-                if let Some(c) = self.root.as_mut().and_then(|r| r.revoke(device)) {
+                if let Some(c) = self.root.as_mut().and_then(|r| r.revoke(device).ok()) {
                     self.root_records(c, None);
                 }
             }
@@ -1966,7 +1987,7 @@ impl Node {
     /// simulator is not a security boundary.
     fn app_signature(&self, tag: &str, data: &[u8]) -> Vec<u8> {
         let mut input = self.bus.to_vec();
-        input.extend_from_slice(&self.view.checkpoint.generation.to_be_bytes());
+        input.extend_from_slice(&self.view.generation.to_be_bytes());
         input.extend_from_slice(&digest(0, tag.as_bytes()));
         input.extend_from_slice(&digest(0, data));
         digest(u64::from_be_bytes(*b"cpb app\0"), &input).to_vec()
@@ -2001,7 +2022,7 @@ impl Node {
         } else {
             Err(Report::new(
                 RuleCode::MEM_APP_SIGNATURE,
-                format!("tag {tag}, root generation {}", self.view.checkpoint.generation),
+                format!("tag {tag}, root generation {}", self.view.generation),
             ))
         }
     }

@@ -70,7 +70,7 @@ not know about them.
 | Stream identifier | `StreamId` | 1..2^31 - 1 | R-STR-2 |
 | Chunk number | `ChunkNo` | 1..2^31 - 1 | R-STR-2 |
 | Blob segment size | `seg` | 1024..16346 bytes | B.5 |
-| Key fingerprint | `KeyFingerprint` | 64 bits, shown as 20 digits | R-JOIN-5, R-JOIN-7, B.8 |
+| Key fingerprint | `KeyFingerprint` | 32 bytes | R-JOIN-5, R-JOIN-7, B.8 |
 | Bus fingerprint | `BusFingerprint` | 64 bits, shown as 20 digits | B.11 |
 
 ## 4. Keys and Algorithms
@@ -292,7 +292,7 @@ A halted target does not answer with a refusal or a result code; it answers with
 | System channels | `SYSTEM_CHANNELS` | 16 |
 | Short code digits | `PAIR_CODE_DIGITS` | 6 |
 | QR secret length | `PAIR_SECRET_LEN` | 16 |
-| Key fingerprint bits | `FINGERPRINT_BITS` | 64 |
+| Bus fingerprint bits | `FINGERPRINT_BITS` | 64 |
 
 ## 14. Profile Parameters
 

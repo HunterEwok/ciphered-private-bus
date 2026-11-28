@@ -33,11 +33,11 @@ network is the Dolev-Yao adversary, which is the transport assumption of R-ARC-5
 | R-JOIN-6 | pairing, root | `admission_via_request`, `admission_direct`; `old_root_powerless` |
 | R-JOIN-9 | pairing | `admission_direct` |
 | R-KEY-2 | channels, calls, quantum | `channel_key_secrecy` (with `PROBE_UNSIGNED_CLAIM`), `command_secrecy`, `harvest_now_decrypt_later` |
-| R-KEY-8 | all | every signature and derivation carries its own label; `PROBE_NO_LABEL` (root) and `PROBE_BLOB_SAME_LABEL` (channels, `key_separation`) show a defect when one is missing or shared |
+| R-KEY-8 | all | every signature and derivation carries its own label; `PROBE_NO_LABEL` (root) shows a defect when one is missing; `key_separation` (channels) proves that no content key is a blob key |
 | R-KEY-9 | channels, calls | see the note below |
 | R-CH-1 | channels | `channel_key_secrecy` |
 | R-CH-2 | channels | `channel_key_secrecy`, `grant_authenticity` |
-| R-CH-3 | channels | `content_secrecy`, `blob_secrecy`, `content_key_unique` (with `PROBE_KEY_NO_HEADER`), `key_separation` (with `PROBE_BLOB_SAME_LABEL`) |
+| R-CH-3 | channels | `content_secrecy`, `blob_secrecy` (with `PROBE_BLOB_KEY_IN_CLEAR`), `content_key_unique` (with `PROBE_KEY_NO_HEADER`), `blob_key_unique` (with `PROBE_BLOB_KEY_FROM_K`), `key_separation` |
 | R-CH-4 | channels | `grant_authenticity`, `source_authenticity` |
 | R-CH-5 | channels | `channel_key_secrecy`: a reader the source no longer names does not learn the new key; when to rotate is the state model's |
 | R-CH-18 | channels | `request_authenticity`, `answer_binding` |
@@ -65,6 +65,8 @@ models show is the first half of the requirement: every key used with nonce zero
 unique to one message. A publication key comes from the channel key and the publication header with its
 number, and `content_key_unique` proves that no two publications share it (channels; the model draws the
 number fresh, and that numbers do not repeat is the state model's; `PROBE_KEY_NO_HEADER` falsifies it).
+A blob key is 32 random bytes drawn for one blob, and `blob_key_unique` proves that no two blobs share
+it (channels; `PROBE_BLOB_KEY_FROM_K` derives the key from the channel key alone and falsifies it).
 A call's reply and stream keys are exported from the HPKE context of that call, and `reply_key_unique`
 proves that no two calls share a reply key (calls; `PROBE_SHARED_REPLY_KEY` derives the key from a secret
 shared by every call to one sealing key and falsifies it). The second half, that the nonce of a stream

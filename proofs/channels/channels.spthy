@@ -25,9 +25,11 @@
  *   over tagged tuples with the labels of B.8. ChaCha20-Poly1305 is
  *   symmetric encryption with the associated data inside the plaintext.
  *   Padding and channel numbers inside the content are not modelled. A
- *   publication carries one blob segment, under the blob key derived like
- *   the content key with its own label (R-CH-3); the segment number is in
- *   its associated data, and the reader's handling of blobs is not modelled.
+ *   publication carries one blob segment under its own blob key: 32 random
+ *   bytes the source draws for the blob and puts inside the encrypted
+ *   content (R-CH-3, B.5). The segment's nonce is its number, '0', and its
+ *   associated data is the last-segment flag; the reader's handling of blobs
+ *   is not modelled.
  * - A grant without a request carries '0' where an answer to a key request
  *   (R-CH-18) carries the request's 16 random bytes.
  * - The reader's rules match the channel key and the content untyped: the
@@ -50,7 +52,8 @@
  *   PROBE_PUB_SIG_HEADER   the publication signature omits the content hash -> source_authenticity
  *   PROBE_REQUEST_UNSIGNED the source answers a key request without its signature -> request_authenticity
  *   PROBE_KEY_NO_HEADER    the content key comes from K alone, not from the header -> content_key_unique
- *   PROBE_BLOB_SAME_LABEL  the blob key uses the content key's label -> key_separation
+ *   PROBE_BLOB_KEY_IN_CLEAR the blob key is also sent in the clear  -> blob_secrecy
+ *   PROBE_BLOB_KEY_FROM_K  the blob key comes from K alone, the same for every blob -> blob_key_unique
  */
 
 theory CpbChannels
@@ -65,18 +68,28 @@ macros: pubsigmsg(hdr, c) = <'cpb publication v1', h(hdr)>
 macros: pubsigmsg(hdr, c) = <'cpb publication v1', h(hdr), h(c)>
 #endif
 
-// The content key and the blob key of a publication (R-CH-3): from K and the
-// header hash, each with its own label. The probes drop the header from the
-// content key, or give the blob key the content key's label.
+// The content key of a publication (R-CH-3): from K and the header hash. The
+// probe drops the header.
 #ifdef PROBE_KEY_NO_HEADER
 macros: contentkey(K, hdr) = h(<'cpb content v1', K>)
 #else
 macros: contentkey(K, hdr) = h(<'cpb content v1', K, h(hdr)>)
 #endif
-#ifdef PROBE_BLOB_SAME_LABEL
-macros: blobkey(K, hdr) = h(<'cpb content v1', K, h(hdr)>)
+
+// The blob key (R-CH-3): the fresh value the source draws for the blob. The
+// probe derives it from K alone, the same for every blob under K.
+#ifdef PROBE_BLOB_KEY_FROM_K
+macros: blobkey(K, r) = h(<'cpb blob v1', K>)
 #else
-macros: blobkey(K, hdr) = h(<'cpb blob v1', K, h(hdr)>)
+macros: blobkey(K, r) = r
+#endif
+
+// What travels with a blob segment: the header and the segment. The probe
+// also sends the blob key in the clear.
+#ifdef PROBE_BLOB_KEY_IN_CLEAR
+macros: blobmsg(hdr, b, bk) = <hdr, b, bk>
+#else
+macros: blobmsg(hdr, b, bk) = <hdr, b>
 #endif
 
 // Erasure (R-KEY-4, R-CH-7): keys are persistent facts, and nothing uses a
@@ -213,22 +226,24 @@ rule GrantOnRequest:
     [ Out(<hdr, wrap, sign(<'cpb key grant v1', h(hdr), h(wrap)>, ltk)>) ]
 #endif
 
-// A publication (R-CH-3, B.5): the content key and the blob key come from K
-// and the header hash; the signature covers the header hash and the content
-// hash. The blob segment carries its number, '0', in its associated data.
+// A publication (R-CH-3, B.5): the content key comes from K and the header
+// hash; the blob key is fresh and travels inside the content; the signature
+// covers the header hash and the content hash. The blob segment is encrypted
+// under the blob key with its number, '0', as nonce and the last-segment flag
+// as associated data.
 rule Publish:
     let label  = h(<'cpb chan label v1', bus, S, ch>)
         commit = h(<'cpb chan commit v1', K>)
         hdr    = <'pub', bus, S, ~no, label, commit>
         ck     = contentkey(K, hdr)
-        bk     = blobkey(K, hdr)
-        c      = senc(<~m, h(hdr)>, ck)
-        b      = senc(<~blob, h(hdr), '0'>, bk)
+        bk     = blobkey(K, ~bk)
+        c      = senc(<~m, bk, h(hdr)>, ck)
+        b      = senc(<~blob, '0', 'last'>, bk)
     in
-    [ !SourceKey(bus, S, ch, K), !Ltk(bus, S, ltk), Fr(~no), Fr(~m), Fr(~blob) ]
+    [ !SourceKey(bus, S, ch, K), !Ltk(bus, S, ltk), Fr(~no), Fr(~m), Fr(~blob), Fr(~bk) ]
   --[ Published(bus, S, label, hdr, K, ~m), BlobPublished(bus, S, label, hdr, K, ~blob),
       ContentKey(ck, hdr), BlobKey(bk, hdr) ]->
-    [ Out(<hdr, c, sign(pubsigmsg(hdr, c), ltk)>), Out(<hdr, b>) ]
+    [ Out(<hdr, c, sign(pubsigmsg(hdr, c), ltk)>), Out(blobmsg(hdr, b, bk)) ]
 
 /* ----------------------------------------------------------------- reader */
 
@@ -263,7 +278,7 @@ rule ReaderAccept:
     let commit = h(<'cpb chan commit v1', K>)
         hdr    = <'pub', bus, S, no, label, commit>
         ck     = contentkey(K, hdr)
-        c      = senc(<m, h(hdr)>, ck)
+        c      = senc(<m, bk, h(hdr)>, ck)
     in
     [ !ReaderKey(bus, R, S, label, K), !DevKey(bus, S, pk(xs)),
       In(<hdr, c, sign(pubsigmsg(hdr, c), xs)>) ]
@@ -351,6 +366,11 @@ lemma content_key_unique:
 // R-CH-3, R-KEY-8: no content key is ever a blob key.
 lemma key_separation:
   "All k h1 h2 #i #j. ContentKey(k, h1) @ i & BlobKey(k, h2) @ j ==> F"
+
+// R-CH-3, R-KEY-9: every blob has its own key, so its segment numbers are the
+// only nonces under it.
+lemma blob_key_unique:
+  "All k h1 h2 #i #j. BlobKey(k, h1) @ i & BlobKey(k, h2) @ j ==> h1 = h2"
 
 // R-CH-2, R-CH-4: a reader takes a channel key only from a grant its source
 // made for it, on this bus, unless the source's device key is known.

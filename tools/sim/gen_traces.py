@@ -70,8 +70,8 @@ MODELS = {
         "transitions": "membership",
     },
     "enrollment": {
-        "consts": "joiners=j1,j2 presence=j1 acceptors=h,root limit=2 max_tid=6",
-        "scenario_consts": "joiners=j1 presence=j1 acceptors=h limit=2 max_tid=4",
+        "consts": "joiners=j1,j2 presence=j1 acceptors=h,root max_tid=6",
+        "scenario_consts": "joiners=j1 presence=j1 acceptors=h max_tid=4",
         "rare": {"rootAdmit": 4, "acceptorRequest": 3, "joinerSend": 2, "badRequest": 1},
     },
 }

@@ -3,8 +3,7 @@
 
 //! Device enrollment: the Quint model `models/enrollment/enrollment.qnt` in Rust.
 //!
-//! The engine holds what the model checks: the attempts each side counts per code
-//! (R-JOIN-3), the payload a joiner signs over its pairing session, the join request an
+//! The engine holds what the model checks: the payload a joiner signs over its pairing session, the join request an
 //! acceptor makes from it (R-JOIN-4), and the Root's check of the joiner's signature before
 //! a request reaches the owner (R-JOIN-5). Pairing itself is `CPace` in the core; here a
 //! session is named by its transcript, as in the model.
@@ -12,42 +11,6 @@
 use std::collections::VecDeque;
 
 use cpb_api::{DeviceId, RuleCode};
-
-/// The runs one side has made with one code (R-JOIN-3).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Attempts {
-    limit: u8,
-    used: u8,
-}
-
-impl Attempts {
-    /// A fresh code that allows `limit` runs.
-    #[must_use]
-    pub fn new(limit: u8) -> Self {
-        Self { limit, used: 0 }
-    }
-
-    /// Counts a run. False if the code is spent: the run must not happen.
-    pub fn take(&mut self) -> bool {
-        if self.used >= self.limit {
-            return false;
-        }
-        self.used = self.used.saturating_add(1);
-        true
-    }
-
-    /// Runs made.
-    #[must_use]
-    pub fn used(&self) -> u8 {
-        self.used
-    }
-
-    /// Runs the code still allows.
-    #[must_use]
-    pub fn left(&self) -> u8 {
-        self.limit.saturating_sub(self.used)
-    }
-}
 
 /// What a joiner signs: its device key, its user-presence key, its name, and the transcript
 /// of the pairing session (R-JOIN-4). A key is named by the device that holds it.
@@ -171,7 +134,7 @@ impl Buffer {
 
 #[cfg(test)]
 mod tests {
-    use super::{Attempts, Buffer, Payload, Request};
+    use super::{Buffer, Payload, Request};
     use cpb_api::{DeviceId, RuleCode};
 
     const JOINER: DeviceId = DeviceId::from_u64(1);
@@ -179,15 +142,6 @@ mod tests {
 
     fn payload(tid: u64) -> Payload {
         Payload { key: JOINER, presence: Some(JOINER), name: "j".to_owned(), tid }
-    }
-
-    /// The model's `limitTest`: a side stops after its attempts (R-JOIN-3).
-    #[test]
-    fn a_code_allows_its_attempts_and_no_more() {
-        let mut a = Attempts::new(2);
-        assert!(a.take() && a.take());
-        assert!(!a.take());
-        assert_eq!((a.used(), a.left()), (2, 0));
     }
 
     /// The model's `relayTest`: a payload signed in the joiner's session with a man in the

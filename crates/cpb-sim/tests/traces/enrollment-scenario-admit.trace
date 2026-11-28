@@ -1,36 +1,31 @@
 model enrollment
-const joiners=j1 presence=j1 acceptors=h limit=2 max_tid=4
+const joiners=j1 presence=j1 acceptors=h max_tid=4
 = tid 0
-= joiner j1 tries=0 current=0
-= acceptor h j1=0
+= joiner j1 current=0
 = sent 
 = inbox 
 = passports 
 pairHonest j1 h
 = tid 1
-= joiner j1 tries=1 current=1
-= acceptor h j1=1
+= joiner j1 current=1
 = sent 
 = inbox 
 = passports 
 joinerSend j1
 = tid 1
-= joiner j1 tries=1 current=1
-= acceptor h j1=1
+= joiner j1 current=1
 = sent j1:j1:j1:1>h
 = inbox 
 = passports 
 acceptorRequest h 1 j1:j1:j1:1
 = tid 1
-= joiner j1 tries=1 current=1
-= acceptor h j1=1
+= joiner j1 current=1
 = sent j1:j1:j1:1>h
 = inbox j1:j1:j1:1:h/j1:j1:j1:1
 = passports 
 rootAdmit j1:j1:j1:1:h/j1:j1:j1:1 j1
 = tid 1
-= joiner j1 tries=1 current=1
-= acceptor h j1=1
+= joiner j1 current=1
 = sent j1:j1:j1:1>h
 = inbox j1:j1:j1:1:h/j1:j1:j1:1
 = passports j1:j1:j1

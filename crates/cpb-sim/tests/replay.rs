@@ -26,7 +26,7 @@ use std::path::Path;
 use cpb_api::{Action, ActionSet, DeviceId, Rights, StreamMode};
 use cpb_sim::engine::calls::{CallBody, CmdRights, Commander, SigKey, Target};
 use cpb_sim::engine::channels::{Grant, Pub, Reader, Source};
-use cpb_sim::engine::enrollment::{Attempts, Buffer, Payload, Request};
+use cpb_sim::engine::enrollment::{Buffer, Payload, Request};
 use cpb_sim::engine::membership::{Checkpoint, HaltKind, HaltProof, Passport, Root, RootChange, RootKey, View};
 use cpb_sim::engine::streams::{Chunk, Kind, Side, Table};
 
@@ -544,7 +544,7 @@ impl Streams {
 
 // ---------------------------------------------------------------------- enrollment
 
-/// The enrollment model: the engine counts the attempts, makes the join requests and checks
+/// The enrollment model: the engine makes the join requests and checks
 /// the joiner's signature at the Root; the harness keeps the model's ghost state (the
 /// sessions and what was sent in them) and plays the owner, who confirms a request only if
 /// its key is the key of the device in front of them (R-JOIN-7).
@@ -554,8 +554,6 @@ struct Enrollment {
     /// Session transcript to (joiner, acceptor).
     sessions: BTreeMap<u64, (String, String)>,
     current: BTreeMap<String, u64>,
-    joiner: BTreeMap<String, Attempts>,
-    acceptor: BTreeMap<String, BTreeMap<String, Attempts>>,
     sent: BTreeSet<(Payload, String)>,
     inbox: Buffer,
     passports: BTreeSet<String>,
@@ -598,18 +596,12 @@ fn request_text(r: &Request) -> String {
 
 impl Enrollment {
     fn new(c: &BTreeMap<String, String>) -> Self {
-        let limit: u8 = c["limit"].parse().unwrap();
         let joiners = list(&c["joiners"]);
         Self {
             presence: list(&c["presence"]).into_iter().collect(),
             tid: 0,
             sessions: BTreeMap::new(),
             current: joiners.iter().map(|j| (j.clone(), 0)).collect(),
-            joiner: joiners.iter().map(|j| (j.clone(), Attempts::new(limit))).collect(),
-            acceptor: list(&c["acceptors"])
-                .into_iter()
-                .map(|a| (a, joiners.iter().map(|j| (j.clone(), Attempts::new(limit))).collect()))
-                .collect(),
             sent: BTreeSet::new(),
             inbox: Buffer::new(usize::MAX),
             passports: BTreeSet::new(),
@@ -619,11 +611,7 @@ impl Enrollment {
     fn project(&self) -> Vec<String> {
         let mut out = vec![format!("= tid {}", self.tid)];
         for (j, t) in &self.current {
-            out.push(format!("= joiner {j} tries={} current={t}", self.joiner[j].used()));
-        }
-        for (a, m) in &self.acceptor {
-            let tries: Vec<String> = m.iter().map(|(j, n)| format!("{j}={}", n.used())).collect();
-            out.push(format!("= acceptor {a} {}", tries.join(",")));
+            out.push(format!("= joiner {j} current={t}"));
         }
         let mut sent: Vec<String> = self.sent.iter().map(|(p, to)| format!("{}>{to}", payload_text(p))).collect();
         sent.sort();
@@ -643,30 +631,19 @@ impl Enrollment {
     fn step(&mut self, a: &[&str]) {
         match a[0] {
             "pairHonest" => {
-                assert!(self.joiner.get_mut(a[1]).unwrap().take(), "the joiner's code is spent");
-                // The compromised acceptor keeps no count.
-                if let Some(m) = self.acceptor.get_mut(a[2]) {
-                    assert!(m.get_mut(a[1]).unwrap().take(), "the acceptor's code is spent");
-                }
                 self.tid += 1;
                 self.session(a[1], a[2]);
                 self.current.insert(a[1].to_string(), self.tid);
             }
+            // The adversary is given every code, so its runs always complete.
             "advPairJoiner" => {
-                assert!(self.joiner.get_mut(a[1]).unwrap().take(), "the joiner's code is spent");
                 self.tid += 1;
-                if a[2] == "1" {
-                    self.session(a[1], "adv");
-                    self.current.insert(a[1].to_string(), self.tid);
-                }
+                self.session(a[1], "adv");
+                self.current.insert(a[1].to_string(), self.tid);
             }
             "advPairAcceptor" => {
-                let counted = self.acceptor.get_mut(a[1]).unwrap().get_mut(a[2]).unwrap().take();
-                assert!(counted, "the acceptor's code is spent");
                 self.tid += 1;
-                if a[3] == "1" {
-                    self.session("adv", a[1]);
-                }
+                self.session("adv", a[1]);
             }
             "joinerSend" => {
                 let tid = self.current[a[1]];

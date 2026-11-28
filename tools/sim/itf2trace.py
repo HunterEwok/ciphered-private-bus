@@ -203,11 +203,9 @@ def en_request(r: dict) -> str:
 
 def en_state(st: dict, pre: str) -> list[str]:
     out = [f"= tid {val(st[pre + 'tid'])}"]
-    current, tries = val(st[pre + "current"]), val(st[pre + "joinerTries"])
+    current = val(st[pre + "current"])
     for j in sorted(current):
-        out.append(f"= joiner {j} tries={tries[j]} current={current[j]}")
-    for a, m in sorted(val(st[pre + "acceptorTries"]).items()):
-        out.append(f"= acceptor {a} " + ",".join(f"{j}={n}" for j, n in sorted(m.items())))
+        out.append(f"= joiner {j} current={current[j]}")
     out.append("= sent " + ",".join(sorted(f"{en_payload(x['p'])}>{x['to']}" for x in val(st[pre + "sent"]))))
     out.append("= inbox " + ",".join(sorted(en_request(r) for r in val(st[pre + "inbox"]))))
     out.append("= passports " + ",".join(
@@ -221,9 +219,9 @@ def en_step(st: dict, pre: str) -> str:
     if a == "pairHonest":
         return f"{a} {p['j']} {p['a']}"
     if a == "advPairJoiner":
-        return f"{a} {p['j']} {b(p['success'])}"
+        return f"{a} {p['j']}"
     if a == "advPairAcceptor":
-        return f"{a} {p['a']} {p['j']} {b(p['success'])}"
+        return f"{a} {p['a']}"
     if a == "joinerSend":
         return f"{a} {p['j']}"
     if a == "acceptorRequest":

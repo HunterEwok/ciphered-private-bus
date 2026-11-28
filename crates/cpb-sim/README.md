@@ -21,7 +21,7 @@ same state and the same transitions:
 | `engine::channels` | [`models/channels`](../../models/channels/) | Channel keys and rotation, grants, publication numbers reserved in blocks, the reader's window and retention depth, the clearing publication, reboots |
 | `engine::calls` | [`models/calls`](../../models/calls/) | Nonce slots, calls, replies, the two open refusals and the commander's automatic retries, "reset nonces", key epochs, passport changes |
 | `engine::streams` | [`models/streams`](../../models/streams/) | A stream side in ordered and lossy mode, chunk numbers, credit in both directions, "end", "reset nonces" after a quiet period, the table of open streams |
-| `engine::enrollment` | [`models/enrollment`](../../models/enrollment/) | The attempts each side counts per pairing code, the payload a joiner signs over its pairing session, the join request an acceptor makes from it, the Root's check of the joiner's signature, the bounded buffer of join requests |
+| `engine::enrollment` | [`models/enrollment`](../../models/enrollment/) | The payload a joiner signs over its pairing session, the join request an acceptor makes from it, the Root's check of the joiner's signature, the bounded buffer of join requests |
 | `engine::membership` | [`models/membership`](../../models/membership/) | Passports and checkpoints with their window, the Root's records and the reissue that moves the window, root change records, the halt on two records with one number, halt proofs, the permanent halt, the acceptance of data and key grants against the receiver's checkpoint, reboots |
 
 **Trace equivalence.** `tests/replay.rs` replays model traces against the engines: every run of

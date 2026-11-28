@@ -208,10 +208,8 @@ def line(model: str, text: str, vals: dict, prev: dict, cur: dict, pre: str) -> 
     if model == "enrollment":
         if n == "pairHonest":
             return f"{n} {a[0]} {a[1]}"
-        if n == "advPairJoiner":
-            return f"{n} {a[0]} {b(a[1])}"
-        if n == "advPairAcceptor":
-            return f"{n} {a[0]} {a[1]} {b(a[2])}"
+        if n in ("advPairJoiner", "advPairAcceptor"):
+            return f"{n} {a[0]}"
         if n == "joinerSend":
             return f"{n} {a[0]}"
         if n == "acceptorRequest":

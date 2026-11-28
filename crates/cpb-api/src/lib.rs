@@ -356,6 +356,8 @@ pub enum StreamEnd {
     Replaced,
     /// The link went down.
     LinkDown,
+    /// The relay that carries the stream does not serve streams (R-STR-7).
+    RelayRefused,
     /// No traffic between two "reset nonces" events.
     Idle,
     /// The node halted.
@@ -576,13 +578,6 @@ pub enum Event {
         stream: StreamId,
         /// The bytes added.
         added: u32,
-    },
-    /// A relay on the stream's path reported that it does not serve streams (R-STR-7). The
-    /// report is an unsigned hint that the network can forge, so the core changes nothing:
-    /// the stream stays open, and the application decides whether to end it.
-    StreamRefused {
-        /// The stream.
-        stream: StreamId,
     },
     /// A stream closed for a reason other than this side's own "end".
     StreamClosed {

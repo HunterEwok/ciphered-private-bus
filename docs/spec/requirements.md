@@ -972,10 +972,9 @@ has not yet consumed.
 > *Serves:* S14. *Verified by:* model.
 
 > **R-STR-7.** A relay forwards stream chunks without modification and MAY refuse to serve streams at
-> all. It then answers a chunk with its refusal (Appendix B, `RelayRefusal`, code 4). Like every relay
-> refusal it is an unsigned hint that the network adversary can forge (R-CALL-12, Section 15.3), so it
-> MUST NOT close the stream or change its state: the core reports it to the application, which decides
-> whether to end the stream. Forwarding a chunk costs a relay no more than
+> all. It then answers a chunk with its refusal (Appendix B, `RelayRefusal`, code 4). The refusal
+> arrives on the link that carries the stream, so the sender closes its side as on "link down"
+> (R-STR-5) and reports the reason to the application. Forwarding a chunk costs a relay no more than
 > forwarding a call; the right to refuse exists because a stream has no size a quota could bound in
 > advance, and a relay may belong to a third party.
 > *Serves:* S15. *Verified by:* relay test.
@@ -1256,9 +1255,8 @@ Appendix B, Section B.10.
 > members with the read right. Subscribing delivers the channel's retained publications at once. With a
 > call the core delivers the key that signed it: the device key, the user-presence key, or the root key
 > (R-CALL-4). When a stream closes for any reason other than the application's own "end", the core
-> reports the reason (R-STR-2 to R-STR-6), and it passes on a relay's hint that it does not serve
-> streams (R-STR-7). On every node the interface verifies the Root's signature over application data;
-> on the root device it asks for that signature (R-KEY-12). On the
+> reports the reason (R-STR-2 to R-STR-7). On every node the interface verifies the Root's signature
+> over application data; on the root device it asks for that signature (R-KEY-12). On the
 > root device the interface also gives the owner's operations, each confirmed through the root key
 > (R-CORE-2): answer a join request (R-JOIN-5), change the rights and permits of a device (R-MEM-4), and
 > revoke a device (R-MEM-4). The core reports each join request that carries a valid joiner's signature

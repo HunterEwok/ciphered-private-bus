@@ -967,11 +967,8 @@ fn a_relay_may_refuse_streams() {
     let (sa, _) = open_stream(&mut sim, StreamMode::Ordered, 4, 4);
     sim.node(A).unwrap().stream_write(sa, b"abcd").unwrap();
     sim.settle().unwrap();
-    // The refusal is a hint that the network can forge: the application is told, and the
-    // stream stays open until the application ends it.
-    assert_eq!(sim.drain_events(A), vec![Event::StreamRefused { stream: sa }]);
+    assert_eq!(closed(&sim.drain_events(A), sa), Some(StreamEnd::RelayRefused));
     assert!(sim.drain_events(B).is_empty());
-    sim.node(A).unwrap().stream_end(sa).unwrap();
 }
 
 #[test]
